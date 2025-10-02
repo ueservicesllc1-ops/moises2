@@ -4,7 +4,7 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Music, Upload, Play, Pause } from 'lucide-react';
 import MoisesFeatures from '@/components/MoisesFeatures';
 import ChordAnalyzer from '@/components/ChordAnalyzer';
@@ -19,6 +19,7 @@ export default function MoisesFeaturesPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [detectedBPM, setDetectedBPM] = useState(120);
   const [duration, setDuration] = useState(180);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -36,7 +37,13 @@ export default function MoisesFeaturesPage() {
   };
 
   const handlePlayPause = () => {
-    setIsPlaying(!isPlaying);
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play();
+      }
+    }
   };
 
   return (
@@ -98,11 +105,13 @@ export default function MoisesFeaturesPage() {
           <div className="bg-dark-800 rounded-lg p-6">
             <h3 className="text-xl font-semibold mb-4">Reproductor de Audio</h3>
             <audio
+              ref={audioRef}
               controls
               src={audioUrl}
               className="w-full"
               onPlay={() => setIsPlaying(true)}
               onPause={() => setIsPlaying(false)}
+              onEnded={() => setIsPlaying(false)}
             />
           </div>
         )}
