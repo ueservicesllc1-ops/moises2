@@ -53,6 +53,20 @@ const ChordDisplayModal: React.FC<ChordDisplayModalProps> = ({
     }
   }, [currentTime, chords]);
 
+  // Cerrar modal con tecla ESC
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('keydown', handleEscape);
+      return () => document.removeEventListener('keydown', handleEscape);
+    }
+  }, [isOpen, onClose]);
+
   const handlePlayPause = () => {
     if (audioRef.current) {
       if (isPlaying) {
@@ -130,8 +144,8 @@ const ChordDisplayModal: React.FC<ChordDisplayModalProps> = ({
   const previousChord = chords[previousChordIndex];
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-      <div className="bg-dark-800 rounded-lg p-6 w-full max-w-4xl mx-4">
+    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 overflow-y-auto">
+      <div className="bg-dark-800 rounded-lg p-6 w-full max-w-4xl mx-4 my-8 max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-white">🎼 Acordes en Tiempo Real</h2>
@@ -214,11 +228,11 @@ const ChordDisplayModal: React.FC<ChordDisplayModalProps> = ({
                 <span>{formatTime(currentChord.start_time)}</span>
                 <span>{formatTime(currentChord.end_time)}</span>
               </div>
-              <div className="w-full bg-gray-700 rounded-full h-2">
+              <div className="w-full bg-gray-700 rounded-full h-2 overflow-hidden">
                 <div 
                   className={`bg-gradient-to-r ${getChordColor(currentChord.chord_type)} h-2 rounded-full transition-all duration-300`}
                   style={{ 
-                    width: `${((currentTime - currentChord.start_time) / (currentChord.end_time - currentChord.start_time)) * 100}%` 
+                    width: `${Math.min(Math.max(((currentTime - currentChord.start_time) / (currentChord.end_time - currentChord.start_time)) * 100, 0), 100)}%` 
                   }}
                 />
               </div>
@@ -257,11 +271,11 @@ const ChordDisplayModal: React.FC<ChordDisplayModalProps> = ({
           {/* Chord Progression Timeline */}
           <div className="space-y-3">
             <h3 className="text-lg font-semibold text-white text-center">Progresión de Acordes</h3>
-            <div className="flex justify-center space-x-2 overflow-x-auto pb-2">
+            <div className="flex space-x-2 overflow-x-auto pb-2 max-w-full">
               {chords.map((chord, index) => (
                 <div
                   key={index}
-                  className={`flex-shrink-0 p-3 rounded-lg cursor-pointer transition-all duration-200 ${
+                  className={`flex-shrink-0 p-2 rounded-lg cursor-pointer transition-all duration-200 min-w-[60px] ${
                     index === currentChordIndex
                       ? 'bg-primary-500 text-white shadow-lg scale-110'
                       : index < currentChordIndex
@@ -275,7 +289,7 @@ const ChordDisplayModal: React.FC<ChordDisplayModalProps> = ({
                   }}
                 >
                   <div className="text-center">
-                    <div className="font-bold text-sm">{chord.chord}</div>
+                    <div className="font-bold text-xs">{chord.chord}</div>
                     <div className="text-xs opacity-75">
                       {formatTime(chord.start_time)}
                     </div>
