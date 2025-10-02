@@ -13,7 +13,11 @@ import {
   LogOut,
   Cloud,
   Play,
-  Trash2
+  Trash2,
+  Zap,
+  Target,
+  Repeat,
+  BarChart3
 } from 'lucide-react'
 import NewSongUpload from '@/components/NewSongUpload'
 import ConnectionStatus from '@/components/ConnectionStatus'
@@ -262,6 +266,13 @@ export default function Home() {
               >
                 <Cloud className="w-4 h-4" />
                 <span>Subir a la Nube</span>
+              </button>
+              <button 
+                onClick={() => router.push('/moises-features')}
+                className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2"
+              >
+                <Zap className="w-4 h-4" />
+                <span>Funcionalidades Moises</span>
               </button>
               
               {/* User Profile in Header */}
