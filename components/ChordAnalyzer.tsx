@@ -3,7 +3,7 @@
  * Basado en las funcionalidades de Moises.ai
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Music, Clock, Key, TrendingUp, Play, Pause, RotateCcw } from 'lucide-react';
 
 interface ChordInfo {
@@ -35,6 +35,7 @@ const ChordAnalyzer: React.FC<ChordAnalyzerProps> = ({ audioUrl, onClose }) => {
   const [selectedChord, setSelectedChord] = useState<ChordInfo | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   // Colores para diferentes tipos de acordes
   const chordColors = {
@@ -125,6 +126,16 @@ const ChordAnalyzer: React.FC<ChordAnalyzerProps> = ({ audioUrl, onClose }) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handlePlayPause = () => {
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play();
+      }
+    }
   };
 
   const getChordColor = (chordType: string) => {
@@ -285,11 +296,23 @@ const ChordAnalyzer: React.FC<ChordAnalyzerProps> = ({ audioUrl, onClose }) => {
         </div>
       )}
 
+      {/* Audio Element */}
+      {audioUrl && (
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onEnded={() => setIsPlaying(false)}
+          onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
+        />
+      )}
+
       {/* Controls */}
       {chords.length > 0 && (
         <div className="flex justify-center space-x-4">
           <button
-            onClick={() => setIsPlaying(!isPlaying)}
+            onClick={handlePlayPause}
             className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center"
           >
             {isPlaying ? <Pause className="h-4 w-4 mr-2" /> : <Play className="h-4 w-4 mr-2" />}
@@ -299,6 +322,9 @@ const ChordAnalyzer: React.FC<ChordAnalyzerProps> = ({ audioUrl, onClose }) => {
             onClick={() => {
               setSelectedChord(null);
               setCurrentTime(0);
+              if (audioRef.current) {
+                audioRef.current.currentTime = 0;
+              }
             }}
             className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center"
           >
