@@ -12,6 +12,7 @@ import TempoPitchController from '@/components/TempoPitchController';
 import IntelligentMetronome from '@/components/IntelligentMetronome';
 import LoopSections from '@/components/LoopSections';
 import AudioAnalyzer from '@/components/AudioAnalyzer';
+import MoisesStyleInterface from '@/components/MoisesStyleInterface';
 
 export default function MoisesFeaturesPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -19,6 +20,7 @@ export default function MoisesFeaturesPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [detectedBPM, setDetectedBPM] = useState(120);
   const [duration, setDuration] = useState(180);
+  const [showMoisesInterface, setShowMoisesInterface] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -116,12 +118,39 @@ export default function MoisesFeaturesPage() {
           </div>
         )}
 
-        {/* Main Features Panel */}
+        {/* Moises Style Interface Button */}
         {audioUrl && (
+          <div className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg p-6 text-center">
+            <h3 className="text-xl font-bold text-white mb-4">🎸 Interfaz Estilo Moises</h3>
+            <p className="text-purple-200 mb-4">
+              Experimenta la interfaz completa de Moises con mixer, diagramas de guitarra y controles profesionales
+            </p>
+            <button
+              onClick={() => setShowMoisesInterface(true)}
+              className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-6 py-3 rounded-lg font-medium transition-all duration-200"
+            >
+              🎵 Abrir Interfaz Moises
+            </button>
+          </div>
+        )}
+
+        {/* Main Features Panel */}
+        {audioUrl && !showMoisesInterface && (
           <MoisesFeatures
             audioUrl={audioUrl}
             detectedBPM={detectedBPM}
             duration={duration}
+          />
+        )}
+
+        {/* Moises Style Interface */}
+        {showMoisesInterface && (
+          <MoisesStyleInterface
+            audioUrl={audioUrl}
+            songTitle={selectedFile?.name || "Mi plenitud - Yeshua | Marcos Brunet | TOMATULUGAR"}
+            bpm={detectedBPM}
+            key="E"
+            onClose={() => setShowMoisesInterface(false)}
           />
         )}
 
