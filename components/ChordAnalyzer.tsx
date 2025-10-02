@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Music, Clock, Key, TrendingUp, Play, Pause, RotateCcw } from 'lucide-react';
+import { Music, Clock, Key, TrendingUp, Play, Pause, RotateCcw, Eye } from 'lucide-react';
+import ChordDisplayModal from './ChordDisplayModal';
 
 interface ChordInfo {
   chord: string;
@@ -35,6 +36,7 @@ const ChordAnalyzer: React.FC<ChordAnalyzerProps> = ({ audioUrl, onClose }) => {
   const [selectedChord, setSelectedChord] = useState<ChordInfo | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [showChordModal, setShowChordModal] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   // Colores para diferentes tipos de acordes
@@ -319,6 +321,13 @@ const ChordAnalyzer: React.FC<ChordAnalyzerProps> = ({ audioUrl, onClose }) => {
             {isPlaying ? 'Pausar' : 'Reproducir'}
           </button>
           <button
+            onClick={() => setShowChordModal(true)}
+            className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg flex items-center"
+          >
+            <Eye className="h-4 w-4 mr-2" />
+            Ver Acordes en Tiempo Real
+          </button>
+          <button
             onClick={() => {
               setSelectedChord(null);
               setCurrentTime(0);
@@ -333,6 +342,16 @@ const ChordAnalyzer: React.FC<ChordAnalyzerProps> = ({ audioUrl, onClose }) => {
           </button>
         </div>
       )}
+
+      {/* Chord Display Modal */}
+      <ChordDisplayModal
+        isOpen={showChordModal}
+        onClose={() => setShowChordModal(false)}
+        chords={chords}
+        audioUrl={audioUrl}
+        currentTime={currentTime}
+        onTimeChange={setCurrentTime}
+      />
     </div>
   );
 };
