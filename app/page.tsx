@@ -285,8 +285,11 @@ export default function Home() {
               onClick={() => {
                 if ((window as any).stopAllAudio) {
                   (window as any).stopAllAudio();
-                  alert('🎵 Todo el audio ha sido detenido');
                 }
+                if ((window as any).stopAllSystemAudio) {
+                  (window as any).stopAllSystemAudio();
+                }
+                alert('🎵 Todo el audio ha sido detenido (incluyendo del sistema)');
               }}
               className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2"
             >

@@ -25,6 +25,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
+      <head>
+        <script src="/audio-cleanup.js" defer></script>
+      </head>
       <body className={`${inter.className} antialiased`}>
         <AuthProvider>
           <div className="min-h-screen gradient-dark">

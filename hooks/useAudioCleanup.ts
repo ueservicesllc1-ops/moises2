@@ -45,15 +45,78 @@ export const useAudioCleanup = () => {
         console.log('Error cerrando AudioContext:', e);
       }
       
+      // Limpiar todos los MediaSource y SourceBuffers
+      try {
+        if (window.MediaSource) {
+          const mediaSource = new MediaSource();
+          if (mediaSource.readyState === 'open') {
+            mediaSource.endOfStream();
+          }
+        }
+      } catch (e) {
+        console.log('Error cerrando MediaSource:', e);
+      }
+      
+      // Forzar limpieza de caché de audio
+      try {
+        if ('caches' in window) {
+          caches.keys().then(cacheNames => {
+            cacheNames.forEach(cacheName => {
+              if (cacheName.includes('audio') || cacheName.includes('media')) {
+                caches.delete(cacheName);
+              }
+            });
+          });
+        }
+      } catch (e) {
+        console.log('Error limpiando caché:', e);
+      }
+      
+      // Limpiar todos los Web Audio API nodes
+      try {
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        if (audioContext.state !== 'closed') {
+          // Obtener todos los nodos activos y desconectarlos
+          const allNodes = audioContext.destination.context;
+          if (allNodes && allNodes.close) {
+            allNodes.close();
+          }
+        }
+      } catch (e) {
+        console.log('Error cerrando Web Audio nodes:', e);
+      }
+      
       console.log('✅ LIMPIEZA COMPLETA TERMINADA');
     };
 
     // Exponer función globalmente
     (window as any).stopAllAudio = cleanupAllAudio;
     
+    // Limpiar antes de cerrar la ventana
+    const handleBeforeUnload = () => {
+      console.log('🛑 VENTANA CERRÁNDOSE - LIMPIEZA DE AUDIO');
+      cleanupAllAudio();
+    };
+    
+    // Limpiar antes de que se cierre la pestaña
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        console.log('🛑 PESTAÑA OCULTA - LIMPIEZA DE AUDIO');
+        cleanupAllAudio();
+      }
+    };
+    
+    // Agregar event listeners
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('beforeunload', handleBeforeUnload);
+    
     // Limpiar al desmontar
     return () => {
       cleanupAllAudio();
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, []);
 };
