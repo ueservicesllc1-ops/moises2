@@ -16,6 +16,7 @@ import {
   Download,
   MoreVertical
 } from 'lucide-react';
+import GuitarChordDiagram from './GuitarChordDiagram';
 
 interface SimpleMixerProps {
   isOpen: boolean;
@@ -105,6 +106,35 @@ const SimpleMixer: React.FC<SimpleMixerProps> = ({ isOpen, onClose, songData }) 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  
+  // Datos de acordes que aparecerán automáticamente
+  const chordData = [
+    {
+      chord: "C#m",
+      type: "minor",
+      frets: [4, 2, 4, 3, 0, 0],
+      fingers: [4, 1, 3, 2, 0, 0],
+      muted: [true, false, false, false, false, false],
+      open: [false, false, false, false, true, true]
+    },
+    {
+      chord: "G#m",
+      type: "minor",
+      frets: [4, 6, 6, 4, 4, 4],
+      fingers: [1, 3, 4, 1, 1, 1],
+      muted: [false, false, false, false, false, false],
+      open: [false, false, false, false, false, false],
+      capo: 4
+    },
+    {
+      chord: "A",
+      type: "major",
+      frets: [0, 2, 2, 2, 2, 0],
+      fingers: [0, 1, 2, 3, 4, 0],
+      muted: [true, false, false, false, false, false],
+      open: [false, true, false, false, false, true]
+    }
+  ];
 
   // Colores para cada pista
   const trackColors = {
@@ -572,36 +602,61 @@ const SimpleMixer: React.FC<SimpleMixerProps> = ({ isOpen, onClose, songData }) 
                   </div>
                 </div>
                 
-                {/* Volume Fader */}
-                <div className="flex-1 flex flex-col items-center">
-                  <div className="text-gray-400 text-xs mb-2">Level</div>
-                  <div className="relative h-32 w-6 bg-gray-700 rounded-lg mb-2">
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      value={track.volume}
-                      onChange={(e) => handleTrackUpdate(track.id, { volume: parseFloat(e.target.value) })}
-                      className="absolute w-32 h-6 bg-transparent cursor-pointer slider transform -rotate-90"
-                      style={{ 
-                        transform: 'rotate(-90deg)',
-                        top: '50%',
-                        left: '50%',
-                        marginTop: '-12px',
-                        marginLeft: '-64px'
-                      }}
-                    />
-                    {/* Volume Level Indicator */}
-                    <div 
-                      className="absolute bottom-0 left-1 right-1 bg-blue-500 rounded-b-lg transition-all duration-100"
-                      style={{ height: `${track.volume * 100}%` }}
-                    ></div>
+                {/* Chord Display - Solo para ciertos tracks */}
+                {track.id === 'vocals' && (
+                  <div className="flex-1 flex flex-col items-center space-y-2">
+                    <div className="text-gray-400 text-xs mb-2">Chords</div>
+                    <div className="space-y-2">
+                      {chordData.map((chord, chordIndex) => (
+                        <div key={chordIndex} className="bg-gray-700 rounded p-2">
+                          <GuitarChordDiagram
+                            chord={chord.chord}
+                            chordType={chord.type}
+                            frets={chord.frets}
+                            fingers={chord.fingers}
+                            muted={chord.muted}
+                            open={chord.open}
+                            capo={chord.capo}
+                            className="scale-75"
+                          />
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="text-gray-400 text-xs">
-                    {Math.round(track.volume * 100)}
+                )}
+                
+                {/* Volume Fader - Solo para tracks que no son vocals */}
+                {track.id !== 'vocals' && (
+                  <div className="flex-1 flex flex-col items-center">
+                    <div className="text-gray-400 text-xs mb-2">Level</div>
+                    <div className="relative h-32 w-6 bg-gray-700 rounded-lg mb-2">
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={track.volume}
+                        onChange={(e) => handleTrackUpdate(track.id, { volume: parseFloat(e.target.value) })}
+                        className="absolute w-32 h-6 bg-transparent cursor-pointer slider transform -rotate-90"
+                        style={{ 
+                          transform: 'rotate(-90deg)',
+                          top: '50%',
+                          left: '50%',
+                          marginTop: '-12px',
+                          marginLeft: '-64px'
+                        }}
+                      />
+                      {/* Volume Level Indicator */}
+                      <div 
+                        className="absolute bottom-0 left-1 right-1 bg-blue-500 rounded-b-lg transition-all duration-100"
+                        style={{ height: `${track.volume * 100}%` }}
+                      ></div>
+                    </div>
+                    <div className="text-gray-400 text-xs">
+                      {Math.round(track.volume * 100)}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             ))}
             
