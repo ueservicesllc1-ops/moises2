@@ -43,6 +43,25 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
   const [isProcessingSeparation, setIsProcessingSeparation] = useState(false);
   const [separationProgress, setSeparationProgress] = useState(0);
   const [separationMessage, setSeparationMessage] = useState('');
+  const [canCancelSeparation, setCanCancelSeparation] = useState(false);
+
+  // Función para cancelar el proceso de separación
+  const cancelSeparation = async () => {
+    try {
+      console.log('🛑 Cancelando proceso de separación...');
+      setIsProcessingSeparation(false);
+      setCanCancelSeparation(false);
+      setSeparationProgress(0);
+      setSeparationMessage('Proceso cancelado');
+      
+      // Aquí podrías llamar a un endpoint para cancelar el proceso en el backend
+      // await fetch(`http://localhost:8000/cancel/${taskId}`, { method: 'POST' });
+      
+      alert('Proceso de separación cancelado');
+    } catch (error) {
+      console.error('Error cancelando separación:', error);
+    }
+  };
 
   // Función para extraer metadatos del archivo de audio
   const extractMetadataFromFile = async (file: File) => {
@@ -224,28 +243,55 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
   };
 
   const pollSeparationStatus = async (taskId: string, songData: any) => {
-    const maxAttempts = 120; // 120 intentos máximo (2 minutos para Demucs)
+    const maxAttempts = 300; // 300 intentos máximo (5 minutos para Demucs)
+    const stuckThreshold = 30; // Si no avanza en 30 intentos, considerar stuck
     let attempts = 0;
+    let lastProgress = 0;
+    let stuckCount = 0;
+    
+    // Habilitar botón de cancelar después de 10 intentos
+    setTimeout(() => {
+      setCanCancelSeparation(true);
+    }, 10000);
     
     const poll = async () => {
       try {
         const statusResponse = await fetch(`http://localhost:8000/status/${taskId}`);
+        
+        if (!statusResponse.ok) {
+          throw new Error(`HTTP ${statusResponse.status}: ${statusResponse.statusText}`);
+        }
+        
         const statusResult = await statusResponse.json();
         
         console.log(`🔄 Separation status (attempt ${attempts + 1}):`, statusResult);
         
+        // Verificar si el progreso está atascado
+        const currentProgress = statusResult.progress || 0;
+        if (currentProgress === lastProgress && currentProgress > 0) {
+          stuckCount++;
+          console.log(`⚠️ Progress stuck at ${currentProgress}% (${stuckCount} attempts)`);
+          
+          if (stuckCount >= stuckThreshold) {
+            throw new Error(`Proceso atascado en ${currentProgress}% por más de ${stuckThreshold} intentos`);
+          }
+        } else {
+          stuckCount = 0;
+          lastProgress = currentProgress;
+        }
+        
         // Actualizar progreso y mensaje
-        setSeparationProgress(statusResult.progress || 0);
-        if (statusResult.progress) {
-          if (statusResult.progress < 20) {
+        setSeparationProgress(currentProgress);
+        if (currentProgress) {
+          if (currentProgress < 20) {
             setSeparationMessage('Iniciando separación...');
-          } else if (statusResult.progress < 40) {
+          } else if (currentProgress < 40) {
             setSeparationMessage('Iniciando Demucs AI...');
-          } else if (statusResult.progress < 70) {
+          } else if (currentProgress < 70) {
             setSeparationMessage('Procesando con Demucs AI...');
-          } else if (statusResult.progress < 85) {
+          } else if (currentProgress < 85) {
             setSeparationMessage('Demucs completado, procesando archivos...');
-          } else if (statusResult.progress < 95) {
+          } else if (currentProgress < 95) {
             setSeparationMessage('Subiendo archivos a la nube...');
           } else {
             setSeparationMessage('¡Casi listo!');
@@ -262,18 +308,19 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
           return { success: true, taskId, stems: statusResult.stems };
           
         } else if (statusResult.status === 'failed') {
-          throw new Error('Audio separation failed');
+          throw new Error(`Audio separation failed: ${statusResult.error || 'Unknown error'}`);
         } else if (attempts < maxAttempts) {
           // Continuar polling
           attempts++;
           setTimeout(poll, 1000); // Poll cada segundo
         } else {
-          throw new Error('Audio separation timeout');
+          throw new Error(`Audio separation timeout after ${maxAttempts} attempts (${Math.floor(maxAttempts/60)} minutes)`);
         }
         
       } catch (error) {
         console.error('❌ Error polling separation status:', error);
         setIsProcessingSeparation(false);
+        setSeparationMessage(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
         throw error;
       }
     };
@@ -665,8 +712,19 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
                   <div className="text-gray-300 text-xs mt-2">{separationProgress}%</div>
                 </div>
                 
-                <div className="text-gray-400 text-sm">
-                  🤖 Usando Demucs AI para separación de alta calidad
+                <div className="flex justify-between items-center">
+                  <div className="text-gray-400 text-sm">
+                    🤖 Usando Demucs AI para separación de alta calidad
+                  </div>
+                  
+                  {canCancelSeparation && (
+                    <button
+                      onClick={cancelSeparation}
+                      className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm"
+                    >
+                      Cancelar
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
