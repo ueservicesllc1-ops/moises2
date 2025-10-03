@@ -217,7 +217,7 @@ const SimpleMixer: React.FC<SimpleMixerProps> = ({ isOpen, onClose, songData }) 
           const b2Url = src;
           // Extraer la ruta después de /audio/ para usar en el proxy
           const audioPath = b2Url.replace('https://s3.us-east-005.backblazeb2.com/moises2/audio/', '');
-          const proxyUrl = `http://localhost:3001/api/audio/${audioPath}`;
+          const proxyUrl = `http://localhost:8000/api/audio/${audioPath}`;
           
           console.log(`🎼 Adding audio track: ${key}`);
           console.log(`🔗 Original B2 URL: ${b2Url}`);

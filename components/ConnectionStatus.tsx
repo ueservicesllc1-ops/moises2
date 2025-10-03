@@ -13,7 +13,7 @@ export default function ConnectionStatus() {
     const checkB2Status = async () => {
       try {
         // Verificar si el proxy server responde
-        const response = await fetch('http://localhost:3001/api/health')
+        const response = await fetch('http://localhost:8000/')
         const data = await response.json()
         
         if (data.status === 'OK') {
