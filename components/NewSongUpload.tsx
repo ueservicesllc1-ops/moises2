@@ -33,6 +33,7 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
   const [songTitle, setSongTitle] = useState('');
   const [artistName, setArtistName] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [metadataExtracted, setMetadataExtracted] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [showSeparationModal, setShowSeparationModal] = useState(false);
@@ -42,6 +43,104 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
   const [isProcessingSeparation, setIsProcessingSeparation] = useState(false);
   const [separationProgress, setSeparationProgress] = useState(0);
   const [separationMessage, setSeparationMessage] = useState('');
+
+  // Función para extraer metadatos del archivo de audio
+  const extractMetadataFromFile = async (file: File) => {
+    try {
+      console.log('🎵 Extrayendo metadatos del archivo:', file.name);
+      
+      // Crear un elemento de audio temporal para extraer metadatos
+      const audio = new Audio();
+      const objectUrl = URL.createObjectURL(file);
+      
+      return new Promise<{title: string, artist: string}>((resolve) => {
+        audio.addEventListener('loadedmetadata', () => {
+          console.log('📊 Metadatos cargados:', {
+            title: audio.title || '',
+            artist: audio.artist || '',
+            album: audio.album || '',
+            duration: audio.duration
+          });
+          
+          // Extraer título y artista de los metadatos o del nombre del archivo
+          let extractedTitle = audio.title || '';
+          let extractedArtist = audio.artist || '';
+          
+          // Si no hay metadatos, intentar extraer del nombre del archivo
+          if (!extractedTitle && !extractedArtist) {
+            const fileName = file.name.replace(/\.[^/.]+$/, ''); // Remover extensión
+            const parts = fileName.split(' - ');
+            
+            if (parts.length >= 2) {
+              extractedArtist = parts[0].trim();
+              extractedTitle = parts.slice(1).join(' - ').trim();
+            } else {
+              // Si no hay separador, usar el nombre completo como título
+              extractedTitle = fileName;
+              extractedArtist = 'Artista Desconocido';
+            }
+          }
+          
+          // Si aún no hay título, usar el nombre del archivo
+          if (!extractedTitle) {
+            extractedTitle = file.name.replace(/\.[^/.]+$/, '');
+          }
+          
+          // Si aún no hay artista, usar "Artista Desconocido"
+          if (!extractedArtist) {
+            extractedArtist = 'Artista Desconocido';
+          }
+          
+          console.log('✅ Metadatos extraídos:', { title: extractedTitle, artist: extractedArtist });
+          
+          // Limpiar el objeto URL
+          URL.revokeObjectURL(objectUrl);
+          
+          resolve({ title: extractedTitle, artist: extractedArtist });
+        });
+        
+        audio.addEventListener('error', () => {
+          console.log('⚠️ Error cargando metadatos, usando nombre del archivo');
+          
+          // Fallback: usar nombre del archivo
+          const fileName = file.name.replace(/\.[^/.]+$/, '');
+          const parts = fileName.split(' - ');
+          
+          let extractedTitle = fileName;
+          let extractedArtist = 'Artista Desconocido';
+          
+          if (parts.length >= 2) {
+            extractedArtist = parts[0].trim();
+            extractedTitle = parts.slice(1).join(' - ').trim();
+          }
+          
+          URL.revokeObjectURL(objectUrl);
+          resolve({ title: extractedTitle, artist: extractedArtist });
+        });
+        
+        // Cargar el archivo
+        audio.src = objectUrl;
+        audio.load();
+      });
+      
+    } catch (error) {
+      console.error('Error extrayendo metadatos:', error);
+      
+      // Fallback: usar nombre del archivo
+      const fileName = file.name.replace(/\.[^/.]+$/, '');
+      const parts = fileName.split(' - ');
+      
+      let extractedTitle = fileName;
+      let extractedArtist = 'Artista Desconocido';
+      
+      if (parts.length >= 2) {
+        extractedArtist = parts[0].trim();
+        extractedTitle = parts.slice(1).join(' - ').trim();
+      }
+      
+      return { title: extractedTitle, artist: extractedArtist };
+    }
+  };
 
   const saveSeparatedSongToCloud = async (statusResult: any, songData: any, taskId: string) => {
     try {
@@ -182,7 +281,7 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
     return await poll();
   };
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       // Validar tipo de archivo
@@ -201,16 +300,22 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
       setSelectedFile(file);
       console.log('Archivo seleccionado:', file.name, file.size, 'bytes');
       
-      // Auto-cargar datos del archivo
-      const fileName = file.name;
-      const parsedData = parseFileName(fileName);
-      
-      // Siempre cargar el título, y el artista si está disponible
-      setSongTitle(parsedData.title);
-      if (parsedData.artist) {
-        setArtistName(parsedData.artist);
+      // Extraer metadatos automáticamente
+      try {
+        console.log('🎵 Extrayendo metadatos automáticamente...');
+        const metadata = await extractMetadataFromFile(file);
+        setSongTitle(metadata.title);
+        setArtistName(metadata.artist);
+        setMetadataExtracted(true);
+        console.log('✅ Metadatos extraídos automáticamente:', metadata);
+      } catch (error) {
+        console.error('Error extrayendo metadatos:', error);
+        // Fallback: usar nombre del archivo
+        const fileName = file.name.replace(/\.[^/.]+$/, '');
+        setSongTitle(fileName);
+        setArtistName('Artista Desconocido');
+        setMetadataExtracted(false);
       }
-      console.log('Datos auto-cargados:', parsedData);
     }
   };
 
@@ -353,9 +458,17 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
 
   const handleUploadSong = async () => {
     try {
-      if (!songTitle || !artistName || !selectedFile) {
-        alert('Por favor completa todos los campos y selecciona un archivo');
+      if (!selectedFile) {
+        alert('Por favor selecciona un archivo de audio');
         return;
+      }
+      
+      // Si no se extrajeron metadatos, usar valores por defecto
+      if (!songTitle) {
+        setSongTitle(selectedFile.name.replace(/\.[^/.]+$/, ''));
+      }
+      if (!artistName) {
+        setArtistName('Artista Desconocido');
       }
 
       if (!user?.uid) {
@@ -401,6 +514,7 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
       setSongTitle('');
       setArtistName('');
       setSelectedFile(null);
+      setMetadataExtracted(false);
       setUploadProgress(0);
       setShowSeparationModal(false);
       setSeparationOptions(null);
@@ -443,29 +557,35 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
         </div>
         
         <div className="space-y-4">
-          <div>
-            <label className="block text-white font-bold mb-2">🎤 Nombre del Artista:</label>
-            <input
-              type="text"
-              value={artistName}
-              onChange={(e) => setArtistName(e.target.value)}
-              placeholder="Ej: Juan Pérez"
-              disabled={isUploading}
-              className="w-full bg-gray-700 text-white p-3 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none disabled:opacity-50"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-white font-bold mb-2">🎶 Título de la Canción:</label>
-            <input
-              type="text"
-              value={songTitle}
-              onChange={(e) => setSongTitle(e.target.value)}
-              placeholder="Ej: Mi Nueva Canción"
-              disabled={isUploading}
-              className="w-full bg-gray-700 text-white p-3 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none disabled:opacity-50"
-            />
-          </div>
+          {/* Información extraída automáticamente */}
+          {selectedFile && (songTitle || artistName) && (
+            <div className="bg-blue-900 bg-opacity-30 border border-blue-500 rounded-lg p-4">
+              <h3 className="text-blue-300 font-semibold mb-2 flex items-center">
+                <Music className="h-4 w-4 mr-2" />
+                Información Detectada Automáticamente
+              </h3>
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <span className="text-blue-200 text-sm">🎤 Artista:</span>
+                  <span className="text-white font-medium">{artistName}</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-blue-200 text-sm">🎶 Título:</span>
+                  <span className="text-white font-medium">{songTitle}</span>
+                </div>
+                {metadataExtracted && (
+                  <p className="text-green-400 text-xs">
+                    ✅ Extraído de los metadatos del archivo
+                  </p>
+                )}
+                {!metadataExtracted && (
+                  <p className="text-yellow-400 text-xs">
+                    ⚠️ Extraído del nombre del archivo
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
           
           <div>
             <label className="block text-white font-bold mb-2">📁 Archivo de Audio:</label>
@@ -508,7 +628,7 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
 
           <button
             onClick={handleUploadSong}
-            disabled={!songTitle || !artistName || !selectedFile}
+            disabled={!selectedFile}
             className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2"
           >
             <Music className="h-4 w-4" />
