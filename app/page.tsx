@@ -17,17 +17,22 @@ import {
   Zap,
   Target,
   Repeat,
-  BarChart3
+  BarChart3,
+  VolumeX
 } from 'lucide-react'
 import NewSongUpload from '@/components/NewSongUpload'
 import ConnectionStatus from '@/components/ConnectionStatus'
 import SimpleMixer from '@/components/SimpleMixer'
 import ProfessionalDAW from '@/components/ProfessionalDAW'
 import { getUserSongs, subscribeToUserSongs, deleteSong, Song } from '@/lib/firestore'
+import useAudioCleanup from '@/hooks/useAudioCleanup'
 
 export default function Home() {
   const { user, loading, logout } = useAuth()
   const router = useRouter()
+  
+  // Hook para limpiar audio
+  useAudioCleanup()
   const [activeTab, setActiveTab] = useState('my-songs')
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('added')
@@ -267,13 +272,27 @@ export default function Home() {
                 <Cloud className="w-4 h-4" />
                 <span>Subir a la Nube</span>
               </button>
-              <button 
-                onClick={() => router.push('/moises-features')}
-                className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2"
-              >
-                <Zap className="w-4 h-4" />
-                <span>Funcionalidades Moises</span>
-              </button>
+            <button
+              onClick={() => router.push('/moises-features')}
+              className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2"
+            >
+              <Zap className="w-4 h-4" />
+              <span>Funcionalidades Moises</span>
+            </button>
+            
+            {/* Botón de emergencia para detener todo el audio */}
+            <button
+              onClick={() => {
+                if ((window as any).stopAllAudio) {
+                  (window as any).stopAllAudio();
+                  alert('🎵 Todo el audio ha sido detenido');
+                }
+              }}
+              className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2"
+            >
+              <VolumeX className="w-4 h-4" />
+              <span>Detener Todo el Audio</span>
+            </button>
               
               {/* User Profile in Header */}
               <div className="flex items-center space-x-3 border-l border-gray-600 pl-4">

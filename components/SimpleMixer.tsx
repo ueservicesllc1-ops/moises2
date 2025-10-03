@@ -82,6 +82,17 @@ const SimpleMixer: React.FC<SimpleMixerProps> = ({ isOpen, onClose, songData }) 
       audio.removeAttribute('src'); // Remover fuente
     });
     
+    // STOP todos los MediaElements
+    const allMediaElements = document.querySelectorAll('video, audio');
+    allMediaElements.forEach((media, index) => {
+      console.log(`⏹️ STOPPING media element ${index + 1}`);
+      media.pause();
+      media.currentTime = 0;
+      media.src = '';
+      media.load();
+      media.removeAttribute('src');
+    });
+    
     // Cerrar AudioContext completamente
     try {
       if (window.AudioContext) {
@@ -153,31 +164,8 @@ const SimpleMixer: React.FC<SimpleMixerProps> = ({ isOpen, onClose, songData }) 
     } else if (!isOpen) {
       console.log('🛑 Modal cerrado - STOP completo del audio');
       
-      // STOP completo cuando se cierre el modal
-      tracks.forEach(track => {
-        if (track.audio) {
-          console.log(`⏹️ STOPPING track: ${track.name}`);
-          track.audio.pause();
-          track.audio.currentTime = 0;
-          track.audio.src = '';
-          track.audio.load(); // Forzar recarga para detener completamente
-          track.audio.removeAttribute('src'); // Remover fuente completamente
-        }
-      });
-      
-      // STOP cualquier audio que pueda estar en el DOM
-      const allAudioElements = document.querySelectorAll('audio');
-      console.log(`🎵 STOPPING ${allAudioElements.length} elementos de audio del DOM`);
-      
-      allAudioElements.forEach((audio, index) => {
-        console.log(`⏹️ STOPPING audio DOM ${index + 1}`);
-        audio.pause();
-        audio.currentTime = 0;
-        audio.src = '';
-        audio.load(); // Forzar recarga
-        audio.removeAttribute('src'); // Remover fuente
-      });
-      
+      // Usar la función de limpieza completa
+      cleanupAudio();
       setTracks([]);
       setIsPlaying(false);
       setCurrentTime(0);
