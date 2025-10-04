@@ -1,28 +1,35 @@
-/**
- * ProfessionalDAW - Interfaz de DAW profesional con tracks horizontales y sliders
- * Implementa la funcionalidad de DAWs como Cubase, FL Studio, Ableton, Pro Tools
- */
+'use client';
 
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import ProfessionalSlider from './ProfessionalSlider';
-
-interface TrackData {
-  id: string;
-  name: string;
-  src: string;
-  color: string;
-  volume: number;
-  pan: number;
-  muted: boolean;
-  solo: boolean;
-  waveSurfer?: any;
-}
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { 
+  Play, 
+  Pause, 
+  Square, 
+  RotateCcw, 
+  SkipBack, 
+  SkipForward,
+  Volume2, 
+  VolumeX, 
+  Mic, 
+  Guitar, 
+  Drum, 
+  Music, 
+  Piano,
+  Maximize2,
+  Settings,
+  Download,
+  Loop,
+  Record,
+  Scissors,
+  Copy,
+  Paste
+} from 'lucide-react';
 
 interface SongData {
   id: string;
   title: string;
   artist: string;
-  stems: Record<string, string>;
+  stems: { [key: string]: string };
   bpm: number;
   key: string;
   timeSignature: string;
@@ -35,404 +42,549 @@ interface ProfessionalDAWProps {
   songData: SongData;
 }
 
+interface Track {
+  id: string;
+  name: string;
+  icon: React.ReactNode;
+  color: string;
+  audio: HTMLAudioElement;
+  volume: number;
+  muted: boolean;
+  solo: boolean;
+  pan: number;
+  gain: number;
+  selected: boolean;
+  regions: AudioRegion[];
+}
+
+interface AudioRegion {
+  id: string;
+  name: string;
+  startTime: number;
+  endTime: number;
+  color: string;
+  audioUrl: string;
+}
+
 const ProfessionalDAW: React.FC<ProfessionalDAWProps> = ({ isOpen, onClose, songData }) => {
+  const [tracks, setTracks] = useState<Track[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(60); // 60 segundos por defecto
+  const [zoom, setZoom] = useState(1);
   const [masterVolume, setMasterVolume] = useState(0.8);
-  const [tracks, setTracks] = useState<TrackData[]>([]);
+  const [selectedTrack, setSelectedTrack] = useState<string | null>(null);
+  const [waveforms, setWaveforms] = useState<{ [key: string]: number[] }>({});
   const [isLoading, setIsLoading] = useState(true);
-  const [allTracksLoaded, setAllTracksLoaded] = useState(false);
   
-  const trackRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const audioContextRef = useRef<AudioContext | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
+  const analysersRef = useRef<{ [key: string]: AnalyserNode }>({});
+  const animationFrameRef = useRef<number>();
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const trackHeight = 80;
 
-  // Inicializar tracks basados en los stems disponibles
+  // Configuración de pistas
+  const trackConfigs = [
+    { key: 'vocals', name: 'Vocals', icon: <Mic className="w-4 h-4" />, color: '#EC4899' },
+    { key: 'instrumental', name: 'Instrumental', icon: <Guitar className="w-4 h-4" />, color: '#3B82F6' },
+    { key: 'drums', name: 'Drums', icon: <Drum className="w-4 h-4" />, color: '#F97316' },
+    { key: 'bass', name: 'Bass', icon: <Music className="w-4 h-4" />, color: '#10B981' },
+    { key: 'other', name: 'Other', icon: <Music className="w-4 h-4" />, color: '#8B5CF6' },
+    { key: 'piano', name: 'Piano', icon: <Piano className="w-4 h-4" />, color: '#F59E0B' }
+  ];
+
+  // Inicializar pistas
   useEffect(() => {
-    console.log('🎵 Stems disponibles:', songData.stems);
-    if (songData.stems && Object.keys(songData.stems).length > 0) {
-      const trackColors = {
-        vocals: '#ff6b6b',
-        drums: '#4ecdc4',
-        bass: '#45b7d1',
-        other: '#96ceb4',
-        instrumental: '#feca57'
-      };
+    const initializeTracks = async () => {
+      setIsLoading(true);
+      const newTracks: Track[] = [];
 
-      // Solo crear tracks para los stems disponibles, máximo 4
-      const newTracks: TrackData[] = Object.entries(songData.stems)
-        .slice(0, 4) // Limitar a máximo 4 tracks
-        .map(([key, url]) => ({
-          id: key,
-          name: key.charAt(0).toUpperCase() + key.slice(1),
-          src: url,
-          color: trackColors[key as keyof typeof trackColors] || '#6c757d',
-          volume: 0.8,
-          pan: 0,
-          muted: false,
-          solo: false
-        }));
-
-      console.log('🎵 Creando tracks:', newTracks.length, 'tracks');
-      setTracks(newTracks);
-      setAllTracksLoaded(false); // Resetear estado de carga
-      setIsLoading(false);
-    }
-  }, [songData.stems]);
-
-  // Crear instancias de WaveSurfer para cada track
-  useEffect(() => {
-    if (tracks.length > 0) {
-      createWaveSurferInstances().catch(console.error);
-    }
-  }, [tracks.length]); // Solo ejecutar cuando cambie la cantidad de tracks
-
-  // Cleanup al desmontar el componente
-  useEffect(() => {
-    return () => {
-      tracks.forEach(track => {
-        if (track.waveSurfer) {
-          track.waveSurfer.destroy();
-        }
-      });
-    };
-  }, []);
-
-  const createWaveSurferInstances = async () => {
-    console.log('🎵 Creando instancias de WaveSurfer para', tracks.length, 'tracks');
-    
-    // Verificar si ya hay instancias creadas
-    const tracksWithWaveSurfer = tracks.filter(track => track.waveSurfer);
-    if (tracksWithWaveSurfer.length > 0) {
-      console.log('🎵 Ya hay instancias de WaveSurfer creadas, saltando...');
-      return;
-    }
-    
-    // Cargar WaveSurfer dinámicamente
-    const WaveSurferModule = await import('wavesurfer.js');
-    const WaveSurfer = WaveSurferModule.default;
-    
-    tracks.forEach((track, index) => {
-      console.log('🎵 Procesando track:', track.id, track.name);
-      if (track.src && track.id !== 'metronome' && !track.waveSurfer) {
-        const container = trackRefs.current.get(track.id);
-        if (container) {
-          console.log('🎵 Creando WaveSurfer para track:', track.id);
-          const waveSurfer = WaveSurfer.create({
-            container: container,
-            waveColor: track.color,
-            progressColor: track.color,
-            cursorColor: '#ffffff',
-            barWidth: 1,
-            barGap: 0.5,
-            barRadius: 2,
-            height: 60,
-            normalize: true,
-            backend: 'WebAudio',
-            mediaControls: false,
-            interact: true,
-            fillParent: true,
-            minPxPerSec: 1,
-            hideScrollbar: true,
-            audioRate: 1,
-            dragToSeek: true
-          });
-
-          waveSurfer.load(track.src);
+      for (const config of trackConfigs) {
+        const stemUrl = songData.stems[config.key];
+        if (stemUrl) {
+          const audio = new Audio(stemUrl);
+          audio.crossOrigin = 'anonymous';
+          audio.preload = 'auto';
           
-          waveSurfer.on('ready', () => {
-            setTracks(prev => {
-              const updatedTracks = prev.map(t => 
-                t.id === track.id ? { ...t, waveSurfer } : t
-              );
-              
-              // Verificar si todos los tracks están cargados
-              const loadedCount = updatedTracks.filter(t => t.waveSurfer).length;
-              if (loadedCount === updatedTracks.length) {
-                setAllTracksLoaded(true);
-                console.log('✅ Todos los tracks están cargados y listos para reproducir');
-              }
-              
-              return updatedTracks;
-            });
-          });
+          // Crear región de audio para toda la duración
+          const audioRegion: AudioRegion = {
+            id: `${config.key}-region-1`,
+            name: config.name,
+            startTime: 0,
+            endTime: 60, // Duración por defecto
+            color: config.color,
+            audioUrl: stemUrl
+          };
 
-          waveSurfer.on('interaction', () => {
-            const currentTime = waveSurfer.getCurrentTime();
-            setCurrentTime(currentTime);
+          newTracks.push({
+            id: config.key,
+            name: config.name,
+            icon: config.icon,
+            color: config.color,
+            audio,
+            volume: 0.8,
+            muted: false,
+            solo: false,
+            pan: 0,
+            gain: 1,
+            selected: false,
+            regions: [audioRegion]
           });
         }
       }
-    });
-  };
 
-  const handlePlayPause = () => {
-    // No permitir reproducción hasta que todos los tracks estén cargados
-    if (!allTracksLoaded && !isPlaying) {
-      console.log('⏳ Esperando a que todos los tracks se carguen...');
-      return;
+      setTracks(newTracks);
+      setIsLoading(false);
+    };
+
+    if (isOpen && songData) {
+      initializeTracks();
     }
+  }, [isOpen, songData]);
+
+  // Configurar AudioContext
+  useEffect(() => {
+    if (tracks.length === 0) return;
+
+    const setupAudioContext = async () => {
+      try {
+        audioContextRef.current = new AudioContext();
+        
+        for (const track of tracks) {
+          const source = audioContextRef.current.createMediaElementSource(track.audio);
+          const gainNode = audioContextRef.current.createGain();
+          const pannerNode = audioContextRef.current.createStereoPanner();
+          const analyser = audioContextRef.current.createAnalyser();
+          
+          analyser.fftSize = 256;
+          analyser.smoothingTimeConstant = 0.8;
+          
+          source.connect(gainNode);
+          gainNode.connect(pannerNode);
+          pannerNode.connect(analyser);
+          analyser.connect(audioContextRef.current.destination);
+          
+          analysersRef.current[track.id] = analyser;
+          
+          gainNode.gain.value = track.volume * track.gain * masterVolume;
+          pannerNode.pan.value = track.pan;
+        }
+      } catch (error) {
+        console.error('Error setting up audio context:', error);
+      }
+    };
+
+    setupAudioContext();
+
+    return () => {
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
+    };
+  }, [tracks, masterVolume]);
+
+  // Animar waveforms
+  useEffect(() => {
+    const animate = () => {
+      const newWaveforms: { [key: string]: number[] } = {};
+      
+      Object.entries(analysersRef.current).forEach(([id, analyser]) => {
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(dataArray);
+        newWaveforms[id] = Array.from(dataArray);
+      });
+      
+      setWaveforms(newWaveforms);
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
 
     if (isPlaying) {
-      tracks.forEach(track => {
-        if (track.waveSurfer) {
-          track.waveSurfer.pause();
-        }
-      });
-      setIsPlaying(false);
-    } else {
-      tracks.forEach(track => {
-        if (track.waveSurfer) {
-          track.waveSurfer.play();
-          // Aplicar el estado de mute después de iniciar reproducción
-          if (track.muted) {
-            track.waveSurfer.setVolume(0);
-          } else {
-            track.waveSurfer.setVolume(track.volume);
-          }
-        }
-      });
-      setIsPlaying(true);
+      animate();
     }
-  };
 
-  const handleStop = () => {
-    tracks.forEach(track => {
-      if (track.waveSurfer) {
-        track.waveSurfer.stop();
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
       }
+    };
+  }, [isPlaying]);
+
+  // Sincronizar tiempo
+  useEffect(() => {
+    if (tracks.length === 0) return;
+
+    const updateTime = () => {
+      const currentTrack = tracks[0];
+      if (currentTrack.audio) {
+        setCurrentTime(currentTrack.audio.currentTime);
+      }
+    };
+
+    const interval = setInterval(updateTime, 100);
+    return () => clearInterval(interval);
+  }, [tracks]);
+
+  const togglePlayPause = useCallback(async () => {
+    if (tracks.length === 0) return;
+
+    try {
+      if (audioContextRef.current?.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+
+      if (isPlaying) {
+        tracks.forEach(track => track.audio.pause());
+        setIsPlaying(false);
+      } else {
+        const playPromises = tracks.map(track => track.audio.play());
+        await Promise.all(playPromises);
+        setIsPlaying(true);
+      }
+    } catch (error) {
+      console.error('Error toggling playback:', error);
+    }
+  }, [tracks, isPlaying]);
+
+  const stopPlayback = useCallback(() => {
+    tracks.forEach(track => {
+      track.audio.pause();
+      track.audio.currentTime = 0;
     });
     setIsPlaying(false);
     setCurrentTime(0);
-  };
+  }, [tracks]);
 
-  const handleTrackUpdate = (trackId: string, updates: Partial<TrackData>) => {
-    setTracks(prev => prev.map(track => 
-      track.id === trackId ? { ...track, ...updates } : track
-    ));
-  };
-
-  const handleMute = (trackId: string) => {
-    const track = tracks.find(t => t.id === trackId);
-    if (track) {
-      const newMutedState = !track.muted;
-      handleTrackUpdate(trackId, { muted: newMutedState });
-      
-      if (track.waveSurfer) {
-        // MUTE = silenciar (volumen 0), UNMUTE = restaurar volumen original
-        if (newMutedState) {
-          track.waveSurfer.setVolume(0);
-        } else {
-          track.waveSurfer.setVolume(track.volume);
-        }
+  const updateTrackVolume = useCallback((trackId: string, volume: number) => {
+    setTracks(prev => prev.map(track => {
+      if (track.id === trackId) {
+        track.audio.volume = volume * track.gain * masterVolume * (track.muted ? 0 : 1);
+        return { ...track, volume };
       }
-    }
-  };
+      return track;
+    }));
+  }, [masterVolume]);
 
-  const handleSolo = (trackId: string) => {
-    const track = tracks.find(t => t.id === trackId);
-    if (track) {
-      const newSolo = !track.solo;
-      handleTrackUpdate(trackId, { solo: newSolo });
+  const toggleMute = useCallback((trackId: string) => {
+    setTracks(prev => prev.map(track => {
+      if (track.id === trackId) {
+        const muted = !track.muted;
+        track.audio.volume = muted ? 0 : track.volume * track.gain * masterVolume;
+        return { ...track, muted };
+      }
+      return track;
+    }));
+  }, [masterVolume]);
+
+  const toggleSolo = useCallback((trackId: string) => {
+    setTracks(prev => prev.map(track => {
+      const solo = track.id === trackId ? !track.solo : false;
+      const isSoloed = prev.some(t => t.solo);
       
-      if (newSolo) {
-        // Solo: mute all other tracks and unmute the soloed track
-        handleTrackUpdate(trackId, { muted: false });
-        tracks.forEach(t => {
-          if (t.id !== trackId) {
-            handleTrackUpdate(t.id, { muted: true });
-            if (t.waveSurfer) {
-              t.waveSurfer.setVolume(0);
-            }
-          }
-        });
-        // Restore volume for soloed track
-        if (track.waveSurfer) {
-          track.waveSurfer.setVolume(track.volume);
-        }
+      if (isSoloed) {
+        track.audio.volume = solo ? track.volume * track.gain * masterVolume * (track.muted ? 0 : 1) : 0;
       } else {
-        // Un-solo: unmute all tracks
-        tracks.forEach(t => {
-          handleTrackUpdate(t.id, { muted: false });
-          if (t.waveSurfer) {
-            t.waveSurfer.setVolume(t.volume);
-          }
-        });
+        track.audio.volume = track.muted ? 0 : track.volume * track.gain * masterVolume;
       }
-    }
+      
+      return { ...track, solo };
+    }));
+  }, [masterVolume]);
+
+  const selectTrack = (trackId: string) => {
+    setSelectedTrack(trackId);
+    setTracks(prev => prev.map(track => ({
+      ...track,
+      selected: track.id === trackId
+    })));
   };
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  const formatTime = (time: number) => {
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    const milliseconds = Math.floor((time % 1) * 100);
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}`;
+  };
+
+  const generateTimeMarkers = () => {
+    const markers = [];
+    for (let i = 0; i <= duration; i += 1) {
+      markers.push(i);
+    }
+    return markers;
+  };
+
+  const WaveformRegion: React.FC<{ region: AudioRegion; trackId: string }> = ({ region, trackId }) => {
+    const waveformData = waveforms[trackId] || [];
+    
+    return (
+      <div
+        className="relative h-full cursor-pointer hover:opacity-80 transition-opacity"
+        style={{ 
+          left: `${(region.startTime / duration) * 100}%`,
+          width: `${((region.endTime - region.startTime) / duration) * 100}%`,
+          backgroundColor: region.color,
+          opacity: 0.8
+        }}
+      >
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="flex items-center space-x-1 h-6">
+            {waveformData.slice(0, 20).map((value, index) => (
+              <div
+                key={index}
+                className="w-1 bg-white opacity-60"
+                style={{ height: `${(value / 255) * 100}%` }}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="absolute bottom-0 left-1 text-white text-xs font-medium">
+          {region.name}
+        </div>
+      </div>
+    );
   };
 
   if (!isOpen) return null;
 
+  if (isLoading) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-gray-900 rounded-lg p-8 text-white">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p>Cargando DAW profesional...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex flex-col">
-      {/* Header */}
-      <div className="bg-gray-900 text-white p-4 flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <h2 className="text-xl font-bold">Professional DAW</h2>
-          <div className="text-sm text-gray-300">
-            {songData.title} - {songData.artist}
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-gray-900 rounded-lg shadow-2xl w-full max-w-[95vw] h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-4 text-white flex justify-between items-center">
+          <div>
+            <h2 className="text-xl font-bold">Professional DAW</h2>
+            <p className="text-blue-100">{songData.title} - {songData.artist}</p>
+          </div>
+          <div className="flex items-center space-x-4">
+            <span className="text-sm">{songData.bpm} BPM</span>
+            <span className="text-sm">{songData.timeSignature}</span>
+            <button
+              onClick={onClose}
+              className="text-white hover:text-gray-300 text-2xl font-bold"
+            >
+              ×
+            </button>
           </div>
         </div>
-        <button
-          onClick={onClose}
-          className="text-gray-400 hover:text-white text-2xl"
-        >
-          ×
-        </button>
-      </div>
 
-      {/* Área principal de tracks (60% de la pantalla) */}
-      <div className="flex-1 bg-gray-800 p-4 overflow-y-auto">
-        <div className="space-y-4">
-          {tracks.map((track) => (
-            <div key={track.id} className="bg-gray-700 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center space-x-3">
-                  <span className="text-white font-medium">{track.name}</span>
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={() => handleMute(track.id)}
-                      className={`p-2 rounded text-xs ${track.muted ? 'bg-red-600' : 'bg-gray-600'} hover:bg-opacity-80`}
-                    >
-                      {track.muted ? 'MUTE' : 'MUTE'}
-                    </button>
-                    <button
-                      onClick={() => handleSolo(track.id)}
-                      className={`p-2 rounded text-xs ${track.solo ? 'bg-yellow-600' : 'bg-gray-600'} hover:bg-opacity-80`}
-                    >
-                      SOLO
-                    </button>
-                  </div>
+        {/* Timeline Header */}
+        <div className="bg-gray-800 border-b border-gray-700 flex">
+          <div className="w-48 bg-gray-700 border-r border-gray-600 flex items-center justify-center">
+            <span className="text-gray-300 font-medium">Track</span>
+          </div>
+          <div className="flex-1 relative overflow-hidden">
+            <div className="flex h-12">
+              {generateTimeMarkers().map((marker) => (
+                <div
+                  key={marker}
+                  className="border-r border-gray-600 flex-shrink-0 text-xs text-gray-400 flex items-end pb-1"
+                  style={{ width: `${(1 / duration) * 100}%` }}
+                >
+                  {marker}
                 </div>
-                <div className="flex items-center space-x-6">
-                  <ProfessionalSlider
-                    value={track.volume}
-                    onChange={(value) => handleTrackUpdate(track.id, { volume: value })}
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    orientation="horizontal"
-                    size="small"
-                    color={track.color}
-                    label="Vol"
-                    showValue={false}
-                  />
-                  <ProfessionalSlider
-                    value={track.pan}
-                    onChange={(value) => handleTrackUpdate(track.id, { pan: value })}
-                    min={-1}
-                    max={1}
-                    step={0.01}
-                    orientation="horizontal"
-                    size="small"
-                    color="#f59e0b"
-                    label="Pan"
-                    showValue={false}
-                  />
-                </div>
-              </div>
-              
-              {/* Waveform container */}
-              <div 
-                ref={(el) => {
-                  if (el) trackRefs.current.set(track.id, el);
-                }}
-                className="w-full h-16 bg-gray-600 rounded"
-                style={{ minHeight: '60px' }}
-              />
+              ))}
             </div>
-          ))}
+          </div>
         </div>
-      </div>
 
-      {/* Controles de transporte */}
-      <div className="bg-gray-900 p-4 flex items-center justify-center space-x-4">
-        <button
-          onClick={handleStop}
-          className="p-2 bg-gray-700 hover:bg-gray-600 rounded text-white text-sm"
-        >
-          STOP
-        </button>
-        <button
-          onClick={handlePlayPause}
-          disabled={!allTracksLoaded && !isPlaying}
-          className={`p-3 rounded text-white font-bold transition-all duration-200 ${
-            !allTracksLoaded && !isPlaying 
-              ? 'bg-gray-600 cursor-not-allowed opacity-50' 
-              : 'bg-blue-600 hover:bg-blue-700'
-          }`}
-        >
-          {!allTracksLoaded && !isPlaying ? 'LOADING...' : (isPlaying ? 'PAUSE' : 'PLAY')}
-        </button>
-        <div className="text-white text-sm">
-          {formatTime(currentTime)} / {formatTime(duration)}
-        </div>
-      </div>
-
-      {/* Sección de mixer (30% de la pantalla) */}
-      <div className="h-1/3 bg-gray-900 p-4">
-        <div className="text-white mb-4">
-          <h3 className="text-lg font-bold">Audio Controls</h3>
-        </div>
-        
-        <div className="flex space-x-4 h-full">
-          {/* Tracks mixer */}
-          <div className="flex space-x-2 flex-1">
-            {tracks.map((track) => (
-              <div key={track.id} className="flex flex-col items-center space-y-2">
-                <div className="text-white text-xs">{track.name}</div>
-                <ProfessionalSlider
-                  value={track.volume}
-                  onChange={(value) => handleTrackUpdate(track.id, { volume: value })}
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  orientation="vertical"
-                  size="medium"
-                  color={track.color}
-                  showValue={true}
-                />
-                <div className="flex space-x-1">
-                  <button
-                    onClick={() => handleMute(track.id)}
-                    className={`p-1 rounded text-xs ${track.muted ? 'bg-red-600' : 'bg-gray-600'}`}
+        {/* Tracks and Timeline */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Track List */}
+          <div className="w-48 bg-gray-800 border-r border-gray-700 overflow-y-auto">
+            {tracks.map((track, index) => (
+              <div
+                key={track.id}
+                className={`h-20 border-b border-gray-700 p-2 cursor-pointer transition-colors ${
+                  track.selected ? 'bg-blue-900' : 'hover:bg-gray-700'
+                }`}
+                onClick={() => selectTrack(track.id)}
+              >
+                <div className="flex items-center space-x-2 mb-1">
+                  <div 
+                    className="p-1 rounded text-white"
+                    style={{ backgroundColor: track.color }}
                   >
-                    M
-                  </button>
-                  <button
-                    onClick={() => handleSolo(track.id)}
-                    className={`p-1 rounded text-xs ${track.solo ? 'bg-yellow-600' : 'bg-gray-600'}`}
-                  >
-                    S
-                  </button>
+                    {track.icon}
+                  </div>
+                  <span className="text-white text-sm font-medium">{track.name}</span>
+                </div>
+                <div className="text-xs text-gray-400">
+                  {track.muted ? 'MUTED' : track.solo ? 'SOLO' : `${Math.round(track.volume * 100)}%`}
                 </div>
               </div>
             ))}
           </div>
+
+          {/* Timeline */}
+          <div className="flex-1 overflow-auto">
+            {tracks.map((track) => (
+              <div
+                key={track.id}
+                className={`h-20 border-b border-gray-700 relative ${
+                  track.selected ? 'bg-blue-900/20' : ''
+                }`}
+                onClick={() => selectTrack(track.id)}
+              >
+                {track.regions.map((region) => (
+                  <WaveformRegion
+                    key={region.id}
+                    region={region}
+                    trackId={track.id}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Mixer Console */}
+        <div className="bg-gray-800 border-t border-gray-700 p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-white font-semibold">Mixer Console</h3>
+            <div className="flex items-center space-x-4">
+              <span className="text-gray-300 text-sm">Master</span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={masterVolume}
+                onChange={(e) => setMasterVolume(parseFloat(e.target.value))}
+                className="w-24"
+              />
+              <span className="text-gray-300 text-sm w-12">{Math.round(masterVolume * 100)}%</span>
+            </div>
+          </div>
           
-          {/* Master fader */}
-          <div className="flex flex-col items-center space-y-2">
-            <div className="text-white text-xs">Master</div>
-            <ProfessionalSlider
-              value={masterVolume}
-              onChange={setMasterVolume}
-              min={0}
-              max={1}
-              step={0.01}
-              orientation="vertical"
-              size="medium"
-              color="#ef4444"
-              label="Master"
-              showValue={true}
-            />
+          <div className="flex space-x-4 overflow-x-auto">
+            {tracks.map((track) => (
+              <div key={track.id} className="flex-shrink-0 w-16 text-center">
+                <div className="text-white text-xs mb-2">{track.name}</div>
+                
+                {/* Mute Button */}
+                <button
+                  onClick={() => toggleMute(track.id)}
+                  className={`w-8 h-8 rounded mb-2 flex items-center justify-center text-xs ${
+                    track.muted ? 'bg-red-600 text-white' : 'bg-gray-600 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  M
+                </button>
+                
+                {/* Solo Button */}
+                <button
+                  onClick={() => toggleSolo(track.id)}
+                  className={`w-8 h-8 rounded mb-2 flex items-center justify-center text-xs ${
+                    track.solo ? 'bg-yellow-600 text-white' : 'bg-gray-600 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  S
+                </button>
+                
+                {/* Pan Control */}
+                <div className="mb-2">
+                  <input
+                    type="range"
+                    min="-1"
+                    max="1"
+                    step="0.1"
+                    value={track.pan}
+                    onChange={(e) => setTracks(prev => prev.map(t => 
+                      t.id === track.id ? { ...t, pan: parseFloat(e.target.value) } : t
+                    ))}
+                    className="w-12 transform -rotate-90"
+                  />
+                </div>
+                
+                {/* Volume Fader */}
+                <div className="mb-2">
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={track.volume}
+                    onChange={(e) => updateTrackVolume(track.id, parseFloat(e.target.value))}
+                    className="w-12 transform -rotate-90"
+                  />
+                </div>
+                
+                {/* Level Meter */}
+                <div className="h-20 bg-gray-700 rounded relative overflow-hidden">
+                  {waveforms[track.id] && (
+                    <div className="absolute bottom-0 left-0 right-0 flex items-end justify-center space-x-1 p-1">
+                      {waveforms[track.id].slice(0, 8).map((value, index) => (
+                        <div
+                          key={index}
+                          className="w-1 rounded-t"
+                          style={{
+                            height: `${(value / 255) * 100}%`,
+                            backgroundColor: value > 200 ? '#EF4444' : value > 150 ? '#F59E0B' : '#10B981'
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Transport Controls */}
+        <div className="bg-gray-800 border-t border-gray-700 p-4">
+          <div className="flex items-center justify-center space-x-4">
+            <button
+              onClick={() => setCurrentTime(0)}
+              className="bg-gray-600 hover:bg-gray-700 text-white p-2 rounded transition-colors"
+            >
+              <RotateCcw className="w-5 h-5" />
+            </button>
+            
+            <button
+              onClick={stopPlayback}
+              className="bg-gray-600 hover:bg-gray-700 text-white p-2 rounded transition-colors"
+            >
+              <Square className="w-5 h-5" />
+            </button>
+            
+            <button
+              onClick={togglePlayPause}
+              className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-full transition-colors"
+            >
+              {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
+            </button>
+            
+            <button
+              onClick={() => setIsRecording(!isRecording)}
+              className={`p-2 rounded transition-colors ${
+                isRecording ? 'bg-red-600 text-white' : 'bg-gray-600 text-gray-300 hover:bg-gray-700'
+              }`}
+            >
+              <Record className="w-5 h-5" />
+            </button>
+            
+            <button
+              className="bg-gray-600 hover:bg-gray-700 text-white p-2 rounded transition-colors"
+            >
+              <Loop className="w-5 h-5" />
+            </button>
+            
+            <div className="ml-8 text-white font-mono">
+              {formatTime(currentTime)}
+            </div>
           </div>
         </div>
       </div>
