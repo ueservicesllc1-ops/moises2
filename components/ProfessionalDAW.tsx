@@ -18,8 +18,8 @@ import {
   Maximize2,
   Settings,
   Download,
-  Loop,
-  Record,
+  Repeat,
+  Circle,
   Scissors,
   Copy,
   Paste
@@ -573,13 +573,13 @@ const ProfessionalDAW: React.FC<ProfessionalDAWProps> = ({ isOpen, onClose, song
                 isRecording ? 'bg-red-600 text-white' : 'bg-gray-600 text-gray-300 hover:bg-gray-700'
               }`}
             >
-              <Record className="w-5 h-5" />
+              <Circle className="w-5 h-5" />
             </button>
             
             <button
               className="bg-gray-600 hover:bg-gray-700 text-white p-2 rounded transition-colors"
             >
-              <Loop className="w-5 h-5" />
+              <Repeat className="w-5 h-5" />
             </button>
             
             <div className="ml-8 text-white font-mono">
