@@ -24,6 +24,7 @@ import NewSongUpload from '@/components/NewSongUpload'
 import ConnectionStatus from '@/components/ConnectionStatus'
 import SimpleMixer from '@/components/SimpleMixer'
 import ProfessionalDAW from '@/components/ProfessionalDAW'
+import ProfessionalMixer from '@/components/ProfessionalMixer'
 import { getUserSongs, subscribeToUserSongs, deleteSong, Song } from '@/lib/firestore'
 import useAudioCleanup from '@/hooks/useAudioCleanup'
 
@@ -42,6 +43,8 @@ export default function Home() {
   const [showAudioEditor, setShowAudioEditor] = useState(false)
   const [selectedSongForEditor, setSelectedSongForEditor] = useState<Song | null>(null)
   const [showProfessionalDAW, setShowProfessionalDAW] = useState(false)
+  const [showProfessionalMixer, setShowProfessionalMixer] = useState(false)
+  const [selectedSongForMixer, setSelectedSongForMixer] = useState<Song | null>(null)
 
   useEffect(() => {
     if (!loading && !user) {
@@ -131,6 +134,20 @@ export default function Home() {
       console.log('Song has stems, opening Professional DAW')
       setSelectedSongForEditor(song)
       setShowProfessionalDAW(true)
+    } else {
+      console.log('Song has no stems, showing message')
+      alert('Esta canción no tiene pistas separadas. Necesitas procesarla primero con IA.')
+    }
+  }
+
+  const openProfessionalMixer = (song: Song) => {
+    console.log('Opening Professional Mixer for song:', song.title)
+    
+    // Verificar si la canción tiene stems separados
+    if (song.stems && Object.keys(song.stems).length > 0) {
+      console.log('Song has stems, opening Professional Mixer')
+      setSelectedSongForMixer(song)
+      setShowProfessionalMixer(true)
     } else {
       console.log('Song has no stems, showing message')
       alert('Esta canción no tiene pistas separadas. Necesitas procesarla primero con IA.')
@@ -460,6 +477,30 @@ export default function Home() {
                       </td>
                       <td className="py-4 px-4">
                         <div className="flex items-center space-x-2">
+                          {song.stems && Object.keys(song.stems).length > 0 && (
+                            <>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSongClick(song);
+                                }}
+                                className="p-2 bg-purple-500 hover:bg-purple-600 text-white rounded-full transition-colors duration-200 border-2 border-purple-400 hover:border-purple-300 shadow-lg hover:shadow-xl"
+                                title="Abrir DAW"
+                              >
+                                <BarChart3 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openProfessionalMixer(song);
+                                }}
+                                className="p-2 bg-green-500 hover:bg-green-600 text-white rounded-full transition-colors duration-200 border-2 border-green-400 hover:border-green-300 shadow-lg hover:shadow-xl"
+                                title="Mixer Profesional"
+                              >
+                                <Volume2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -470,7 +511,6 @@ export default function Home() {
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
-                          <span className="text-xs text-gray-400">Eliminar</span>
                         </div>
                       </td>
                     </tr>
@@ -534,6 +574,15 @@ export default function Home() {
             timeSignature: selectedSongForEditor.timeSignature || '4/4',
             duration: selectedSongForEditor.duration || '0:00'
           }}
+        />
+      )}
+
+      {/* Professional Mixer Modal */}
+      {showProfessionalMixer && selectedSongForMixer && (
+        <ProfessionalMixer
+          stems={selectedSongForMixer.stems || { vocals: '', instrumental: '' }}
+          songTitle={selectedSongForMixer.title}
+          onClose={() => setShowProfessionalMixer(false)}
         />
       )}
     </div>
