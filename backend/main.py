@@ -1,10 +1,11 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 import os
 import uuid
 import asyncio
+import subprocess
 from pathlib import Path
 from typing import List, Optional, Dict
 import json
@@ -14,9 +15,12 @@ from chord_analyzer import ChordAnalyzer
 from models import ProcessingTask, TaskStatus
 from database import get_db, init_db
 from b2_storage import b2_storage
+from moises_style_processor import moises_processor
 
 # In-memory task storage
 tasks_storage = {}
+# Store active processes for cancellation
+active_processes = {}
 
 app = FastAPI(
     title="Moises Clone API",
@@ -33,8 +37,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static files (commented for demo)
-# app.mount("/static", StaticFiles(directory="static"), name="static")
+# Static files for serving uploaded files
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Initialize database and B2
 @app.on_event("startup")
@@ -51,6 +55,97 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     return {"status": "OK", "message": "Backend is running"}
+
+@app.get("/api/audio/{path:path}")
+async def serve_audio_file(path: str):
+    """Proxy para servir archivos de audio desde B2 con CORS habilitado"""
+    try:
+        print(f"Serving audio file: {path}")
+        
+        # Descargar archivo desde B2
+        file_data = await b2_storage.download_file_bytes(path)
+        
+        if not file_data:
+            raise HTTPException(status_code=404, detail="Audio file not found")
+        
+        # Determinar content type basado en la extensión
+        extension = path.split('.')[-1].lower()
+        content_type_map = {
+            'mp3': 'audio/mpeg',
+            'wav': 'audio/wav',
+            'm4a': 'audio/mp4',
+            'ogg': 'audio/ogg',
+            'flac': 'audio/flac'
+        }
+        content_type = content_type_map.get(extension, 'audio/mpeg')
+        
+        # Retornar archivo con headers CORS
+        from fastapi.responses import Response
+        return Response(
+            content=file_data,
+            media_type=content_type,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*",
+                "Cache-Control": "public, max-age=3600"
+            }
+        )
+        
+    except Exception as e:
+        print(f"Error serving audio file {path}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/delete-files")
+async def delete_files_from_b2(request: dict):
+    """Eliminar archivos de B2 cuando se borra una canción"""
+    try:
+        song_id = request.get("songId")
+        file_url = request.get("fileUrl")
+        stems = request.get("stems", {})
+        
+        print(f"Eliminando archivos para canción {song_id}")
+        
+        deleted_files = []
+        
+        # Eliminar archivo original si existe
+        if file_url:
+            original_path = _extract_b2_path_from_url(file_url)
+            if original_path:
+                success = await b2_storage.delete_file(original_path)
+                if success:
+                    deleted_files.append(f"Original: {original_path}")
+                    print(f"Archivo original eliminado: {original_path}")
+        
+        # Eliminar stems si existen
+        if stems:
+            for stem_name, stem_url in stems.items():
+                if stem_url:
+                    stem_path = _extract_b2_path_from_url(stem_url)
+                    if stem_path:
+                        success = await b2_storage.delete_file(stem_path)
+                        if success:
+                            deleted_files.append(f"{stem_name}: {stem_path}")
+                            print(f"Stem {stem_name} eliminado: {stem_path}")
+        
+        return {
+            "success": True,
+            "deleted_files": deleted_files,
+            "message": f"Eliminados {len(deleted_files)} archivos de B2"
+        }
+        
+    except Exception as e:
+        print(f"Error eliminando archivos de B2: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def _extract_b2_path_from_url(url: str) -> str:
+    """Extraer la ruta del archivo desde la URL de B2"""
+    try:
+        if 'moises/' in url:
+            return url.split('moises/')[1]
+        return None
+    except:
+        return None
 
 @app.post("/upload")
 async def upload_audio(
@@ -73,10 +168,14 @@ async def upload_audio(
     upload_dir.mkdir(parents=True, exist_ok=True)
     
     # Save uploaded file
-    file_path = upload_dir / f"original.{file.filename.split('.')[-1]}"
+    file_ext = file.filename.split('.')[-1] if '.' in file.filename else 'mp3'
+    file_path = upload_dir / f"original.{file_ext}"
     with open(file_path, "wb") as buffer:
         content = await file.read()
         buffer.write(content)
+    
+    print(f"File saved to: {file_path}")
+    print(f"File exists: {file_path.exists()}")
     
     # Parse separation options if provided
     custom_tracks = None
@@ -101,71 +200,123 @@ async def upload_audio(
     
     return {
         "task_id": task_id,
-        "status": "processing",
-        "message": "Audio upload successful, processing started",
+        "status": "uploaded",
+        "message": "Audio upload successful",
+        "file_url": f"http://localhost:8000/uploads/{task_id}/original.{file_ext}",
         "separation_type": separation_type,
         "hi_fi": hi_fi
     }
+
+@app.post("/api/upload")
+async def upload_to_b2(
+    file: UploadFile = File(...),
+    user_id: str = None,
+    song_id: str = None,
+    folder: str = "newsongs"
+):
+    """Upload file to B2 storage via proxy"""
+    
+    if not file.content_type.startswith("audio/"):
+        raise HTTPException(status_code=400, detail="File must be audio")
+    
+    try:
+        # Upload to B2 using the existing b2_storage
+        file_content = await file.read()
+        
+        # Generate unique filename
+        file_ext = file.filename.split('.')[-1] if '.' in file.filename else 'mp3'
+        b2_filename = f"{song_id or 'unknown'}/{file.filename}"
+        
+        # Upload to B2
+        upload_result = await b2_storage.upload_file(
+            file_content=file_content,
+            filename=b2_filename,
+            content_type=file.content_type
+        )
+        
+        return {
+            "success": True,
+            "downloadUrl": upload_result.get("download_url"),
+            "fileId": upload_result.get("file_id"),
+            "filename": b2_filename
+        }
+        
+    except Exception as e:
+        print(f"Error uploading to B2: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 @app.post("/separate")
 async def separate_audio_direct(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    separation_type: str = "vocals-instrumental",
-    separation_options: Optional[str] = None,
-    hi_fi: bool = False,
-    song_id: Optional[str] = None,
-    user_id: Optional[str] = None
+    separation_type: str = Form("vocals-instrumental"),
+    separation_options: Optional[str] = Form(None),
+    hi_fi: bool = Form(False),
+    song_id: Optional[str] = Form(None),
+    user_id: Optional[str] = Form(None),
 ):
-    """Separate audio directly from uploaded file"""
+    """Separate audio using Moises Style architecture - Solo B2 Storage"""
     
     if not file.content_type.startswith("audio/"):
         raise HTTPException(status_code=400, detail="File must be audio")
     
-    # Generate unique task ID
-    task_id = str(uuid.uuid4())
-    
-    # Create upload directory
-    upload_dir = Path(f"uploads/{task_id}")
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Save uploaded file directly
-    file_ext = file.filename.split('.')[-1] if '.' in file.filename else 'mp3'
-    file_path = upload_dir / f"original.{file_ext}"
-    
-    with open(file_path, "wb") as buffer:
-        content = await file.read()
-        buffer.write(content)
-    
-    # Parse separation options if provided
-    custom_tracks = None
-    if separation_options:
+    # Siempre usar arquitectura Moises Style
+    try:
+        print(f"Iniciando separacion Moises Style para: {file.filename}")
+        print(f"Usuario: {user_id or 'anonymous'}")
+        print(f"Tipo separacion: {separation_type}")
+        print(f"Hi-Fi: {hi_fi}")
+        
+        # Leer contenido del archivo
+        file_content = await file.read()
+        print(f"Archivo leido: {len(file_content)} bytes")
+        
+        # Usar el procesador Moises Style
         try:
-            custom_tracks = json.loads(separation_options)
-        except:
-            pass
-    
-    # Create processing task
-    task = ProcessingTask(
-        id=task_id,
-        original_filename=file.filename,
-        file_path=str(file_path),
-        separation_type=separation_type,
-        status=TaskStatus.PROCESSING
-    )
-    
-    # Store task in memory
-    tasks_storage[task_id] = task
-    
-    # Start background processing with options
-    background_tasks.add_task(process_audio, task, custom_tracks, hi_fi)
-    
-    return {
-        "task_id": task_id,
-        "status": "processing",
-        "message": "Audio separation started",
-        "filename": file.filename
-    }
+            result = await moises_processor.separate_audio_moises_style(
+                file_content=file_content,
+                filename=file.filename,
+                user_id=user_id or "anonymous",
+                separation_type=separation_type,
+                hi_fi=hi_fi
+            )
+            print(f"Procesador Moises Style completado: {result}")
+        except Exception as proc_error:
+            print(f"Error en procesador Moises Style: {proc_error}")
+            import traceback
+            print(f"Stack trace procesador: {traceback.format_exc()}")
+            raise proc_error
+        
+        print(f"Resultado procesador: {result}")
+        
+        if result["success"]:
+            response_data = {
+                "success": True,
+                "message": "Audio separado exitosamente estilo Moises",
+                "data": {
+                    "task_id": result["task_id"],
+                    "song_id": result["song_id"],
+                    "original_url": result["original_url"],
+                    "stems": result["stems"],
+                    "separation_type": result["separation_type"],
+                    "hi_fi": result["hi_fi"],
+                    "processed_at": result["processed_at"],
+                    "user_id": result["user_id"]
+                }
+            }
+            print(f"Respuesta exitosa: {response_data}")
+            return response_data
+        else:
+            error_msg = result.get("error", "Error desconocido en procesamiento")
+            print(f"Error en procesamiento: {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
+            
+    except Exception as e:
+        print(f"Error completo en Moises Style: {e}")
+        print(f"Tipo de error: {type(e)}")
+        import traceback
+        print(f"Stack trace: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/status/{task_id}")
 async def get_status(task_id: str):
@@ -433,6 +584,43 @@ async def process_chord_analysis(task: ProcessingTask):
         task.status = TaskStatus.FAILED
         task.error = str(e)
         print(f"Chord analysis error: {e}")
+
+@app.post("/cancel/{task_id}")
+async def cancel_separation(task_id: str):
+    """Cancel an active separation process"""
+    try:
+        if task_id not in tasks_storage:
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        task = tasks_storage[task_id]
+        
+        # Mark task as cancelled
+        task.status = TaskStatus.FAILED
+        task.error = "Process cancelled by user"
+        
+        # Kill the process if it exists
+        if task_id in active_processes:
+            process = active_processes[task_id]
+            if process.poll() is None:  # Process is still running
+                process.terminate()
+                print(f"Process {task_id} terminated")
+            del active_processes[task_id]
+        
+        # Clean up files
+        try:
+            upload_dir = Path(f"uploads/{task_id}")
+            if upload_dir.exists():
+                import shutil
+                shutil.rmtree(upload_dir)
+                print(f"Cleaned up files for task {task_id}")
+        except Exception as e:
+            print(f"Error cleaning up files: {e}")
+        
+        return {"message": "Separation cancelled successfully", "task_id": task_id}
+        
+    except Exception as e:
+        print(f"Error cancelling separation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

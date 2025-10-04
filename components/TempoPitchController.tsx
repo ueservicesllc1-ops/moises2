@@ -285,3 +285,4 @@ const TempoPitchController: React.FC<TempoPitchControllerProps> = ({
 };
 
 export default TempoPitchController;
+

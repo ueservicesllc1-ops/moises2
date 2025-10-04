@@ -138,3 +138,4 @@ const GuitarChordDiagram: React.FC<GuitarChordDiagramProps> = ({
 };
 
 export default GuitarChordDiagram;
+

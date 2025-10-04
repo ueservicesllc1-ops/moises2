@@ -16,7 +16,7 @@ export default function ConnectionStatus() {
         const response = await fetch('http://localhost:8000/')
         const data = await response.json()
         
-        if (data.status === 'OK') {
+        if (data.status === 'running') {
           setB2Status('connected')
           setB2Error(null)
         } else {

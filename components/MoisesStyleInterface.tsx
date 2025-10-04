@@ -300,3 +300,4 @@ const MoisesStyleInterface: React.FC<MoisesStyleInterfaceProps> = ({
 };
 
 export default MoisesStyleInterface;
+

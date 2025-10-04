@@ -11,7 +11,7 @@ interface UploadProgress {
 }
 
 class RealB2Service {
-  private proxyUrl = 'http://localhost:8000'; // Puerto del proxy backend
+  private proxyUrl = 'http://localhost:3001'; // Puerto del proxy backend
 
   // Subir archivo usando proxy backend
   async uploadAudioFile(

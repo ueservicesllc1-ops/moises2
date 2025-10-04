@@ -126,9 +126,43 @@ export async function updateSongStatus(songId: string, status: Song['status']): 
 // Eliminar canción
 export async function deleteSong(songId: string): Promise<void> {
   try {
+    // Primero obtener la canción para eliminar archivos de B2
+    const songDoc = await getDoc(doc(db, 'songs', songId))
+    if (songDoc.exists()) {
+      const songData = songDoc.data() as Song
+      
+      // Eliminar archivos de B2 si existen
+      if (songData.fileUrl || songData.stems) {
+        try {
+          const deleteResponse = await fetch('http://localhost:8000/api/delete-files', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              songId: songId,
+              fileUrl: songData.fileUrl,
+              stems: songData.stems
+            })
+          })
+          
+          if (deleteResponse.ok) {
+            console.log('✅ Archivos de B2 eliminados correctamente')
+          } else {
+            console.warn('⚠️ Error eliminando archivos de B2, continuando con eliminación de Firestore')
+          }
+        } catch (b2Error) {
+          console.warn('⚠️ Error eliminando archivos de B2:', b2Error)
+          // Continuar con la eliminación de Firestore aunque falle B2
+        }
+      }
+    }
+    
+    // Eliminar documento de Firestore
     await deleteDoc(doc(db, 'songs', songId))
+    console.log('✅ Canción eliminada de Firestore')
   } catch (error) {
-    console.error('Error deleting song:', error)
+    console.error('❌ Error deleting song:', error)
     throw error
   }
 }

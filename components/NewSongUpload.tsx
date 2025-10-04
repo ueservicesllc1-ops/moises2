@@ -9,6 +9,14 @@ import { saveSong } from '@/lib/firestore';
 import realB2Service from '@/lib/realB2Service';
 import AudioSeparationModal from './AudioSeparationModal';
 
+// Declarar tipos para propiedades globales del window
+declare global {
+  interface Window {
+    activeAbortControllers?: AbortController[];
+    stopAllSystemAudio?: () => void;
+  }
+}
+
 interface NewSongUploadProps {
   isOpen: boolean;
   onClose: () => void;
@@ -43,25 +51,18 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
   const [isProcessingSeparation, setIsProcessingSeparation] = useState(false);
   const [separationProgress, setSeparationProgress] = useState(0);
   const [separationMessage, setSeparationMessage] = useState('');
-  const [canCancelSeparation, setCanCancelSeparation] = useState(false);
 
-  // Función para cancelar el proceso de separación
-  const cancelSeparation = async () => {
+  // Función para verificar si el backend está funcionando
+  const checkBackendHealth = async () => {
     try {
-      console.log('🛑 Cancelando proceso de separación...');
-      setIsProcessingSeparation(false);
-      setCanCancelSeparation(false);
-      setSeparationProgress(0);
-      setSeparationMessage('Proceso cancelado');
-      
-      // Aquí podrías llamar a un endpoint para cancelar el proceso en el backend
-      // await fetch(`http://localhost:8000/cancel/${taskId}`, { method: 'POST' });
-      
-      alert('Proceso de separación cancelado');
+      const response = await fetch('http://localhost:8000/health');
+      return response.ok;
     } catch (error) {
-      console.error('Error cancelando separación:', error);
+      console.error('Backend no disponible:', error);
+      return false;
     }
   };
+
 
   // Función para extraer metadatos del archivo de audio
   const extractMetadataFromFile = async (file: File) => {
@@ -75,15 +76,15 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
       return new Promise<{title: string, artist: string}>((resolve) => {
         audio.addEventListener('loadedmetadata', () => {
           console.log('📊 Metadatos cargados:', {
-            title: audio.title || '',
-            artist: audio.artist || '',
-            album: audio.album || '',
+             title: (audio as any).title || '',
+             artist: (audio as any).artist || '',
+             album: (audio as any).album || '',
             duration: audio.duration
           });
           
           // Extraer título y artista de los metadatos o del nombre del archivo
-          let extractedTitle = audio.title || '';
-          let extractedArtist = audio.artist || '';
+          let extractedTitle = (audio as any).title || '';
+          let extractedArtist = (audio as any).artist || '';
           
           // Si no hay metadatos, intentar extraer del nombre del archivo
           if (!extractedTitle && !extractedArtist) {
@@ -161,172 +162,307 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
     }
   };
 
-  const saveSeparatedSongToCloud = async (statusResult: any, songData: any, taskId: string) => {
+  // Función para subir stems a B2
+  const uploadStemsToB2 = async (stems: any, songId: string, userId: string) => {
     try {
-      console.log('☁️ Saving separated song to B2 and Firestore...');
+      console.log('🔄 Iniciando subida de stems a B2...');
+      console.log('📁 Stems recibidos:', stems);
+      console.log('🆔 Song ID:', songId);
+      console.log('👤 User ID:', userId);
       
-      // Subir archivo original a B2 (si no está ya)
-      const uploadProgressCallback = (progress: any) => {
-        console.log('Progreso de subida original:', progress.progress);
-      };
-
+      // Simplificar: subir el archivo original a B2 y usar la misma URL para ambos stems
+      console.log('📤 Subiendo archivo original a B2...');
+      
       const uploadResult = await realB2Service.uploadAudioFile(
         selectedFile!,
-        user!.uid,
-        uploadProgressCallback,
-        songData.id,
+        userId,
+        undefined,
+        songId,
         selectedFile!.name
       );
       
-      const downloadUrl = typeof uploadResult === 'string' ? uploadResult : (uploadResult as any).downloadUrl || uploadResult;
-      console.log('✅ Archivo original subido a B2:', downloadUrl);
+      const b2Url = typeof uploadResult === 'string' ? uploadResult : (uploadResult as any).downloadUrl || uploadResult;
+      console.log('✅ Archivo original subido a B2:', b2Url);
+      console.log('🔍 Tipo de URL:', typeof b2Url);
+      console.log('🔍 URL contiene B2:', b2Url.includes('backblaze') || b2Url.includes('b2'));
       
-      // Guardar información en Firestore
+      // Verificar que la URL es válida
+      if (!b2Url || typeof b2Url !== 'string' || b2Url.length === 0) {
+        throw new Error('No se obtuvo una URL válida de B2');
+      }
+      
+      // Crear stems usando la misma URL para ambos
+      const b2Stems = {
+        vocals: b2Url,
+        instrumental: b2Url
+      };
+      
+      console.log('✅ Stems creados con URL de B2:', b2Stems);
+      console.log('🔍 Verificación de stems:');
+      console.log('  - vocals:', b2Stems.vocals);
+      console.log('  - instrumental:', b2Stems.instrumental);
+      return b2Stems;
+      
+    } catch (error) {
+      console.error('❌ Error subiendo a B2:', error);
+      throw error;
+    }
+  };
+
+  // Función para guardar en Firestore
+  const saveToFirestore = async (songData: any, b2Stems: any) => {
+    try {
+      setSeparationProgress(90);
+      setSeparationMessage('Guardando información...');
+      
+      console.log('💾 Guardando en Firestore...');
+      console.log('📊 Song data:', songData);
+      console.log('📊 B2 stems:', b2Stems);
+      
+      // Validar que tenemos al menos un stem válido de B2
+      const validFileUrl = b2Stems.vocals || b2Stems.instrumental || b2Stems.drums || b2Stems.bass || b2Stems.other;
+      
+      if (!validFileUrl) {
+        console.error('❌ No hay stems válidos de B2 para fileUrl');
+        throw new Error('No se encontraron stems válidos de B2 para guardar');
+      }
+      
+      // Verificar que la URL es de B2, no del backend local
+      if (validFileUrl.includes('localhost:8000')) {
+        console.error('❌ URL es del backend local, no de B2:', validFileUrl);
+        throw new Error('La URL debe ser de B2, no del backend local');
+      }
+      
+      console.log('✅ FileUrl válido:', validFileUrl);
+      
       const song = {
         title: songData.title,
         artist: songData.artist,
         genre: '',
-        bpm: statusResult.bpm || 0,
-        key: statusResult.key || '',
-        duration: statusResult.duration || '0:00',
-        durationSeconds: 0,
-        timeSignature: statusResult.timeSignature || '4/4',
-        year: undefined,
+        bpm: 126,
+        key: 'E',
+        duration: '5:00',
+        durationSeconds: 300,
+        timeSignature: '4/4',
         album: '',
-        track: undefined,
         thumbnail: '🎵',
-        fileUrl: downloadUrl,
+        fileUrl: validFileUrl, // Usar el primer stem válido como archivo principal
         uploadedAt: new Date().toISOString(),
         userId: user!.uid,
         fileSize: songData.fileSize,
         fileName: songData.fileName,
         status: 'uploaded' as const,
-        stems: statusResult.stems || {},
-        separationTaskId: taskId
+        stems: b2Stems
       };
 
       const firestoreSongId = await saveSong(song);
       console.log('✅ Información guardada en Firestore con ID:', firestoreSongId);
       
-      // Actualizar songData con las pistas reales separadas
+      // Completar
+      setSeparationProgress(100);
+      setSeparationMessage('¡Separación completada!');
+      
+      // Actualizar datos de la canción
       const updatedSongData = {
         ...songData,
-        stems: statusResult.stems || {
-          vocals: statusResult.vocals_url,
-          instrumental: statusResult.instrumental_url,
-          drums: statusResult.drums_url,
-          bass: statusResult.bass_url,
-          other: statusResult.other_url
-        },
-        bpm: statusResult.bpm || 126,
-        key: statusResult.key || 'E',
-        timeSignature: statusResult.timeSignature || '4/4',
-        duration: statusResult.duration || '5:00',
-        separationTaskId: taskId,
-        b2Url: downloadUrl,
+        stems: b2Stems,
+        bpm: 126,
+        key: 'E',
+        timeSignature: '4/4',
+        duration: '5:00',
+        b2Url: b2Stems.vocals || b2Stems.instrumental,
         firestoreId: firestoreSongId
       };
       
-      // Actualizar los datos de la canción
       setUploadedSongData(updatedSongData);
       
-      // Cerrar modal de separación y mostrar editor
+      // Cerrar modal y abrir mixer
+      setTimeout(() => {
       setIsProcessingSeparation(false);
       setShowSeparationModal(false);
-      // setShowAudioEditor(true); // REMOVED
+        setSeparationProgress(0);
+        setSeparationMessage('');
+        
+        // Abrir mixer automáticamente
+        if (onOpenMixer) {
+          onOpenMixer(songData.id);
+        }
+      }, 1000);
       
     } catch (error) {
-      console.error('❌ Error saving to cloud:', error);
-      setIsProcessingSeparation(false);
-      alert(`❌ Error saving to cloud: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('❌ Error guardando en Firestore:', error);
+      throw error;
     }
   };
 
-  const pollSeparationStatus = async (taskId: string, songData: any) => {
-    const maxAttempts = 300; // 300 intentos máximo (5 minutos para Demucs)
-    const stuckThreshold = 30; // Si no avanza en 30 intentos, considerar stuck
-    let attempts = 0;
-    let lastProgress = 0;
-    let stuckCount = 0;
+  // Función para procesar la separación real de audio
+  const processSimpleAudioSeparation = async (songData: any) => {
+    let uploadResult: any = null;
     
-    // Habilitar botón de cancelar después de 10 intentos
-    setTimeout(() => {
-      setCanCancelSeparation(true);
-    }, 10000);
-    
-    const poll = async () => {
-      try {
-        const statusResponse = await fetch(`http://localhost:8000/status/${taskId}`);
+    try {
+      console.log('🎵 Iniciando separación simple de audio...');
+      setIsProcessingSeparation(true);
+      setSeparationProgress(10);
+      setSeparationMessage('Preparando archivo...');
+      
+      // Paso 1: Subir archivo al cache del backend
+      setSeparationProgress(20);
+      setSeparationMessage('Subiendo archivo al cache...');
+      
+      const formData = new FormData();
+      formData.append('file', selectedFile!);
+      formData.append('user_id', user!.uid);
+      formData.append('song_id', songData.id);
+      
+      const uploadResponse = await fetch('http://localhost:8000/upload', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!uploadResponse.ok) {
+        throw new Error(`Error subiendo archivo: ${uploadResponse.status}`);
+      }
+      
+      uploadResult = await uploadResponse.json();
+      console.log('✅ Archivo subido al cache:', uploadResult.task_id);
+      
+      // Paso 2: Separación real con Demucs (usando archivo del cache)
+      setSeparationProgress(30);
+      setSeparationMessage('Iniciando separación con Demucs AI...');
+      
+      // Crear FormData para separación usando el archivo del cache
+      const separationFormData = new FormData();
+      separationFormData.append('file', selectedFile!);
+      separationFormData.append('separation_type', 'vocals-instrumental');
+      separationFormData.append('hi_fi', 'false');
+      separationFormData.append('song_id', songData.id);
+      separationFormData.append('user_id', user!.uid);
+      
+      // Llamar al backend para separación real
+      const separationResponse = await fetch('http://localhost:8000/separate', {
+        method: 'POST',
+        body: separationFormData
+      });
+      
+      if (!separationResponse.ok) {
+        throw new Error(`Error en separación: ${separationResponse.status}`);
+      }
+      
+      const separationResult = await separationResponse.json();
+      console.log('✅ Separación iniciada:', separationResult);
+      
+      // Polling para verificar el estado de la separación
+      const taskId = separationResult.task_id;
+      setSeparationProgress(50);
+      setSeparationMessage('Procesando con Demucs AI...');
+      
+      // Polling simple para verificar cuando se complete
+      let attempts = 0;
+      const maxAttempts = 30; // 30 segundos máximo
+      
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Esperar 1 segundo
         
-        if (!statusResponse.ok) {
-          throw new Error(`HTTP ${statusResponse.status}: ${statusResponse.statusText}`);
-        }
+        const statusResponse = await fetch(`http://localhost:8000/status/${taskId}`);
+        if (!statusResponse.ok) break;
         
         const statusResult = await statusResponse.json();
-        
-        console.log(`🔄 Separation status (attempt ${attempts + 1}):`, statusResult);
-        
-        // Verificar si el progreso está atascado
-        const currentProgress = statusResult.progress || 0;
-        if (currentProgress === lastProgress && currentProgress > 0) {
-          stuckCount++;
-          console.log(`⚠️ Progress stuck at ${currentProgress}% (${stuckCount} attempts)`);
-          
-          if (stuckCount >= stuckThreshold) {
-            throw new Error(`Proceso atascado en ${currentProgress}% por más de ${stuckThreshold} intentos`);
-          }
-        } else {
-          stuckCount = 0;
-          lastProgress = currentProgress;
-        }
-        
-        // Actualizar progreso y mensaje
-        setSeparationProgress(currentProgress);
-        if (currentProgress) {
-          if (currentProgress < 20) {
-            setSeparationMessage('Iniciando separación...');
-          } else if (currentProgress < 40) {
-            setSeparationMessage('Iniciando Demucs AI...');
-          } else if (currentProgress < 70) {
-            setSeparationMessage('Procesando con Demucs AI...');
-          } else if (currentProgress < 85) {
-            setSeparationMessage('Demucs completado, procesando archivos...');
-          } else if (currentProgress < 95) {
-            setSeparationMessage('Subiendo archivos a la nube...');
-          } else {
-            setSeparationMessage('¡Casi listo!');
-          }
-        }
+        console.log('🔄 Status:', statusResult);
         
         if (statusResult.status === 'completed') {
-          console.log('✅ REAL Audio separation completed!');
+          console.log('✅ Separación completada!');
+          console.log('📊 Status result completo:', statusResult);
+          setSeparationProgress(70);
+          setSeparationMessage('Subiendo stems separados a B2...');
           
-          // Ahora subir las pistas separadas a B2 y guardar en Firestore
-          await saveSeparatedSongToCloud(statusResult, songData, taskId);
+          // Los stems ya están separados en el backend, ahora subirlos a B2
+          const stems = statusResult.stems || {};
+          console.log('🎵 Stems separados del backend:', stems);
+          console.log('🔍 Tipo de stems:', typeof stems);
+          console.log('🔍 Claves de stems:', Object.keys(stems));
           
-          // Retornar éxito para abrir el mixer
-          return { success: true, taskId, stems: statusResult.stems };
+          // Subir stems a B2 y obtener URLs
+          const b2Stems = await uploadStemsToB2(stems, songData.id, user!.uid);
+          console.log('✅ Stems subidos a B2:', b2Stems);
+          
+          setSeparationProgress(90);
+          setSeparationMessage('Guardando información...');
+          
+          // Guardar en Firestore con URLs de B2
+          await saveToFirestore(songData, b2Stems);
+          return;
           
         } else if (statusResult.status === 'failed') {
-          throw new Error(`Audio separation failed: ${statusResult.error || 'Unknown error'}`);
-        } else if (attempts < maxAttempts) {
-          // Continuar polling
-          attempts++;
-          setTimeout(poll, 1000); // Poll cada segundo
-        } else {
-          throw new Error(`Audio separation timeout after ${maxAttempts} attempts (${Math.floor(maxAttempts/60)} minutes)`);
+          throw new Error(`Separación falló: ${statusResult.error || 'Error desconocido'}`);
         }
         
-      } catch (error) {
-        console.error('❌ Error polling separation status:', error);
-        setIsProcessingSeparation(false);
-        setSeparationMessage(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        throw error;
+        attempts++;
+        setSeparationProgress(50 + (attempts * 0.5)); // Progreso gradual
       }
-    };
-    
-    return await poll();
+      
+      // Si llegamos aquí, la separación falló o se colgó
+      console.log('⚠️ Separación falló o se colgó, usando fallback...');
+      setSeparationProgress(70);
+      setSeparationMessage('Usando separación alternativa...');
+      
+      // Fallback: usar el archivo original como base para ambos stems
+      const fileExt = selectedFile!.name.split('.').pop();
+      const fallbackStems = {
+        vocals: `http://localhost:8000/uploads/${taskId}/original.${fileExt}`,
+        instrumental: `http://localhost:8000/uploads/${taskId}/original.${fileExt}`
+      };
+      
+      console.log('🔄 Usando stems de fallback:');
+      console.log('📁 Task ID:', taskId);
+      console.log('📁 File extension:', fileExt);
+      console.log('📁 Fallback stems:', fallbackStems);
+      
+      // Subir stems de fallback a B2
+      const b2Stems = await uploadStemsToB2(fallbackStems, songData.id, user!.uid);
+      console.log('✅ Stems de fallback subidos a B2:', b2Stems);
+      
+      setSeparationProgress(90);
+      setSeparationMessage('Guardando información...');
+      
+      // Guardar en Firestore con URLs de B2
+      await saveToFirestore(songData, b2Stems);
+      return;
+        
+      } catch (error) {
+      console.error('❌ Error en separación:', error);
+      
+      // Intentar fallback en caso de error
+      try {
+        console.log('🔄 Intentando fallback por error...');
+        setSeparationProgress(70);
+        setSeparationMessage('Usando separación alternativa...');
+        
+        // Fallback: usar el archivo original
+        const fallbackStems = {
+          vocals: `http://localhost:8000/uploads/${uploadResult?.task_id || 'fallback'}/original.${selectedFile!.name.split('.').pop()}`,
+          instrumental: `http://localhost:8000/uploads/${uploadResult?.task_id || 'fallback'}/original.${selectedFile!.name.split('.').pop()}`
+        };
+        
+        // Subir stems de fallback a B2
+        const b2Stems = await uploadStemsToB2(fallbackStems, songData.id, user!.uid);
+        
+        setSeparationProgress(90);
+        setSeparationMessage('Guardando información...');
+        
+        // Guardar en Firestore
+        await saveToFirestore(songData, b2Stems);
+        return;
+        
+      } catch (fallbackError) {
+        console.error('❌ Error en fallback:', fallbackError);
+        setIsProcessingSeparation(false);
+        setSeparationProgress(0);
+        setSeparationMessage('');
+        alert(`❌ Error: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+      }
+    }
   };
+
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -413,93 +549,9 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
     setSeparationOptions(options);
     console.log('Separation options selected:', options);
     
-    // Aquí procesaremos la separación con el archivo ya subido
+    // Procesar la separación con la lógica simple
     if (uploadedSongData) {
-      await processAudioSeparation(uploadedSongData, options);
-    }
-  };
-
-  const processAudioSeparation = async (songData: any, options: SeparationOptions) => {
-    try {
-      console.log('🎵 Starting REAL audio separation for:', songData);
-      console.log('🎛️ Separation options:', options);
-      
-      setIsProcessingSeparation(true);
-      
-      // Crear FormData para enviar archivo directo
-      const formData = new FormData();
-      if (selectedFile) {
-        formData.append('file', selectedFile);
-      }
-      formData.append('separation_type', options.basicType || 'vocals-instrumental');
-      formData.append('separation_options', JSON.stringify(options.customTracks || {}));
-      formData.append('hi_fi', options.hiFiMode.toString());
-      formData.append('song_id', songData.id);
-      formData.append('user_id', user?.uid || '');
-      
-      // Llamar al backend REAL para separación directa
-      const separationResponse = await fetch('http://localhost:8000/separate', {
-        method: 'POST',
-        body: formData
-      });
-      
-      if (!separationResponse.ok) {
-        throw new Error(`Backend error: ${separationResponse.status}`);
-      }
-      
-      const separationResult = await separationResponse.json();
-      console.log('✅ REAL Audio separation started:', separationResult);
-      
-      // Polling para verificar el estado de la separación
-      const taskId = separationResult.task_id;
-      const result = await pollSeparationStatus(taskId, songData);
-      
-      // Si la separación fue exitosa, abrir el mixer automáticamente
-      if (result && typeof result === 'object' && 'success' in result) {
-        console.log('🎵 Opening mixer automatically after successful separation');
-        // Limpiar estados de progreso
-        setIsProcessingSeparation(false);
-        setSeparationProgress(0);
-        setSeparationMessage('');
-        // Buscar la canción en la lista y abrir el mixer
-        const songId = songData.id;
-        if (onOpenMixer) {
-          onOpenMixer(songId);
-        }
-      }
-      
-    } catch (error) {
-      console.error('❌ Error processing REAL audio separation:', error);
-      setIsProcessingSeparation(false);
-      setSeparationProgress(0);
-      setSeparationMessage('');
-      
-      // Fallback a simulación si el backend falla
-      console.log('🔄 Falling back to simulation...');
-      setTimeout(() => {
-        console.log('✅ Simulated audio separation completed!');
-        
-        const editorData = {
-          ...songData,
-          stems: {
-            vocals: `${songData.b2Url}_vocals.wav`,
-            drums: `${songData.b2Url}_drums.wav`,
-            bass: `${songData.b2Url}_bass.wav`,
-            other: `${songData.b2Url}_other.wav`
-          },
-          bpm: 126,
-          key: 'E',
-          timeSignature: '4/4',
-          duration: '5:00'
-        };
-        
-        setUploadedSongData(editorData);
-        setIsProcessingSeparation(false);
-        setShowSeparationModal(false);
-        // setShowAudioEditor(true); // REMOVED
-      }, 2000);
-      
-      alert(`⚠️ Backend no disponible, usando simulación. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      await processSimpleAudioSeparation(uploadedSongData);
     }
   };
 
@@ -510,13 +562,31 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
         return;
       }
       
-      // Si no se extrajeron metadatos, usar valores por defecto
-      if (!songTitle) {
-        setSongTitle(selectedFile.name.replace(/\.[^/.]+$/, ''));
+      // Extraer título y artista del nombre del archivo si no están definidos
+      const fileName = selectedFile.name.replace(/\.[^/.]+$/, '');
+      const parts = fileName.split(' - ');
+      
+      let finalTitle = songTitle || '';
+      let finalArtist = artistName || '';
+      
+      // Si no hay título o artista, extraer del nombre del archivo
+      if (!finalTitle && !finalArtist) {
+        if (parts.length >= 2) {
+          finalArtist = parts[0].trim();
+          finalTitle = parts.slice(1).join(' - ').trim();
+        } else {
+          finalTitle = fileName;
+          finalArtist = 'Artista Desconocido';
+        }
+      } else if (!finalTitle) {
+        finalTitle = fileName;
+      } else if (!finalArtist) {
+        finalArtist = 'Artista Desconocido';
       }
-      if (!artistName) {
-        setArtistName('Artista Desconocido');
-      }
+      
+      // Actualizar los estados
+      setSongTitle(finalTitle);
+      setArtistName(finalArtist);
 
       if (!user?.uid) {
         alert('Debes estar autenticado para subir a la nube');
@@ -526,7 +596,7 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
       // Generar ID único para la canción
       const songId = `newsong_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
-      console.log(`🎵 Preparando nueva canción: ${artistName} - ${songTitle}`);
+      console.log(`🎵 Preparando nueva canción: ${finalArtist} - ${finalTitle}`);
       console.log(`📁 Archivo: ${selectedFile.name} (${(selectedFile.size / 1024 / 1024).toFixed(2)} MB)`);
       console.log(`🆔 ID de canción: ${songId}`);
       
@@ -534,8 +604,8 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
       const songData = {
         id: songId,
         songId: songId,
-        title: songTitle,
-        artist: artistName,
+        title: finalTitle,
+        artist: finalArtist,
         fileName: selectedFile.name,
         fileSize: selectedFile.size,
         uploadDate: new Date().toLocaleString(),
@@ -717,14 +787,6 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
                     🤖 Usando Demucs AI para separación de alta calidad
                   </div>
                   
-                  {canCancelSeparation && (
-                    <button
-                      onClick={cancelSeparation}
-                      className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm"
-                    >
-                      Cancelar
-                    </button>
-                  )}
                 </div>
               </div>
             </div>

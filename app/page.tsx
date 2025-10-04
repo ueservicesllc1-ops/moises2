@@ -52,16 +52,16 @@ export default function Home() {
   // Cargar canciones reales desde Firestore
   useEffect(() => {
     if (!user) {
-      console.log('❌ No user, skipping songs load')
+      console.log('No user, skipping songs load')
       return
     }
 
-    console.log('🔄 Loading songs for user:', user.uid)
+    console.log('Loading songs for user:', user.uid)
     setSongsLoading(true)
     
     // Suscribirse a cambios en tiempo real
     const unsubscribe = subscribeToUserSongs(user.uid, (userSongs) => {
-      console.log('📱 Received songs in UI:', userSongs.length)
+      console.log('Received songs in UI:', userSongs.length)
       setSongs(userSongs)
       setSongsLoading(false)
     })
@@ -113,46 +113,46 @@ export default function Home() {
     }
 
     try {
-      console.log('🗑️ Deleting song:', songId)
+      console.log('Deleting song:', songId)
       await deleteSong(songId)
-      console.log('✅ Song deleted successfully')
+      console.log('Song deleted successfully')
       // La lista se actualizará automáticamente por la suscripción a Firestore
     } catch (error) {
-      console.error('❌ Error deleting song:', error)
+      console.error('Error deleting song:', error)
       alert('Error al eliminar la canción. Por favor, inténtalo de nuevo.')
     }
   }
 
   const handleSongClick = (song: Song) => {
-    console.log('🎵 Opening Professional DAW for song:', song.title)
+    console.log('Opening Professional DAW for song:', song.title)
     
     // Verificar si la canción tiene stems separados
     if (song.stems && Object.keys(song.stems).length > 0) {
-      console.log('✅ Song has stems, opening Professional DAW')
+      console.log('Song has stems, opening Professional DAW')
       setSelectedSongForEditor(song)
       setShowProfessionalDAW(true)
     } else {
-      console.log('⚠️ Song has no stems, showing message')
+      console.log('Song has no stems, showing message')
       alert('Esta canción no tiene pistas separadas. Necesitas procesarla primero con IA.')
     }
   }
 
   const handleAudioEditorClose = () => {
-    console.log('🛑 Cerrando DAW - pausando todo el audio')
+    console.log('Cerrando DAW - pausando todo el audio')
     
     // Usar la función global de limpieza si está disponible
     if ((window as any).stopAllAudio) {
-      console.log('🎵 Usando función global de limpieza')
+      console.log('Usando función global de limpieza')
       ;(window as any).stopAllAudio()
     } else {
-      console.log('⚠️ Función global no disponible, usando método alternativo')
+      console.log('Función global no disponible, usando método alternativo')
       
       // Método alternativo: pausar elementos de audio en el DOM
       const audioElements = document.querySelectorAll('audio')
-      console.log(`🎵 Encontrados ${audioElements.length} elementos de audio en DOM`)
+      console.log(`Encontrados ${audioElements.length} elementos de audio en DOM`)
       
       audioElements.forEach((audio, index) => {
-        console.log(`⏹️ Pausando audio DOM ${index + 1}`)
+        console.log(`Pausando audio DOM ${index + 1}`)
         audio.pause()
         audio.currentTime = 0
         audio.src = ''
@@ -163,7 +163,7 @@ export default function Home() {
     setShowProfessionalDAW(false)
     setSelectedSongForEditor(null)
     
-    console.log('✅ DAW cerrado y audio detenido')
+    console.log('DAW cerrado y audio detenido')
   }
 
   return (
@@ -289,7 +289,7 @@ export default function Home() {
                 if ((window as any).stopAllSystemAudio) {
                   (window as any).stopAllSystemAudio();
                 }
-                alert('🎵 Todo el audio ha sido detenido (incluyendo del sistema)');
+                alert('Todo el audio ha sido detenido (incluyendo del sistema)');
               }}
               className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2"
             >
@@ -355,6 +355,7 @@ export default function Home() {
 
         {/* Songs Table */}
         <div className="flex-1 p-6">
+          {console.log('Songs count:', songs.length, 'Loading:', songsLoading)}
           {songsLoading ? (
             <div className="bg-gray-800 rounded-lg p-12 text-center">
               <div className="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
@@ -369,13 +370,43 @@ export default function Home() {
               </div>
               <h3 className="text-xl font-medium text-white mb-2">No songs yet</h3>
               <p className="text-gray-400 mb-6">Upload your first audio file to get started with track separation</p>
-              <button 
-                onClick={handleUploadClick}
-                className="bg-teal-500 hover:bg-teal-600 text-white px-6 py-3 rounded-lg flex items-center space-x-2 mx-auto"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Upload Audio</span>
-              </button>
+              <div className="space-y-3">
+                <button 
+                  onClick={handleUploadClick}
+                  className="bg-teal-500 hover:bg-teal-600 text-white px-6 py-3 rounded-lg flex items-center space-x-2 mx-auto"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Upload Audio</span>
+                </button>
+                
+                <button 
+                  onClick={() => {
+                    // Crear canción de prueba
+                    const testSong = {
+                      id: 'test-' + Date.now(),
+                      title: 'Canción de Prueba',
+                      artist: 'Artista Test',
+                      genre: 'Test',
+                      bpm: 120,
+                      key: 'C',
+                      duration: '3:45',
+                      thumbnail: '♪',
+                      fileUrl: 'http://example.com/test.mp3',
+                      uploadedAt: new Date().toISOString(),
+                      userId: user?.uid || 'test',
+                      fileSize: 1000000,
+                      fileName: 'test.mp3',
+                      status: 'completed' as const
+                    };
+                    setSongs([testSong]);
+                    console.log('Canción de prueba agregada');
+                  }}
+                  className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg flex items-center space-x-2 mx-auto"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Agregar Canción de Prueba</span>
+                </button>
+              </div>
             </div>
           ) : (
             <div className="bg-gray-800 rounded-lg overflow-hidden">
@@ -394,7 +425,9 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody>
-                  {songs.map((song) => (
+                  {songs.map((song) => {
+                    console.log('Rendering song:', song.title, 'ID:', song.id);
+                    return (
                     <tr key={song.id} className="border-b border-gray-700 hover:bg-gray-700/50 cursor-pointer" onClick={() => handleSongClick(song)}>
                       <td className="py-4 px-4">
                         <div className="flex items-center space-x-3">
@@ -426,19 +459,23 @@ export default function Home() {
                         </button>
                       </td>
                       <td className="py-4 px-4">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteSong(song.id!, song.title);
-                          }}
-                          className="p-2 bg-red-500 hover:bg-red-600 text-white rounded-full"
-                          title="Eliminar canción"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteSong(song.id!, song.title);
+                            }}
+                            className="p-2 bg-red-500 hover:bg-red-600 text-white rounded-full transition-colors duration-200 border-2 border-red-400 hover:border-red-300 shadow-lg hover:shadow-xl"
+                            title="Eliminar canción"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                          <span className="text-xs text-gray-400">Eliminar</span>
+                        </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
