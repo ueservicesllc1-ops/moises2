@@ -25,6 +25,8 @@ interface SeparationOptions {
   drums?: boolean;
   bass?: boolean;
   other?: boolean;
+  guitar?: boolean;
+  piano?: boolean;
   hiFiMode: boolean;
 }
 
@@ -48,6 +50,8 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
     drums: false,
     bass: false,
     other: false,
+    guitar: false,
+    piano: false,
     hiFiMode: false
   });
 
@@ -109,35 +113,11 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
     return () => clearInterval(interval);
   }, []);
 
-  // Verificar estado del proxy B2 cada 3 segundos
+  // Verificar estado del proxy B2 (Mock) ahora que S3 es nativo
   useEffect(() => {
-    const checkB2Proxy = async () => {
-      try {
-        // En producción Railway, el B2 proxy podría no existir separado
-        // Solo verificar en local
-        if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-          const response = await fetch('http://localhost:3001/api/health', {
-            method: 'GET',
-            signal: AbortSignal.timeout(2000)
-          });
-          setB2ProxyOnline(response.ok);
-        } else {
-          // En producción, asumir que está online si el backend está online
-          setB2ProxyOnline(pythonServerOnline);
-        }
-      } catch (error) {
-        // Silenciar el error - el proxy B2 no es crítico
-        setB2ProxyOnline(false);
-      }
-    };
-
-    // Verificar inmediatamente
-    checkB2Proxy();
-    
-    // Verificar cada 3 segundos
-    const interval = setInterval(checkB2Proxy, 3000);
-    
-    return () => clearInterval(interval);
+    // Como eliminamos el proxy en puerto 3001 y centralizamos en el Backend,
+    // el estado de la comunicación S3 está atado con la salud de Python (8000).
+    setB2ProxyOnline(pythonServerOnline);
   }, [pythonServerOnline]);
 
   // Detectar si Demucs está trabajando (cuando está procesando)
@@ -207,7 +187,9 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
         vocals: separationOptions.vocals,
         drums: separationOptions.drums,
         bass: separationOptions.bass,
-        other: separationOptions.other
+        other: separationOptions.other,
+        guitar: separationOptions.guitar,
+        piano: separationOptions.piano
       }
     });
 
@@ -231,7 +213,9 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
           vocals: separationOptions.vocals,
           drums: separationOptions.drums,
           bass: separationOptions.bass,
-          other: separationOptions.other
+          other: separationOptions.other,
+          guitar: separationOptions.guitar,
+          piano: separationOptions.piano
         };
         formData.append('separation_options', JSON.stringify(selectedTracks));
         console.log('🎯 Enviando tracks custom:', selectedTracks);
@@ -245,7 +229,9 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
           vocals: separationOptions.vocals,
           drums: separationOptions.drums,
           bass: separationOptions.bass,
-          other: separationOptions.other
+          other: separationOptions.other,
+          guitar: separationOptions.guitar,
+          piano: separationOptions.piano
         } : 'N/A'
       });
 
@@ -601,7 +587,9 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
               { key: 'vocals', label: '🎤 Vocals', description: 'Voces principales' },
               { key: 'drums', label: '🥁 Drums', description: 'Batería y percusión' },
               { key: 'bass', label: '🎸 Bass', description: 'Línea de bajo' },
-              { key: 'other', label: '🎹 Other', description: 'Otros instrumentos' }
+              { key: 'guitar', label: '🎸 Guitar', description: 'Guitarras limpias' },
+              { key: 'piano', label: '🎹 Piano', description: 'Teclados y pianos' },
+              { key: 'other', label: '🔮 Other', description: 'Sintetizadores, pads' }
             ].map(({ key, label, description }) => (
              <button
                key={key}

@@ -196,26 +196,25 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
             print(f"[PROCESS] Procesando tracks CUSTOM: {custom_tracks}")
             requested_tracks = [track for track, enabled in custom_tracks.items() if enabled]
             print(f"[PROCESS] Tracks a separar: {requested_tracks}")
-            
             if len(requested_tracks) == 0:
-                requested_tracks = ["vocals", "drums", "bass", "other"]
+                requested_tracks = ["vocals", "drums", "bass", "other", "guitar", "piano"]
             
-            stems = await audio_processor.separate_with_demucs(task.file_path, update_progress, requested_tracks)
+            stems = await asyncio.to_thread(audio_processor.separate_with_demucs, task.file_path, update_progress, requested_tracks, hi_fi)
         
         elif task.separation_type == "vocals-instrumental":
             print(f"[PROCESS] Procesando modo: vocals-instrumental")
             requested_tracks = ["vocals", "instrumental"]
-            stems = await audio_processor.separate_with_demucs(task.file_path, update_progress, requested_tracks)
+            stems = await asyncio.to_thread(audio_processor.separate_with_demucs, task.file_path, update_progress, requested_tracks, hi_fi)
         
         elif task.separation_type == "vocals-drums-bass-other":
-            print(f"[PROCESS] Procesando modo: vocals-drums-bass-other (4 stems)")
-            requested_tracks = ["vocals", "drums", "bass", "other"]
-            stems = await audio_processor.separate_with_demucs(task.file_path, update_progress, requested_tracks)
+            print(f"[PROCESS] Procesando modo: vocals-drums-bass-other-guitar-piano (6 stems)")
+            requested_tracks = ["vocals", "drums", "bass", "other", "guitar", "piano"]
+            stems = await asyncio.to_thread(audio_processor.separate_with_demucs, task.file_path, update_progress, requested_tracks, hi_fi)
         
         else:
-            print(f"[PROCESS] Procesando modo por defecto: 4 stems")
-            requested_tracks = ["vocals", "drums", "bass", "other"]
-            stems = await audio_processor.separate_with_demucs(task.file_path, update_progress, requested_tracks)
+            print(f"[PROCESS] Procesando modo por defecto: 6 stems")
+            requested_tracks = ["vocals", "drums", "bass", "other", "guitar", "piano"]
+            stems = await asyncio.to_thread(audio_processor.separate_with_demucs, task.file_path, update_progress, requested_tracks, hi_fi)
         
         print(f"\n[PROCESS] Demucs separation completed! Got {len(stems)} stems")
         print(f"   Stems: {list(stems.keys())}")
@@ -360,38 +359,9 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
 async def upload_stems_to_b2(stems: Dict[str, str], task_id: str) -> Dict[str, str]:
     """Upload separated stems to B2 and return URLs"""
     try:
-        import aiohttp
-        import aiofiles
+        from b2_uploader import b2_uploader
         
-        b2_stems = {}
-        
-        for stem_name, stem_path in stems.items():
-            if os.path.exists(stem_path):
-                print(f"Uploading {stem_name} to B2...")
-                
-                # Read file
-                async with aiofiles.open(stem_path, 'rb') as f:
-                    file_data = await f.read()
-                
-                # Create FormData
-                form_data = aiohttp.FormData()
-                form_data.add_field('file', file_data, filename=f"{stem_name}.wav", content_type='audio/wav')
-                form_data.add_field('userId', 'system')
-                form_data.add_field('songId', task_id)
-                form_data.add_field('trackName', stem_name)
-                form_data.add_field('folder', 'stems')
-                
-                # Upload to B2 via proxy
-                async with aiohttp.ClientSession() as session:
-                    async with session.post('http://localhost:3001/api/upload', data=form_data) as response:
-                        if response.status == 200:
-                            result = await response.json()
-                            b2_url = result.get('downloadUrl', '')
-                            b2_stems[stem_name] = b2_url
-                            print(f"SUCCESS: {stem_name} uploaded to B2: {b2_url}")
-                        else:
-                            print(f"ERROR: Failed to upload {stem_name}: {response.status}")
-        
+        b2_stems = await b2_uploader.upload_all_stems_to_b2(stems, "system", task_id)
         return b2_stems
         
     except Exception as e:
@@ -511,11 +481,12 @@ async def serve_audio(path: str):
             )
         
         # If not found locally, try to stream from B2
-        print(f"Audio file not found locally: {local_path}, trying B2...")
+        print(f"Audio file not found locally: {local_path}, trying B2 proxy...")
         try:
-            # Construct B2 URL directly
-            # Format: https://s3.us-east-005.backblazeb2.com/moises2/audio/{path}
-            b2_url = f"https://s3.us-east-005.backblazeb2.com/moises2/audio/{path}"
+            # Construct B2 Native URL
+            b2_bucket = os.getenv("B2_BUCKET_NAME", "Multitrack")
+            # f005 is the Native B2 CDN which allows direct reads
+            b2_url = f"https://f005.backblazeb2.com/file/{b2_bucket}/audio/{path}"
             print(f"Streaming from B2 URL: {b2_url}")
             
             # Stream the file from B2 through backend

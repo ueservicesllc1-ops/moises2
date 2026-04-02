@@ -1138,7 +1138,60 @@ export default function Home() {
     return 0; // Si no se detecta, retornar 0
   };
 
-  // Función para analizar BPM y offset de la canción - REMOVED
+  // Helper para proxyar URLs de audio a través del backend local (evitar CORS y corregir IPs viejas)
+  const getProxyUrl = (url: string | undefined) => {
+    if (!url) return '';
+    
+    // Si ya es una ruta relativa local, dejarla
+    if (url.startsWith('/')) return url;
+    
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    
+    // Si contiene el IP viejo, redirigir al backend local para fallback
+    const oldIp = '104.197.145.173';
+    if (url.includes(oldIp)) {
+      const newUrl = url.replace(`http://${oldIp}:8000`, backendUrl);
+      console.log(`[PROXY] Corrigiendo IP vieja (General): ${url} -> ${newUrl}`);
+      return newUrl;
+    }
+    
+    // Convertir URLs de S3 o Native B2 al Proxy Central en FastAPI (Puerto 8000)
+    // Esto es CRUCIAL para saltar las politicas CORS del bucket que bloquean al navegador
+    const b2Regex = /^https?:\/\/(?:s3\.us-east-005|f005)\.backblazeb2\.com\/(?:file\/)?(?:moises2|Multitrack)\/audio\/(.+)$/i;
+    const match = url.match(b2Regex);
+    if (match && match[1]) {
+      const path = match[1];
+      const proxyUrl = `${backendUrl}/audio/${path}`;
+      console.log(`[PROXY] Redirigiendo URL B2 al Proxy Anti-CORS de FastAPI: ${url} -> ${proxyUrl}`);
+      return proxyUrl;
+    }
+    
+    return url;
+  };
+
+  // ==========================================
+  // SUPER CACHE: Almacena Audio Files en Disco (IndexedDB / Cache API)
+  // ==========================================
+  const getCachedAudioBlobUrl = async (url: string): Promise<string> => {
+    try {
+      const cache = await caches.open('moises-audio-cache');
+      let response = await cache.match(url);
+      if (!response) {
+        console.log(`[AUDIO CACHE MISS] Network Load para ${url}...`);
+        response = await fetch(url);
+        if (response.ok) {
+           await cache.put(url, response.clone());
+        }
+      } else {
+        console.log(`[AUDIO CACHE HIT] Sirviendo ${url} al 100% desde DISCO duro local 🚀!`);
+      }
+      const blob = await response.blob();
+      return URL.createObjectURL(blob);
+    } catch (e) {
+      console.warn('Error usando Cache de Disco Local, cayendo a red', e);
+      return url;
+    }
+  };
 
   const loadAudioFiles = async (song: Song) => {
     if (!song.stems) return
@@ -1182,16 +1235,19 @@ export default function Home() {
 
     try {
       console.log(' Loading song tracks:', song.stems)
-      for (const [trackKey, trackUrl] of Object.entries(song.stems)) {
-        if (trackUrl) {
-          console.log(` Loading audio for ${trackKey}: ${trackUrl}`)
+      for (let [trackKey, originalTrackUrl] of Object.entries(song.stems)) {
+        const cacheKeyUrl = getProxyUrl(originalTrackUrl);
+        if (cacheKeyUrl) {
+          console.log(` Loading audio for ${trackKey}: ${cacheKeyUrl}`)
           
+          // Magia de Disco: Descargar o recuperar del disco local y convertir en Blob Instantáneo
+          const trackUrl = await getCachedAudioBlobUrl(cacheKeyUrl);
           
           // 1. PRIMERO: Buscar en cache localStorage
-          if (waveformCache[trackUrl]) {
+          if (waveformCache[cacheKeyUrl]) {
             console.log(` CACHE HIT para ${trackKey}`)
             newLoadingStates[trackKey] = 'cached'
-            newWaveforms[trackKey] = waveformCache[trackUrl]
+            newWaveforms[trackKey] = waveformCache[cacheKeyUrl]
             
             // Crear elemento audio desde cache
             const audio = new Audio(trackUrl)
@@ -1364,7 +1420,7 @@ export default function Home() {
             
             
             // 3. GUARDAR en cache persistente para próximas veces
-            const newPersistentCache = { ...waveformCache, [trackUrl]: waveformData }
+            const newPersistentCache = { ...waveformCache, [cacheKeyUrl]: waveformData }
             setWaveformCache(newPersistentCache)
             try {
               localStorage.setItem('waveform-cache', JSON.stringify(newPersistentCache))
@@ -1374,7 +1430,7 @@ export default function Home() {
               console.warn('Cache lleno, limpiando cache viejo...')
               localStorage.removeItem('waveform-cache')
               try {
-                localStorage.setItem('waveform-cache', JSON.stringify({ [trackUrl]: waveformData }))
+                localStorage.setItem('waveform-cache', JSON.stringify({ [cacheKeyUrl]: waveformData }))
                 console.log(` GUARDADO en cache (después de limpiar) para ${trackKey}`)
               } catch (e2) {
                 console.error('No se pudo guardar en cache:', e2)

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Audio Processor REAL - Demucs + Procesamiento adicional para 10+ tracks
 """
 
@@ -16,7 +16,7 @@ class AudioProcessor:
     def __init__(self):
         self.models_loaded = False
         
-    async def separate_with_demucs(self, file_path: str, task_callback=None, requested_tracks=None) -> Dict[str, str]:
+    def separate_with_demucs(self, file_path: str, task_callback=None, requested_tracks=None, is_hi_fi: bool = False) -> Dict[str, str]:
         """Separate audio using Demucs (IA REAL)"""
         try:
             # Create output directory
@@ -27,34 +27,78 @@ class AudioProcessor:
             if task_callback:
                 task_callback(20, "Starting Demucs AI separation...")
             
-            # Run Demucs command - using the htdemucs model for best quality
-            cmd = [
-                "python", "-m", "demucs",
-                "--name", "htdemucs",  # Best quality model
-                "--out", str(output_dir),
-                file_path
-            ]
+            # Run Demucs using Python API natively
+            import torch
+            import torchaudio
+            from demucs.pretrained import get_model
+            from demucs.apply import apply_model
             
-            print(f"Running Demucs command: {' '.join(cmd)}")
+            print("Loading Demucs model 'htdemucs_6s'...")
+            model = get_model('htdemucs_6s')
+            model.cpu()
+            model.eval()
             
             # Update progress: Processing with Demucs
             if task_callback:
                 task_callback(40, "Processing with Demucs AI...")
             
-            # Execute in subprocess
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            print(f"Loading audio file: {file_path}")
+            # Use librosa instead of torchaudio.load to bypass torchcodec MP3 decoding issues on Windows
+            import librosa
+            import numpy as np
             
-            stdout, stderr = await process.communicate()
+            audio_data, sr = librosa.load(file_path, sr=None, mono=False)
+            if audio_data.ndim == 1:
+                audio_data = np.expand_dims(audio_data, axis=0)
             
-            if process.returncode != 0:
-                print(f"Demucs error: {stderr.decode()}")
-                raise Exception(f"Demucs error: {stderr.decode()}")
+            wav = torch.tensor(audio_data, dtype=torch.float32)
             
-            print(f"Demucs output: {stdout.decode()}")
+            # Demucs expects specific sample rate and channels
+            from demucs.audio import convert_audio
+            wav = convert_audio(wav, sr, model.samplerate, model.audio_channels)
+            
+            # Normalize
+            ref = wav.mean(0)
+            wav = (wav - ref.mean()) / ref.std()
+            
+            print("Applying Demucs model...")
+            
+            # Configurar Calidad (HiFi vs Standar/Fast)
+            # shifts = evalúa música múltiples veces para cancelar artefactos robóticos en IA
+            shifts_amt = 5 if is_hi_fi else 2
+            overlap_amt = 0.25
+            
+            if is_hi_fi:
+                print(">>> RUNNING IN HI-FI MODE (Max Quality) - Shifts: 5")
+            else:
+                print(">>> RUNNING IN FAST MODE (Standard) - Shifts: 2")
+            
+            # Apply model sin progress=True para evitar el crash de caracteres unicode en la terminal de Windows
+            with torch.no_grad():
+                sources = apply_model(
+                    model, 
+                    wav[None], 
+                    device='cpu', 
+                    shifts=shifts_amt, 
+                    split=True, 
+                    overlap=overlap_amt, 
+                    progress=False
+                )[0]
+                
+            sources = sources * ref.std() + ref.mean()
+            
+            # Save stems
+            model_dir = output_dir / "htdemucs_6s" / Path(file_path).stem
+            model_dir.mkdir(parents=True, exist_ok=True)
+            
+            print("Saving stems...")
+            for stem_idx, stem_name in enumerate(model.sources):
+                stem_path = model_dir / f"{stem_name}.wav"
+                # torchaudio.save is fine but soundfile is requested or preferred by user
+                stem_audio = sources[stem_idx].numpy().T
+                sf.write(str(stem_path), stem_audio, model.samplerate)
+                
+            print("Demucs processing completed successfully!")
             
             # Update progress: Demucs completed
             if task_callback:
@@ -65,7 +109,7 @@ class AudioProcessor:
             file_name = Path(file_path).stem
             
             # Demucs creates a folder with the model name
-            model_dir = output_dir / "htdemucs" / file_name
+            model_dir = output_dir / "htdemucs_6s" / file_name
             
             if model_dir.exists():
                 # Map Demucs output to our expected format
@@ -73,28 +117,31 @@ class AudioProcessor:
                     "vocals.wav": "vocals",
                     "drums.wav": "drums", 
                     "bass.wav": "bass",
-                    "other.wav": "other"
+                    "other.wav": "other",
+                    "guitar.wav": "guitar",
+                    "piano.wav": "piano"
                 }
                 
                 # Si se solicitaron tracks espec├¡ficos, solo procesar esos
                 if requested_tracks:
-                    print(f"≡ƒÄ» Creating only requested tracks: {requested_tracks}")
+                    print(f"Creating only requested tracks: {requested_tracks}")
                     
                     # Para vocals-instrumental, combinar drums + bass + other
                     if "vocals" in requested_tracks and "instrumental" in requested_tracks:
-                        print(f"≡ƒÄñ Modo: Vocals + Instrumental")
+                        print(f"Modo: Vocals + Instrumental")
                         # Vocals
                         vocals_path = model_dir / "vocals.wav"
                         if vocals_path.exists():
                             stems["vocals"] = str(vocals_path)
-                            print(f"Γ£à Found vocals: {vocals_path}")
+                            print(f"Found vocals: {vocals_path}")
                         
-                        # Instrumental = drums + bass + other
+                        # Instrumental = ALL EXCEPT vocals
                         instrumental_tracks = []
-                        for track in ["drums", "bass", "other"]:
-                            track_path = model_dir / f"{track}.wav"
-                            if track_path.exists():
-                                instrumental_tracks.append(track_path)
+                        for track in stem_mapping.values():
+                            if track != "vocals":
+                                track_path = model_dir / f"{track}.wav"
+                                if track_path.exists():
+                                    instrumental_tracks.append(track_path)
                         
                         if instrumental_tracks:
                             # Combinar los tracks instrumentales
@@ -116,21 +163,21 @@ class AudioProcessor:
                             instrumental_path = model_dir.parent / "instrumental.wav"
                             sf.write(str(instrumental_path), combined_audio, sr)
                             stems["instrumental"] = str(instrumental_path)
-                            print(f"Γ£à Created instrumental: {instrumental_path}")
+                            print(f"Created instrumental: {instrumental_path}")
                     
                     else:
                         # ≡ƒöÑ FIX: Procesar tracks individuales solicitados
-                        print(f"≡ƒÄ╡ Modo: Tracks individuales ({len(requested_tracks)} tracks)")
+                        print(f"Modo: Tracks individuales ({len(requested_tracks)} tracks)")
                         for stem_file, stem_name in stem_mapping.items():
                             if stem_name in requested_tracks:
                                 stem_path = model_dir / stem_file
                                 if stem_path.exists():
                                     stems[stem_name] = str(stem_path)
-                                    print(f"Γ£à Found {stem_name}: {stem_path}")
+                                    print(f"Found {stem_name}: {stem_path}")
                                 else:
-                                    print(f"ΓÜá∩╕Å Track {stem_name} no encontrado en: {stem_path}")
+                                    print(f"Track {stem_name} no encontrado en: {stem_path}")
                         
-                        print(f"Γ£à Total stems procesados: {len(stems)}")
+                        print(f"Total stems procesados: {len(stems)}")
                 
                 else:
                     # Si no se especificaron tracks, devolver todos

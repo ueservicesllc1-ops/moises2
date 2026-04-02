@@ -18,9 +18,10 @@ class B2Storage:
     async def download_file(self, file_path: str) -> AsyncGenerator[bytes, None]:
         """Download file from B2 and stream it"""
         try:
-            # Construir URL completa de B2
-            b2_url = f"https://s3.us-east-005.backblazeb2.com/moises2/{file_path}"
-            print(f"📥 Downloading from B2: {b2_url}")
+            # Construir URL completa de B2 con el nuevo bucket y credenciales
+            bucket = "Multitrack"
+            b2_url = f"https://s3.us-east-005.backblazeb2.com/{bucket}/{file_path}"
+            print(f"Downloading from B2: {b2_url}")
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(b2_url) as response:
@@ -28,10 +29,10 @@ class B2Storage:
                         async for chunk in response.content.iter_chunked(8192):
                             yield chunk
                     else:
-                        print(f"❌ Error downloading {file_path}: {response.status}")
+                        print(f"Error downloading {file_path}: {response.status}")
                         raise Exception(f"Failed to download file: {response.status}")
         except Exception as e:
-            print(f"❌ Error in download_file: {e}")
+            print(f"Error in download_file: {e}")
             raise
 
 # Global instance

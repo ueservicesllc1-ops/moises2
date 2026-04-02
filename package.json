@@ -5,16 +5,17 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start -p ${PORT:-3000}",
-    "lint": "next lint",
-    "start:proxy": "cd backend && PATH=/opt/venv/bin:$PATH python3 main.py",
-    "start:full": "concurrently \"npm run start\" \"npm run start:proxy\""
+    "start": "next start",
+    "start:client": "next dev",
+    "start:backend": "cd backend && ..\\.venv\\Scripts\\python.exe main.py",
+    "start:full": "concurrently \"npm run start:client\" \"npm run start:backend\""
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.899.0",
     "@headlessui/react": "1.7.17",
     "@types/react-dom": "18.2.15",
     "autoprefixer": "10.4.16",
+    "aws-sdk": "^2.1524.0",
     "axios": "1.6.2",
     "class-variance-authority": "0.7.0",
     "clsx": "2.0.0",
@@ -26,7 +27,9 @@
     "d3-time": "^3.1.0",
     "d3-time-format": "^4.1.0",
     "d3-zoom": "^3.0.0",
+    "dotenv": "^17.4.0",
     "express": "^5.1.0",
+    "express-fileupload": "^1.4.3",
     "ffprobe-static": "^3.1.0",
     "firebase": "^9.23.0",
     "framer-motion": "10.16.5",
