@@ -108,20 +108,21 @@ class ChordAnalyzer:
             beats_per_measure = time_signature[0]
             print(f"Estimated time signature: {time_signature[0]}/{time_signature[1]}")
             
-            # Extraer características cromáticas con CENS (más robusto ante ruido y cambios de timbre)
-            chroma = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=512)
+            # Extraer características cromáticas con STFT (Máxima compatibilidad)
+            print(f"Extracting features for: {file_path}")
+            chroma = librosa.feature.chroma_stft(y=y, sr=sr, hop_length=1024)
             
             # Configurar dimensiones
             n_frames = chroma.shape[1]
             total_duration = len(y) / sr
-            frame_time = total_duration / n_frames if n_frames > 0 else 0.02
+            frame_time = total_duration / n_frames if n_frames > 0 else 0.05
             
-            # Procesar con ventanas fijas de 1.0 segundo para máxima fluidez
+            # Procesar con ventanas de 1.5 segundos
             chords = []
-            window_duration = 1.0
-            
+            window_duration = 1.5
             num_windows = int(total_duration / window_duration)
-            print(f"Processing {num_windows} windows for chord progression")
+            
+            print(f"Audio loaded: {y.shape}, Chroma: {chroma.shape}, Duration: {total_duration}s")
             
             for window_idx in range(num_windows):
                 start_time = window_idx * window_duration
@@ -134,87 +135,72 @@ class ChordAnalyzer:
                 if start_frame >= n_frames:
                     break
                 
-                # Promediar características cromáticas en la ventana
-                window_chroma = np.mean(chroma[:, start_frame:max(start_frame+1, end_frame)], axis=1)
+                # Promedio de la ventana
+                window_data = chroma[:, start_frame:max(start_frame+1, end_frame)]
+                window_chroma = np.mean(window_data, axis=1)
                 
                 # Normalizar
-                chroma_sum = np.sum(window_chroma)
-                if chroma_sum > 0:
-                    window_chroma = window_chroma / chroma_sum
+                c_sum = np.sum(window_chroma)
+                if c_sum > 0:
+                    window_chroma = window_chroma / c_sum
                 
-                # Detectar acorde para esta ventana - SIN UMBRALES AGRESIVOS
-                chord_result = self._detect_chord_in_frame_v2(window_chroma)
+                # Detección simplificada
+                best_chord_name = "C"
+                best_score = -1.0
                 
-                if chord_result:
-                    chords.append(ChordResult(
-                        chord=chord_result['chord'],
-                        confidence=chord_result['confidence'],
-                        start_time=start_time,
-                        end_time=end_time,
-                        root_note=chord_result['root_note'],
-                        chord_type=chord_result['chord_type']
-                    ))
+                for name, template in self.chord_templates.items():
+                    # Score de coincidencia básica
+                    score = np.dot(window_chroma, template)
+                    if score > best_score:
+                        best_score = score
+                        best_chord_name = name
+                
+                chords.append(ChordResult(
+                    chord=best_chord_name,
+                    confidence=float(max(0.1, min(0.9, best_score))),
+                    start_time=float(start_time),
+                    end_time=float(end_time),
+                    root_note=best_chord_name.replace('m', '').replace('7', ''),
+                    chord_type=self._get_chord_type(best_chord_name)
+                ))
             
-            # Si no hay acordes aún (raro con CENS), al menos crear uno basado en la tonalidad
+            # Si algo falló y no hay acordes, forzar la tonalidad como acorde continuo
             if not chords:
+                print("⚠️ No chords found in loop, applying key fallback")
                 key_info = self.analyze_key(file_path)
+                key_chord = "G" # Default ultra-safe
                 if key_info:
-                    print(f"Fallback to key: {key_info.key} {key_info.mode}")
-                    chords.append(ChordResult(
-                        chord=f"{key_info.key}{'m' if key_info.mode == 'minor' else ''}",
-                        confidence=0.5,
-                        start_time=0,
-                        end_time=total_duration,
-                        root_note=key_info.key,
-                        chord_type=key_info.mode
-                    ))
+                    key_chord = f"{key_info.key}{'m' if key_info.mode == 'minor' else ''}"
+                
+                chords.append(ChordResult(
+                    chord=key_chord,
+                    confidence=0.5,
+                    start_time=0,
+                    end_time=total_duration,
+                    root_note=key_chord.replace('m', ''),
+                    chord_type='minor' if 'm' in key_chord else 'major'
+                ))
 
-            # Filtrar redundancias pero mantener la línea de tiempo
+            # Unir acordes idénticos consecutivos para una lista limpia
             final_chords = []
             if chords:
-                current = chords[0]
+                curr = chords[0]
                 for i in range(1, len(chords)):
-                    if chords[i].chord == current.chord:
-                        # Unir con el anterior si es el mismo acorde
-                        current.end_time = chords[i].end_time
+                    if chords[i].chord == curr.chord:
+                        curr.end_time = chords[i].end_time
                     else:
-                        final_chords.append(current)
-                        current = chords[i]
-                final_chords.append(current)
+                        final_chords.append(curr)
+                        curr = chords[i]
+                final_chords.append(curr)
             
-            print(f"Final chord count: {len(final_chords)}")
+            print(f"✅ Analysis finished: {len(final_chords)} chords found")
             return final_chords
             
         except Exception as e:
-            print(f"Error analyzing chords: {e}")
+            print(f"❌ Critical error in analyze_chords: {e}")
             import traceback
             traceback.print_exc()
             return []
-
-    def _detect_chord_in_frame_v2(self, chroma: np.ndarray) -> Dict:
-        """Versión mejorada de detección de acordes usando correlación con plantillas"""
-        best_chord_name = "C"
-        best_score = -1.0
-        
-        # Probar cada plantilla
-        for name, template in self.chord_templates.items():
-            # Correlación simple pero efectiva
-            score = np.dot(chroma, template)
-            
-            # Penalizar notas que no están en el acorde
-            extra_notes_penalty = np.sum(chroma * (1 - np.array(template))) * 0.2
-            score -= extra_notes_penalty
-            
-            if score > best_score:
-                best_score = score
-                best_chord_name = name
-        
-        return {
-            'chord': best_chord_name,
-            'confidence': max(0.1, min(0.95, best_score)),
-            'root_note': best_chord_name.replace('m', '').replace('7', ''),
-            'chord_type': self._get_chord_type(best_chord_name)
-        }
 
     def _get_chord_type(self, chord_name: str) -> str:
         """Determina el tipo de acorde"""
