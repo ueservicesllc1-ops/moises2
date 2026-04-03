@@ -33,16 +33,22 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
     from demucs.apply import apply_model
     from demucs.audio import convert_audio
     import torchaudio
+    import subprocess
     
     print("[MODAL GPU] Nueva solicitud de extracción recibida!")
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        input_path = os.path.join(tmp_dir, "input_audio.mp3")
-        with open(input_path, "wb") as f:
+        input_mp3 = os.path.join(tmp_dir, "input_audio.mp3")
+        input_wav = os.path.join(tmp_dir, "input_audio.wav")
+        with open(input_mp3, "wb") as f:
             f.write(audio_bytes)
+            
+        print("[MODAL GPU] Convirtiendo audio a WAV de forma segura con ffmpeg...")
+        # Usa subprocess para convertir sin depender de los códecs rotos de torchaudio
+        subprocess.run(["ffmpeg", "-y", "-i", input_mp3, input_wav], capture_output=True, check=True)
         
-        # Cargar audio
-        wav, sr = torchaudio.load(input_path)
+        # Cargar audio desde el WAV limpio
+        wav, sr = torchaudio.load(input_wav)
         
         # Cargar Modelo avanzado (la GPU lo absorbe en 1 segundo a su VRAM)
         print("[MODAL GPU] Cargando modelo htdemucs_6s a Memoria de Vídeo...")
