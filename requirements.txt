@@ -1,22 +1,12 @@
-# Build tools - DEBEN instalarse primero
-setuptools>=70.0.0
-wheel>=0.42.0
-Cython>=3.0.0
-
 # Backend Dependencies
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 
-# Audio Processing - Versiones actualizadas y compatibles
-numpy>=2.0.0
-scipy>=1.15.0
+# Audio Utils (for BPM/Metadata)
+numpy>=1.20.0
 librosa==0.11.0
 soundfile==0.12.1
-pydub==0.25.1
-ffmpeg-python==0.2.0
-demucs==4.0.1
-# pyrubberband==0.3.0  # Comentado: no compatible con Python 3.12
 
 # Utilities
 aiofiles==23.2.1
@@ -26,19 +16,9 @@ pydantic>=2.0.0
 requests>=2.31.0
 yt-dlp>=2024.10.7
 
-# Database
-sqlalchemy==2.0.23
-
-# Auth - Opcional
-# python-jose[cryptography]==3.3.0
-# passlib[bcrypt]==1.7.4
-
-# Environment
-python-dotenv>=1.0.0
-
 # Storage
 aioboto3==12.3.0
+python-dotenv>=1.0.0
 
-# PyTorch + Audio Model Stability
-torch>=2.9.0
-torchaudio>=2.9.0
+# Cloud AI Engine (Essential)
+modal>=1.4.1

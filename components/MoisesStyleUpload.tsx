@@ -432,11 +432,10 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
               
               // Transmutar al proxy igual que hace el Mixer
               let proxyUrl = url;
-              const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
               const b2Regex = /^https?:\/\/(?:s3\.us-east-005|f005)\.backblazeb2\.com\/(?:file\/)?(?:moises2|Multitrack)\/audio\/(.+)$/i;
               const match = url.match(b2Regex);
               if (match && match[1]) {
-                 proxyUrl = `${backendUrl}/audio/${match[1]}`;
+                 proxyUrl = `/backend-audio/${match[1]}`;
               }
               
               // Revisar si ya está en caché

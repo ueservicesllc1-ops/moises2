@@ -191,30 +191,47 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
         # Determinar qué tracks solicitar
         requested_tracks = None
         
-        # Procesar tracks custom (individuales seleccionados)
         if task.separation_type == "custom" and custom_tracks:
-            print(f"[PROCESS] Procesando tracks CUSTOM: {custom_tracks}")
             requested_tracks = [track for track, enabled in custom_tracks.items() if enabled]
-            print(f"[PROCESS] Tracks a separar: {requested_tracks}")
-            if len(requested_tracks) == 0:
-                requested_tracks = ["vocals", "drums", "bass", "other", "guitar", "piano"]
-            
-            stems = await asyncio.to_thread(audio_processor.separate_with_demucs, task.file_path, update_progress, requested_tracks, hi_fi)
-        
         elif task.separation_type == "vocals-instrumental":
-            print(f"[PROCESS] Procesando modo: vocals-instrumental")
             requested_tracks = ["vocals", "instrumental"]
-            stems = await asyncio.to_thread(audio_processor.separate_with_demucs, task.file_path, update_progress, requested_tracks, hi_fi)
-        
         elif task.separation_type == "vocals-drums-bass-other":
-            print(f"[PROCESS] Procesando modo: vocals-drums-bass-other-guitar-piano (6 stems)")
             requested_tracks = ["vocals", "drums", "bass", "other", "guitar", "piano"]
-            stems = await asyncio.to_thread(audio_processor.separate_with_demucs, task.file_path, update_progress, requested_tracks, hi_fi)
-        
         else:
-            print(f"[PROCESS] Procesando modo por defecto: 6 stems")
             requested_tracks = ["vocals", "drums", "bass", "other", "guitar", "piano"]
-            stems = await asyncio.to_thread(audio_processor.separate_with_demucs, task.file_path, update_progress, requested_tracks, hi_fi)
+            
+        if not requested_tracks:
+            requested_tracks = ["vocals", "drums", "bass", "other", "guitar", "piano"]
+            
+        print(f"[MODAL] Tracks a extraer: {requested_tracks}")
+        update_progress(20, "Subiendo audio a Instancias Base de Inteligencia Artificial (Nvidia T4 GPU)...")
+        
+        # 1. Empacar Audio Original
+        with open(task.file_path, "rb") as f:
+            audio_bytes = f.read()
+
+        # 2. Conectar e Invocar el Cerebro en Modal
+        import modal
+        print(f"[MODAL] 🚀 Disparando Cálculos Matriciales Serverless...")
+        update_progress(50, "Cocinando magia sonora con Tarjetas Gráficas de última generación...")
+        
+        remote_gpu_func = modal.Function.lookup("moises-demucs-worker", "separate_audio")
+        # Esto suspende el hilo principal 15-20 segs pero ¡SIN USAR tu procesador! Todo se opera en la Nube
+        stems_bytes = await asyncio.to_thread(remote_gpu_func.remote, audio_bytes, requested_tracks, hi_fi)
+        
+        # 3. Extraer Tracks De Vueltos por internet y escupirlos al Disco para subida a B2
+        print(f"[MODAL] ✨ Extracción terminada en tiempo récord! Serializando audios a disco físico...")
+        update_progress(80, "¡La cirugía fue un éxito! Recibiendo partes diseccionadas desde el Espacio Exterior...")
+        
+        stems = {}
+        target_dir = Path(task.file_path).parent / "demucs_output"
+        target_dir.mkdir(exist_ok=True, parents=True)
+        
+        for key_name, byte_stream in stems_bytes.items():
+            stem_path = target_dir / f"{key_name}.wav"
+            with open(stem_path, "wb") as f_out:
+                f_out.write(byte_stream)
+            stems[key_name] = str(stem_path)
         
         print(f"\n[PROCESS] Demucs separation completed! Got {len(stems)} stems")
         print(f"   Stems: {list(stems.keys())}")
