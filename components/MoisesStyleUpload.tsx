@@ -414,7 +414,49 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
           console.log('[FIRESTORE] Song saved successfully! ID:', firestoreSongId);
 
           setUploadProgress(100);
-          setUploadMessage('¡Separación completada exitosamente!');
+          setUploadMessage('¡Separación completada exitosamente! 💾 Pre-cacheando en Disco...');
+          
+          // ==========================================
+          // GHOST PREFETCH FOR ZERO-LATENCY PLAYBACK
+          // ==========================================
+          try {
+            console.log('[PREFETCH] Iniciando descarga fantasma hacia Memoria Caché...');
+            const cache = await caches.open('moises-audio-cache');
+            
+            // Extraer URLs
+            const stemUrls = Object.values(statusResult.stems || {});
+            
+            // Loop para descargar e inyectar al disco
+            const prefetchPromises = stemUrls.map(async (url: any) => {
+              if (typeof url !== 'string') return;
+              
+              // Transmutar al proxy igual que hace el Mixer
+              let proxyUrl = url;
+              const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+              const b2Regex = /^https?:\/\/(?:s3\.us-east-005|f005)\.backblazeb2\.com\/(?:file\/)?(?:moises2|Multitrack)\/audio\/(.+)$/i;
+              const match = url.match(b2Regex);
+              if (match && match[1]) {
+                 proxyUrl = `${backendUrl}/audio/${match[1]}`;
+              }
+              
+              // Revisar si ya está en caché
+              const cachedResponse = await cache.match(proxyUrl);
+              if (!cachedResponse) {
+                 console.log(`[PREFETCH] 👻 Descargando stem al disco: ${proxyUrl.split('/').pop()}`);
+                 const response = await fetch(proxyUrl);
+                 if (response.ok) {
+                    await cache.put(proxyUrl, response.clone());
+                 }
+              }
+            });
+            
+            // Esperar paciente a que todos bajen antes de abrir el Mixer (Asegura Cero latencia real)
+            await Promise.all(prefetchPromises);
+            console.log('[PREFETCH] ✨ Todos los Stems pre-descargados exitosamente en Caché.');
+            
+          } catch(err) {
+            console.error('[PREFETCH] Error bajando fantasmas (no crítico):', err);
+          }
 
           console.log('[COMPLETE] Setting progress to 100%');
 
