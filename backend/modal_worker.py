@@ -5,6 +5,13 @@ import os
 # Nombramos nuestra "máquina" en la nube
 app = modal.App("moises-demucs-worker")
 
+def download_models():
+    """Descarga los modelos permanentemente en el disco de la nube durante la compilación"""
+    import torch
+    from demucs.pretrained import get_model
+    print("Pre-descargando Demucs Model para evitar tiempos de espera y ahorrar dinero...")
+    get_model('htdemucs_6s')
+
 # 1. Definimos el ADN de nuestro servidor virtual (Software e Inteligencia Artificial)
 # Cuando esto despierte, auto-instalará todo esto en la GPU
 image = (
@@ -17,6 +24,7 @@ image = (
         "soundfile", 
         "numpy"
     )
+    .run_function(download_models)
 )
 
 # 2. Le pedimos formalmente a Modal una tarjeta NVIDIA T4 con un tiempo máximo de 10 min
