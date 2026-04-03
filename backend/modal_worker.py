@@ -68,11 +68,12 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
         ref = wav.mean(0)
         wav = (wav - ref.mean()) / ref.std()
 
-        # Configuración Inteligente (Velocidad Vs Calidad extrema)
-        shifts_amt = 5 if is_hi_fi else 2
+        # Configuración Inteligente (Velocidad Vs Calidad extrema "Audiófilo")
+        shifts_amt = 10 if is_hi_fi else 3
+        overlap_amt = 0.5 if is_hi_fi else 0.25
         
-        print(f"[MODAL GPU] Iniciando disección matemática ⚡ (Shifts: {shifts_amt})")
-        # Procesamiento en la Tarjeta de Video (Lo que a la PC le toma 10min, ella lo hace en 15-20 segundos)
+        print(f"[MODAL GPU] Iniciando disección matemática nivel Estudio ⚡ (Shifts: {shifts_amt}, Overlap: {overlap_amt})")
+        # Procesamiento en la Tarjeta de Video (Lo que a la PC le toma 10min, ella lo hace en 15-30 segundos)
         with torch.no_grad():
             sources = apply_model(
                 model, 
@@ -80,7 +81,7 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
                 device='cuda', 
                 shifts=shifts_amt, 
                 split=True, 
-                overlap=0.25, 
+                overlap=overlap_amt, 
                 progress=True
             )[0]
         
