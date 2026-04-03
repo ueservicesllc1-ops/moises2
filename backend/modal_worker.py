@@ -99,7 +99,7 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
             expected_filename = f"{stem_name}.wav"
             my_stem_name = stem_mapping.get(expected_filename)
             
-            if my_stem_name in requested_tracks or "instrumental" in requested_tracks:
+            if my_stem_name in requested_tracks or (my_stem_name == "vocals" and "vocals" in requested_tracks):
                 stem_audio = sources[idx].cpu().numpy().T
                 
                 buf = io.BytesIO()
