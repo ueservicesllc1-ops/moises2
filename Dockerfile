@@ -14,7 +14,7 @@ RUN npm run build
 # ─── Stage 2: Python venv ──────────────────────────────────────────────────
 # Modal handles all ML (demucs/spleeter) — Railway only needs:
 #   fastapi, librosa (BPM/chords), modal client, yt-dlp, misc utils
-FROM python:3.11-slim-bullseye AS pybuilder
+FROM python:3.9-slim-bullseye AS pybuilder
 
 RUN apt-get update && apt-get install -y \
     build-essential \
