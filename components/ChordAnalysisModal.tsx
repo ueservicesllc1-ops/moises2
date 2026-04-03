@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useState, useRef } from 'react'
-import { X, Upload, Music2, Loader2 } from 'lucide-react'
+import React, { useState, useRef, useEffect } from 'react'
+import { X, Upload, Music2, Loader2, Play, Pause, RotateCcw } from 'lucide-react'
 import AdminModalLabel from './AdminModalLabel'
 
 interface ChordAnalysisModalProps {
@@ -12,16 +12,75 @@ interface ChordAnalysisModalProps {
 
 interface ChordInfo {
   time: number
+  endTime?: number
   chord: string
   confidence: number
 }
 
 const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose, isPremium }) => {
   const [audioFile, setAudioFile] = useState<File | null>(null)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
   const [chords, setChords] = useState<ChordInfo[]>([])
   const [detectedKey, setDetectedKey] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  // Manejar audio y tiempo
+  useEffect(() => {
+    if (audioUrl) {
+      const audio = new Audio(audioUrl)
+      audioRef.current = audio
+      
+      const handleTimeUpdate = () => setCurrentTime(audio.currentTime)
+      const handleLoadedMetadata = () => setDuration(audio.duration)
+      const handleEnded = () => setIsPlaying(false)
+      
+      audio.addEventListener('timeupdate', handleTimeUpdate)
+      audio.addEventListener('loadedmetadata', handleLoadedMetadata)
+      audio.addEventListener('ended', handleEnded)
+      
+      return () => {
+        audio.removeEventListener('timeupdate', handleTimeUpdate)
+        audio.removeEventListener('loadedmetadata', handleLoadedMetadata)
+        audio.removeEventListener('ended', handleEnded)
+        audio.pause()
+        URL.revokeObjectURL(audioUrl)
+      }
+    }
+  }, [audioUrl])
+
+  const togglePlay = () => {
+    if (!audioRef.current) return
+    if (isPlaying) {
+      audioRef.current.pause()
+    } else {
+      audioRef.current.play()
+    }
+    setIsPlaying(!isPlaying)
+  }
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = parseFloat(e.target.value)
+    if (audioRef.current) {
+      audioRef.current.currentTime = time
+      setCurrentTime(time)
+    }
+  }
+
+  const handleChordClick = (time: number) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = time
+      setCurrentTime(time)
+      if (!isPlaying) {
+        audioRef.current.play()
+        setIsPlaying(true)
+      }
+    }
+  }
 
   // Análisis de acordes usando el backend
   const analyzeChords = async (file: File) => {
@@ -66,6 +125,7 @@ const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose
           // Convertir formato del backend al formato del componente
           const detectedChords: ChordInfo[] = (statusData.chords || []).map((c: any) => ({
             time: c.start_time,
+            endTime: c.end_time,
             chord: c.chord,
             confidence: c.confidence
           }))
@@ -97,9 +157,12 @@ const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose
     if (!file) return
 
     setAudioFile(file)
+    setAudioUrl(URL.createObjectURL(file))
     setIsAnalyzing(true)
     setChords([])
     setDetectedKey(null)
+    setIsPlaying(false)
+    setCurrentTime(0)
 
     try {
       console.log('📁 Cargando archivo:', file.name)
@@ -181,6 +244,44 @@ const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose
         {/* Resultados */}
         {!isAnalyzing && (chords.length > 0 || detectedKey) && (
           <div className="space-y-6">
+            
+            {/* Reproductor de Audio */}
+            {audioUrl && (
+              <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 flex items-center space-x-4 shadow-lg">
+                <button
+                  onClick={togglePlay}
+                  className="w-12 h-12 flex-shrink-0 bg-blue-600 hover:bg-blue-500 text-white rounded-full flex items-center justify-center transition-all shadow-lg"
+                >
+                  {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-1" />}
+                </button>
+                
+                <div className="flex-1 flex flex-col space-y-1">
+                  <div className="flex justify-between text-xs text-gray-400 font-mono">
+                    <span>{formatTime(currentTime)}</span>
+                    <span>{formatTime(duration)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max={duration || 0}
+                    step="0.1"
+                    value={currentTime}
+                    onChange={handleSeek}
+                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                  />
+                </div>
+                
+                <button
+                  onClick={() => { if(audioRef.current) audioRef.current.currentTime = 0; setCurrentTime(0); }}
+                  className="p-2 text-gray-400 hover:text-white transition-colors"
+                  title="Reiniciar"
+                >
+                  <RotateCcw className="w-5 h-5" />
+                </button>
+              </div>
+            )}
+
+            {/* Tonalidad Detectada */}
             {/* Tonalidad Detectada */}
             {detectedKey && (
               <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 border-2 border-blue-500/50 rounded-lg p-6 text-center">
@@ -201,25 +302,38 @@ const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose
               <h3 className="text-white font-bold text-lg mb-4">Progresión de Acordes</h3>
               
               {chords.length > 0 ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[400px] overflow-y-auto">
-                  {chords.map((chord, index) => (
-                    <div
-                      key={index}
-                      className="bg-gradient-to-br from-gray-700/50 to-gray-800/50 border border-gray-600 rounded-lg p-3 hover:border-blue-500/50 transition-all cursor-pointer"
-                    >
-                      <div className="flex flex-col items-center">
-                        <span className="text-gray-400 text-xs mb-1">{formatTime(chord.time)}</span>
-                        <span className="text-white font-bold text-xl">{chord.chord}</span>
-                        <div className="w-full bg-gray-900 rounded-full h-1 mt-2">
-                          <div 
-                            className="bg-blue-500 h-1 rounded-full transition-all"
-                            style={{ width: `${chord.confidence * 100}%` }}
-                          />
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                  {chords.map((chord, index) => {
+                    const isActive = currentTime >= chord.time && (index === chords.length - 1 || currentTime < chords[index + 1].time)
+                    
+                    return (
+                      <div
+                        key={index}
+                        onClick={() => handleChordClick(chord.time)}
+                        className={`bg-gradient-to-br border rounded-lg p-3 transition-all cursor-pointer ${
+                          isActive 
+                            ? 'from-blue-600/40 to-blue-900/40 border-blue-400 scale-105 shadow-[0_0_15px_rgba(59,130,246,0.5)] z-10' 
+                            : 'from-gray-700/50 to-gray-800/50 border-gray-600 hover:border-gray-500'
+                        }`}
+                      >
+                        <div className="flex flex-col items-center">
+                          <span className={`text-xs mb-1 ${isActive ? 'text-blue-300 font-bold' : 'text-gray-400'}`}>
+                            {formatTime(chord.time)}
+                          </span>
+                          <span className={`text-xl font-bold ${isActive ? 'text-white' : 'text-gray-200'}`}>
+                            {chord.chord}
+                          </span>
+                          <div className="w-full bg-gray-900 rounded-full h-1 mt-2">
+                            <div 
+                              className={`h-1 rounded-full transition-all ${isActive ? 'bg-blue-300' : 'bg-blue-500/50'}`}
+                              style={{ width: `${chord.confidence * 100}%` }}
+                            />
+                          </div>
+                          <span className="text-gray-500 text-[10px] mt-1">{(chord.confidence * 100).toFixed(0)}%</span>
                         </div>
-                        <span className="text-gray-500 text-xs mt-1">{(chord.confidence * 100).toFixed(0)}%</span>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="py-12 border-2 border-dashed border-gray-700 rounded-lg text-center">
