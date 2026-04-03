@@ -398,14 +398,13 @@ class ChordAnalyzer:
 
     def _filter_by_stability(self, chords: List[ChordResult]) -> List[ChordResult]:
         """Filtra acordes manteniendo solo los más estables - FILTRADO MUY SIMPLE"""
-        if len(chords) <= 5:
+        if len(chords) <= 1:
             return chords
         
-        # Filtro de confianza generoso
-        filtered = [chord for chord in chords if chord.confidence > 0.15]
+        # Casi no filtrar nada para asegurar que el usuario vea la progresión
+        filtered = [chord for chord in chords if chord.confidence > 0.05]
         
-        # Si filtramos demasiado, usar el umbral mínimo
-        if len(filtered) < len(chords) * 0.2:
-            filtered = [chord for chord in chords if chord.confidence > 0.1]
-        
+        if not filtered and chords:
+            return chords[:1] # Al menos uno si existe
+            
         return filtered

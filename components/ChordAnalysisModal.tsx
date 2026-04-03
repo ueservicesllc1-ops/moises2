@@ -302,22 +302,34 @@ const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose
               <h3 className="text-white font-bold text-lg mb-4">Progresión de Acordes</h3>
               
               {chords.length > 0 ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                <div 
+                  id="chords-grid"
+                  className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar p-1"
+                >
                   {chords.map((chord, index) => {
                     const isActive = currentTime >= chord.time && (index === chords.length - 1 || currentTime < chords[index + 1].time)
                     
+                    // Auto-scroll logic in a side effect by tracking isActive changes
                     return (
                       <div
                         key={index}
+                        id={`chord-${index}`}
                         onClick={() => handleChordClick(chord.time)}
-                        className={`bg-gradient-to-br border rounded-lg p-3 transition-all cursor-pointer ${
+                        className={`bg-gradient-to-br border rounded-lg p-3 transition-all duration-300 cursor-pointer ${
                           isActive 
-                            ? 'from-blue-600/40 to-blue-900/40 border-blue-400 scale-105 shadow-[0_0_15px_rgba(59,130,246,0.5)] z-10' 
-                            : 'from-gray-700/50 to-gray-800/50 border-gray-600 hover:border-gray-500'
+                            ? 'from-blue-600/60 to-blue-900/60 border-blue-300 scale-105 shadow-[0_0_25px_rgba(59,130,246,0.6)] z-10' 
+                            : 'from-gray-700/50 to-gray-800/50 border-gray-600 hover:border-gray-500 hover:scale-[1.02]'
                         }`}
+                        ref={(el) => {
+                          if (isActive && el) {
+                            setTimeout(() => {
+                              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }, 50);
+                          }
+                        }}
                       >
                         <div className="flex flex-col items-center">
-                          <span className={`text-xs mb-1 ${isActive ? 'text-blue-300 font-bold' : 'text-gray-400'}`}>
+                          <span className={`text-xs mb-1 ${isActive ? 'text-blue-200 font-bold' : 'text-gray-400'}`}>
                             {formatTime(chord.time)}
                           </span>
                           <span className={`text-xl font-bold ${isActive ? 'text-white' : 'text-gray-200'}`}>
@@ -329,7 +341,6 @@ const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose
                               style={{ width: `${chord.confidence * 100}%` }}
                             />
                           </div>
-                          <span className="text-gray-500 text-[10px] mt-1">{(chord.confidence * 100).toFixed(0)}%</span>
                         </div>
                       </div>
                     )
