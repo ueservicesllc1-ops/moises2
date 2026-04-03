@@ -6,8 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "start:client": "next dev",
-    "start:backend": "cd backend && ..\\.venv\\Scripts\\python.exe main.py",
+    "start:client": "next start",
+    "start:backend": "cd backend && /opt/venv/bin/python main.py",
     "start:full": "concurrently \"npm run start:client\" \"npm run start:backend\""
   },
   "dependencies": {

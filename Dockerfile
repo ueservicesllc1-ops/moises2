@@ -97,11 +97,10 @@ COPY --from=builder /opt/venv /opt/venv
 
 ENV PATH="/opt/venv/bin:$PATH"
 ENV NODE_ENV=production
-ENV PORT=3000
 
 # Create directories
 RUN mkdir -p uploads temp_conversion temp_analysis
 
-EXPOSE 3000 8000
+EXPOSE 3000
 
-CMD npm run start:full
+CMD concurrently "next start -p ${PORT:-3000}" "cd backend && /opt/venv/bin/python main.py"
