@@ -47,8 +47,13 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
         # Usa subprocess para convertir sin depender de los códecs rotos de torchaudio
         subprocess.run(["ffmpeg", "-y", "-i", input_mp3, input_wav], capture_output=True, check=True)
         
-        # Cargar audio desde el WAV limpio
-        wav, sr = torchaudio.load(input_wav)
+        print("[MODAL GPU] Cargando bytes usando soundfile (anulando torchaudio)...")
+        # sf.read devuelve (frames, channels), asi que necesitamos transponerlo a (channels, frames)
+        wav_numpy, sr = sf.read(input_wav, dtype='float32')
+        if len(wav_numpy.shape) == 1:
+            wav_numpy = wav_numpy.reshape(-1, 1)
+            
+        wav = torch.from_numpy(wav_numpy).transpose(0, 1)
         
         # Cargar Modelo avanzado (la GPU lo absorbe en 1 segundo a su VRAM)
         print("[MODAL GPU] Cargando modelo htdemucs_6s a Memoria de Vídeo...")
