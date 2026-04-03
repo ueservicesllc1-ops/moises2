@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Image as ImageIcon, Users, Crown } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { db } from '@/lib/firebase'
 import { collection, getDocs, doc, updateDoc, query, orderBy } from 'firebase/firestore'
 import { getUserSongs } from '@/lib/firestore'
@@ -70,8 +71,13 @@ export default function AdminPage() {
       }
       
       setUsers(usersData)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error cargando usuarios:', error)
+      if (error.code === 'permission-denied') {
+        toast.error("🔒 Error de Permisos: Ajusta las 'Rules' en tu Consola de Firebase para desarrollo.")
+      } else {
+        toast.error("Error al cargar la lista de usuarios.")
+      }
     } finally {
       setLoading(false)
     }
