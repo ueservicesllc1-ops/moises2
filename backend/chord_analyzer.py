@@ -108,42 +108,42 @@ class ChordAnalyzer:
             beats_per_measure = time_signature[0]
             print(f"Estimated time signature: {time_signature[0]}/{time_signature[1]}")
             
-            # Extraer características cromáticas con CQT (mejor resolución musical)
-            chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=512)
+            # Extraer características cromáticas con CENS (más robusto ante ruido y cambios de timbre)
+            chroma = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=512)
             
-            # Configurar ventanas de tiempo
-            hop_length = 512
-            frame_time = hop_length / sr
-            
-            # Procesar con ventanas fijas de 1.5 segundos (más detalle)
-            chords = []
-            window_duration = 1.5
-            
-            # Dividir la canción en ventanas
+            # Configurar dimensiones
+            n_frames = chroma.shape[1]
             total_duration = len(y) / sr
-            num_windows = int(total_duration / window_duration) + 1
+            frame_time = total_duration / n_frames if n_frames > 0 else 0.02
             
-            print(f"Processing {num_windows} windows of {window_duration}s each with CQT")
+            # Procesar con ventanas fijas de 1.0 segundo para máxima fluidez
+            chords = []
+            window_duration = 1.0
+            
+            num_windows = int(total_duration / window_duration)
+            print(f"Processing {num_windows} windows for chord progression")
             
             for window_idx in range(num_windows):
                 start_time = window_idx * window_duration
-                end_time = min((window_idx + 1) * window_duration, total_duration)
+                end_time = (window_idx + 1) * window_duration
                 
                 # Convertir tiempo a frames
                 start_frame = int(start_time / frame_time)
                 end_frame = int(end_time / frame_time)
                 
-                if start_frame >= chroma.shape[1]:
+                if start_frame >= n_frames:
                     break
                 
                 # Promediar características cromáticas en la ventana
-                window_chroma = np.mean(chroma[:, start_frame:end_frame], axis=1)
+                window_chroma = np.mean(chroma[:, start_frame:max(start_frame+1, end_frame)], axis=1)
                 
                 # Normalizar
-                window_chroma = window_chroma / (np.sum(window_chroma) + 1e-8)
+                chroma_sum = np.sum(window_chroma)
+                if chroma_sum > 0:
+                    window_chroma = window_chroma / chroma_sum
                 
-                # Detectar acorde para esta ventana
-                chord_result = self._detect_chord_in_frame(window_chroma)
+                # Detectar acorde para esta ventana - SIN UMBRALES AGRESIVOS
+                chord_result = self._detect_chord_in_frame_v2(window_chroma)
                 
                 if chord_result:
                     chords.append(ChordResult(
@@ -154,71 +154,67 @@ class ChordAnalyzer:
                         root_note=chord_result['root_note'],
                         chord_type=chord_result['chord_type']
                     ))
-                    print(f"Chord detected: {chord_result['chord']} at {start_time:.1f}s (conf: {chord_result['confidence']:.2f})")
             
-            # Aplicar filtrado armónico inteligente
-            chords = self._apply_harmonic_filtering(chords, tempo)
+            # Si no hay acordes aún (raro con CENS), al menos crear uno basado en la tonalidad
+            if not chords:
+                key_info = self.analyze_key(file_path)
+                if key_info:
+                    print(f"Fallback to key: {key_info.key} {key_info.mode}")
+                    chords.append(ChordResult(
+                        chord=f"{key_info.key}{'m' if key_info.mode == 'minor' else ''}",
+                        confidence=0.5,
+                        start_time=0,
+                        end_time=total_duration,
+                        root_note=key_info.key,
+                        chord_type=key_info.mode
+                    ))
+
+            # Filtrar redundancias pero mantener la línea de tiempo
+            final_chords = []
+            if chords:
+                current = chords[0]
+                for i in range(1, len(chords)):
+                    if chords[i].chord == current.chord:
+                        # Unir con el anterior si es el mismo acorde
+                        current.end_time = chords[i].end_time
+                    else:
+                        final_chords.append(current)
+                        current = chords[i]
+                final_chords.append(current)
             
-            print(f"Detected {len(chords)} chords:")
-            for i, chord in enumerate(chords):
-                print(f"  {i+1}. {chord.chord} at {float(chord.start_time):.1f}s (conf: {float(chord.confidence):.2f})")
-            
-            return chords
+            print(f"Final chord count: {len(final_chords)}")
+            return final_chords
             
         except Exception as e:
             print(f"Error analyzing chords: {e}")
+            import traceback
+            traceback.print_exc()
             return []
 
-    def _detect_chord_in_frame(self, chroma_vector: np.ndarray) -> Optional[Dict]:
-        """Detecta el acorde en un frame de características cromáticas - ALGORITMO SIMPLIFICADO"""
+    def _detect_chord_in_frame_v2(self, chroma: np.ndarray) -> Dict:
+        """Versión mejorada de detección de acordes usando correlación con plantillas"""
+        best_chord_name = "C"
+        best_score = -1.0
         
-        # Normalizar el vector cromático
-        chroma_normalized = chroma_vector / (np.sum(chroma_vector) + 1e-8)
-        
-        # Encontrar las 3 notas más fuertes
-        top_indices = np.argsort(chroma_normalized)[-3:]
-        top_values = chroma_normalized[top_indices]
-        
-        # Solo procesar si hay al menos una nota con energía significativa
-        if np.max(chroma_normalized) < 0.1:
-            return None
-        
-        best_chord = None
-        best_score = 0
-        
-        # Probar solo acordes básicos (mayores y menores)
-        basic_chords = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B',
-                       'Cm', 'C#m', 'Dm', 'D#m', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'Am', 'A#m', 'Bm']
-        
-        for chord_name in basic_chords:
-            if chord_name not in self.chord_templates:
-                continue
-                
-            template = np.array(self.chord_templates[chord_name])
+        # Probar cada plantilla
+        for name, template in self.chord_templates.items():
+            # Correlación simple pero efectiva
+            score = np.dot(chroma, template)
             
-            # Método SIMPLE: producto punto normalizado
-            score = np.dot(chroma_normalized, template)
-            
-            # Bonus si las notas principales del acorde están presentes
-            chord_indices = np.where(template > 0)[0]
-            if len(chord_indices) > 0:
-                chord_strength = np.sum(chroma_normalized[chord_indices])
-                score += chord_strength * 0.5
+            # Penalizar notas que no están en el acorde
+            extra_notes_penalty = np.sum(chroma * (1 - np.array(template))) * 0.2
+            score -= extra_notes_penalty
             
             if score > best_score:
                 best_score = score
-                best_chord = {
-                    'chord': chord_name,
-                    'confidence': min(1.0, score),
-                    'root_note': chord_name.rstrip('m'),
-                    'chord_type': self._get_chord_type(chord_name)
-                }
+                best_chord_name = name
         
-        # Umbral más bajo para detectar más acordes
-        if best_score > 0.2:
-            return best_chord
-        
-        return None
+        return {
+            'chord': best_chord_name,
+            'confidence': max(0.1, min(0.95, best_score)),
+            'root_note': best_chord_name.replace('m', '').replace('7', ''),
+            'chord_type': self._get_chord_type(best_chord_name)
+        }
 
     def _get_chord_type(self, chord_name: str) -> str:
         """Determina el tipo de acorde"""
