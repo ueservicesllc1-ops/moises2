@@ -588,17 +588,18 @@ async def analyze_chords(
         # Generate unique task ID
         task_id = str(uuid.uuid4())
         
-        # Save uploaded file
+        # Save uploaded file with original extension
+        ext = Path(file.filename or "audio.wav").suffix
         upload_dir = Path("uploads") / task_id
         upload_dir.mkdir(parents=True, exist_ok=True)
-        file_path = upload_dir / "audio.wav"
+        file_path = upload_dir / f"audio{ext}"
         
         if file and file.filename:
             # Upload file provided
             with open(file_path, "wb") as buffer:
                 content = await file.read()
                 buffer.write(content)
-            print(f"Saved uploaded file for chord analysis: {file_path}")
+            print(f"✅ Saved uploaded file for chord analysis: {file_path}")
         else:
             # No file provided, this endpoint now expects URL in request body
             return {"error": "No file provided. Use /api/analyze-chords-url endpoint for URL analysis."}

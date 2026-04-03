@@ -179,7 +179,7 @@ const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose
         )}
 
         {/* Resultados */}
-        {!isAnalyzing && chords.length > 0 && (
+        {!isAnalyzing && (chords.length > 0 || detectedKey) && (
           <div className="space-y-6">
             {/* Tonalidad Detectada */}
             {detectedKey && (
@@ -199,26 +199,33 @@ const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose
             {/* Lista de Acordes */}
             <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6">
               <h3 className="text-white font-bold text-lg mb-4">Progresión de Acordes</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[400px] overflow-y-auto">
-                {chords.map((chord, index) => (
-                  <div
-                    key={index}
-                    className="bg-gradient-to-br from-gray-700/50 to-gray-800/50 border border-gray-600 rounded-lg p-3 hover:border-blue-500/50 transition-all cursor-pointer"
-                  >
-                    <div className="flex flex-col items-center">
-                      <span className="text-gray-400 text-xs mb-1">{formatTime(chord.time)}</span>
-                      <span className="text-white font-bold text-xl">{chord.chord}</span>
-                      <div className="w-full bg-gray-900 rounded-full h-1 mt-2">
-                        <div 
-                          className="bg-blue-500 h-1 rounded-full transition-all"
-                          style={{ width: `${chord.confidence * 100}%` }}
-                        />
+              
+              {chords.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[400px] overflow-y-auto">
+                  {chords.map((chord, index) => (
+                    <div
+                      key={index}
+                      className="bg-gradient-to-br from-gray-700/50 to-gray-800/50 border border-gray-600 rounded-lg p-3 hover:border-blue-500/50 transition-all cursor-pointer"
+                    >
+                      <div className="flex flex-col items-center">
+                        <span className="text-gray-400 text-xs mb-1">{formatTime(chord.time)}</span>
+                        <span className="text-white font-bold text-xl">{chord.chord}</span>
+                        <div className="w-full bg-gray-900 rounded-full h-1 mt-2">
+                          <div 
+                            className="bg-blue-500 h-1 rounded-full transition-all"
+                            style={{ width: `${chord.confidence * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-gray-500 text-xs mt-1">{(chord.confidence * 100).toFixed(0)}%</span>
                       </div>
-                      <span className="text-gray-500 text-xs mt-1">{(chord.confidence * 100).toFixed(0)}%</span>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-12 border-2 border-dashed border-gray-700 rounded-lg text-center">
+                  <p className="text-gray-500 italic">No se detectaron cambios de acordes claros en esta pieza.</p>
+                </div>
+              )}
             </div>
 
             {/* Botón para analizar otro archivo */}
