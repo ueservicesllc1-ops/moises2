@@ -215,7 +215,7 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
         print(f"[MODAL] 🚀 Disparando Cálculos Matriciales Serverless...")
         update_progress(50, "Cocinando magia sonora con Tarjetas Gráficas de última generación...")
         
-        remote_gpu_func = modal.Function.lookup("moises-demucs-worker", "separate_audio")
+        remote_gpu_func = modal.Function.from_name("moises-demucs-worker", "separate_audio")
         # Esto suspende el hilo principal 15-20 segs pero ¡SIN USAR tu procesador! Todo se opera en la Nube
         stems_bytes = await asyncio.to_thread(remote_gpu_func.remote, audio_bytes, requested_tracks, hi_fi)
         
