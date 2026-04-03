@@ -76,12 +76,14 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
         ref = wav.mean(0)
         wav = (wav - ref.mean()) / ref.std()
 
-        # Configuración Inteligente (Velocidad Vs Calidad extrema "Audiófilo")
-        shifts_amt = 10 if is_hi_fi else 3
-        overlap_amt = 0.5 if is_hi_fi else 0.25
+        # Configuración Inteligente y Rentabilidad ($)
+        # Nivel PRO: 6 pasadas. Mantiene de maravilla los márgenes de ganancia (aprox 1 minuto de CPU ~ 1 centavo).
+        # Nivel Free: 2 pasadas (15 segs ~ 1/3 de centavo).
+        shifts_amt = 6 if is_hi_fi else 2
+        overlap_amt = 0.25
         
-        print(f"[MODAL GPU] Iniciando disección matemática nivel Estudio ⚡ (Shifts: {shifts_amt}, Overlap: {overlap_amt})")
-        # Procesamiento en la Tarjeta de Video (Lo que a la PC le toma 10min, ella lo hace en 15-30 segundos)
+        print(f"[MODAL GPU] Iniciando disección matemática ⚡ (Shifts: {shifts_amt}, Overlap: {overlap_amt})")
+        # Procesamiento en la Tarjeta de Video 
         with torch.no_grad():
             sources = apply_model(
                 model, 
