@@ -39,7 +39,7 @@ import BpmDetectorModal from '@/components/BpmDetectorModal'
 import ChordAnalysisModal from '@/components/ChordAnalysisModal'
 import YoutubeExtractModal from '@/components/YoutubeExtractModal'
 import HeroPopup from '@/components/HeroPopup'
-import AdminModalLabel from '@/components/AdminModalLabel'
+
 // import ChordAnalyzer from '@/components/ChordAnalyzer'
 import { getUserSongs, subscribeToUserSongs, deleteSong, Song } from '@/lib/firestore'
 // import useAudioCleanup from '@/hooks/useAudioCleanup'
@@ -1825,7 +1825,7 @@ export default function Home() {
       {/* Song Modal */}
       {showSongModal && selectedSong && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <AdminModalLabel modalName="SongModal (Main Mixer)" />
+
           <div className="bg-gray-800 w-[90vw] h-[90vh] mx-4 flex flex-col border border-white border-opacity-20">
             {/* Header - 10% de la pantalla */}
             <div className="bg-black h-[10vh] flex items-center justify-between px-6">

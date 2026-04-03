@@ -4,7 +4,7 @@
 
 import React, { useState } from 'react';
 import { X, ArrowUpDown, Mic, Guitar, Music, Drum, Lock, Zap } from 'lucide-react';
-import AdminModalLabel from './AdminModalLabel';
+
 
 interface AudioSeparationModalProps {
   isOpen: boolean;
@@ -75,7 +75,7 @@ const AudioSeparationModal: React.FC<AudioSeparationModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <AdminModalLabel modalName="AudioSeparationModal" />
+
       <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <div>

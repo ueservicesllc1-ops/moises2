@@ -834,8 +834,8 @@ async def analyze_bpm(file: UploadFile = File(...)):
             buffer.write(content)
         
         try:
-            # Cargar audio con librosa
-            y, sr = librosa.load(str(temp_file))
+            # Cargar audio con librosa (asegurando mono para análisis)
+            y, sr = librosa.load(str(temp_file), mono=True)
             
             # Detectar tempo y beats
             tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, units='time')
@@ -1022,9 +1022,64 @@ def detect_bpm_and_duration(audio_path: str):
     
     print(f"BPM después del redondeo: {original_tempo} -> {tempo}")
     print(f"BPM final que se devuelve: {tempo}")
-    
-    duration = librosa.get_duration(y=y, sr=sr)
-    return int(tempo), round(float(duration), 2)
+    return tempo, duration
+
+@app.post("/api/analyze-key")
+async def analyze_key(file: UploadFile = File(...)):
+    """
+    Analiza la tonalidad (key) de un archivo de audio usando Chroma CQT.
+    """
+    try:
+        temp_dir = Path("temp_analysis")
+        temp_dir.mkdir(exist_ok=True)
+        temp_file = temp_dir / f"key_{uuid.uuid4()}_{file.filename}"
+        
+        with open(temp_file, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+            
+        try:
+            # Cargar audio (mono para análisis de pitch)
+            y, sr = librosa.load(str(temp_file), mono=True)
+            
+            # Extraer Chroma CQT
+            chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+            chroma_mean = np.mean(chroma, axis=1)
+            
+            # Definir plantillas de acordes mayores y menores
+            maj_template = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+            min_template = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+            
+            notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+            
+            best_key = ""
+            best_score = -1
+            
+            for i in range(12):
+                # Rotamos la plantilla para cada nota
+                shifted_maj = np.roll(maj_template, i)
+                shifted_min = np.roll(min_template, i)
+                
+                # Correlación simple
+                score_maj = np.correlate(chroma_mean, shifted_maj)
+                score_min = np.correlate(chroma_mean, shifted_min)
+                
+                if score_maj > best_score:
+                    best_score = score_maj
+                    best_key = f"{notes[i]}"
+                if score_min > best_score:
+                    best_score = score_min
+                    best_key = f"{notes[i]} m"
+            
+            return {"key": best_key}
+            
+        finally:
+            if temp_file.exists():
+                temp_file.unlink()
+                
+    except Exception as e:
+        print(f"Error analyzing Key: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/analyze-audio")
 async def analyze_audio(file: UploadFile = File(...)):

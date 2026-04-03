@@ -11,7 +11,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { saveSong, getTodayUserSongsCount } from '../lib/firestore';
 import { getBackendUrl } from '../lib/config';
-import AdminModalLabel from './AdminModalLabel';
+;
 import SuccessWavePopup from './SuccessWavePopup';
 
 interface MoisesStyleUploadProps {
@@ -534,7 +534,7 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
 
   return (
     <div className="max-w-lg mx-auto p-4 bg-gray-900 shadow-lg">
-      <AdminModalLabel modalName="MoisesStyleUpload" />
+
       
       {/* Status Indicators */}
       <div className="flex items-center justify-start space-x-2 mb-3">
