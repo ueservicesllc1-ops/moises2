@@ -9,7 +9,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { saveSong } from '../lib/firestore';
+import { saveSong, getTodayUserSongsCount } from '../lib/firestore';
 import { getBackendUrl } from '../lib/config';
 import AdminModalLabel from './AdminModalLabel';
 import SuccessWavePopup from './SuccessWavePopup';
@@ -32,6 +32,8 @@ interface SeparationOptions {
 
 const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete, preloadedFile }) => {
   const { user } = useAuth();
+  // TODO: Leer esto desde firestore userData.isPremium en el futuro. Por ahora quemado en el superusuario:
+  const isPremium = user?.email === 'ueservicesllc1@gmail.com';
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadMessage, setUploadMessage] = useState('');
@@ -176,6 +178,19 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
       return;
     }
 
+    if (!isPremium) {
+      try {
+        const todayCount = await getTodayUserSongsCount(user.uid);
+        if (todayCount >= 3) {
+          alert('Has alcanzado el límite de 3 canciones diarias para cuentas gratuitas. ¡Vuelve mañana o adquiere PRO!');
+          setUploadMessage('❌ Límite diario alcanzado (3/3)');
+          return;
+        }
+      } catch (err) {
+        console.error('Error checando limite diario', err);
+      }
+    }
+
     console.log('🚀 Iniciando upload:', {
       fileName: uploadedFile.name,
       fileSize: uploadedFile.size,
@@ -292,6 +307,11 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
   };
 
   const handleOptionChange = (option: keyof SeparationOptions) => {
+    if (!isPremium) {
+      alert("⭐️ Esta característica requiere una cuenta PRO.");
+      return;
+    }
+
     // Si están activando un track individual (vocals, drums, bass, other)
     if (option === 'vocals' || option === 'drums' || option === 'bass' || option === 'other') {
       setSeparationOptions(prev => {
@@ -635,8 +655,9 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
              <button
                key={key}
                onClick={() => handleOptionChange(key as keyof SeparationOptions)}
-                disabled={isUploading}
+                 disabled={isUploading || !isPremium}
                className={`p-2 text-sm border transition-all duration-300 text-left relative shadow-lg overflow-hidden bg-black ${
+                 !isPremium ? 'opacity-60 cursor-not-allowed border-gray-700 bg-gray-900' :
                  separationOptions[key as keyof SeparationOptions]
                    ? 'border-blue-400/50 bg-gradient-to-b from-blue-500/20 via-blue-400/10 to-transparent text-white hover:from-blue-500/25 hover:via-blue-400/15'
                    : 'border-white/20 bg-gradient-to-b from-white/10 via-white/5 to-transparent text-white hover:from-white/15 hover:via-white/8'
@@ -648,7 +669,10 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
                    : 'bg-gray-500'
                }`}></div>
                <div>
-                 <div className="font-medium text-sm">{label}</div>
+                 <div className="font-medium text-sm flex items-center justify-between">
+                   {label}
+                   {!isPremium && <span className="text-[10px] text-yellow-500 font-bold ml-1 border border-yellow-500 rounded px-1">PRO</span>}
+                 </div>
                  <div className="text-xs opacity-75">{description}</div>
                </div>
              </button>
@@ -660,8 +684,9 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
         <div>
            <button
              onClick={() => handleOptionChange('hiFiMode')}
-                disabled={isUploading}
+                disabled={isUploading || !isPremium}
              className={`w-full p-2 text-sm border transition-all duration-300 text-left relative shadow-lg overflow-hidden bg-black ${
+               !isPremium ? 'opacity-60 cursor-not-allowed border-gray-700 bg-gray-900' :
                separationOptions.hiFiMode
                  ? 'border-white/30 bg-gradient-to-b from-white/20 via-white/10 to-transparent text-white hover:from-white/25 hover:via-white/15'
                  : 'border-white/20 bg-gradient-to-b from-white/10 via-white/5 to-transparent text-white hover:from-white/15 hover:via-white/8'
@@ -670,9 +695,14 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
              <div className={`w-4 h-2 rounded transition-colors absolute top-2 right-2 ${
                separationOptions.hiFiMode ? 'bg-blue-500 animate-pulse' : 'bg-gray-500'
              }`}></div>
-             <div>
-               <div className="font-medium text-sm">🎚️ Modo Hi-Fi</div>
-               <div className="text-xs opacity-75">Calidad superior (procesamiento más lento)</div>
+             <div className="flex items-center justify-between">
+               <div>
+                 <div className="font-medium text-sm flex items-center">
+                   🎚️ Modo Hi-Fi
+                   {!isPremium && <span className="text-[10px] text-yellow-500 font-bold ml-2 border border-yellow-500 rounded px-1">PRO</span>}
+                 </div>
+                 <div className="text-xs opacity-75">Calidad superior nivel audiófilo</div>
+               </div>
              </div>
            </button>
         </div>

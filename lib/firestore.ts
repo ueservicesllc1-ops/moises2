@@ -130,6 +130,34 @@ export async function getUserSongs(userId: string): Promise<Song[]> {
   }
 }
 
+// Obtener canciones del usuario creadas hoy
+export async function getTodayUserSongsCount(userId: string): Promise<number> {
+  try {
+    const q = query(
+      collection(db, 'songs'),
+      where('userId', '==', userId)
+    )
+    const querySnapshot = await getDocs(q)
+    let todayCount = 0
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    
+    querySnapshot.forEach((doc) => {
+      const data = doc.data()
+      if (data.uploadedAt) {
+        const songDate = new Date(data.uploadedAt)
+        if (songDate >= today) {
+          todayCount++
+        }
+      }
+    })
+    return todayCount
+  } catch (error) {
+    console.error('Error counting today user songs:', error)
+    return 0
+  }
+}
+
 // Actualizar estado de canción
 export async function updateSongStatus(songId: string, status: Song['status']): Promise<void> {
   try {
