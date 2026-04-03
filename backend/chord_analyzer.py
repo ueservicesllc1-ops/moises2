@@ -108,22 +108,22 @@ class ChordAnalyzer:
             beats_per_measure = time_signature[0]
             print(f"Estimated time signature: {time_signature[0]}/{time_signature[1]}")
             
-            # Extraer características cromáticas
-            chroma = librosa.feature.chroma_stft(y=y, sr=sr, hop_length=1024)
+            # Extraer características cromáticas con CQT (mejor resolución musical)
+            chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=512)
             
             # Configurar ventanas de tiempo
-            hop_length = 1024
+            hop_length = 512
             frame_time = hop_length / sr
             
-            # Procesar con ventanas fijas de 2 segundos - ALGORITMO SIMPLIFICADO
+            # Procesar con ventanas fijas de 1.5 segundos (más detalle)
             chords = []
-            window_duration = 2.0  # Ventanas fijas de 2 segundos
+            window_duration = 1.5
             
-            # Dividir la canción en ventanas de 2 segundos
+            # Dividir la canción en ventanas
             total_duration = len(y) / sr
             num_windows = int(total_duration / window_duration) + 1
             
-            print(f"Processing {num_windows} windows of {window_duration}s each")
+            print(f"Processing {num_windows} windows of {window_duration}s each with CQT")
             
             for window_idx in range(num_windows):
                 start_time = window_idx * window_duration
@@ -214,8 +214,8 @@ class ChordAnalyzer:
                     'chord_type': self._get_chord_type(chord_name)
                 }
         
-        # Umbral más alto pero más realista
-        if best_score > 0.3:
+        # Umbral más bajo para detectar más acordes
+        if best_score > 0.2:
             return best_chord
         
         return None
@@ -401,11 +401,11 @@ class ChordAnalyzer:
         if len(chords) <= 5:
             return chords
         
-        # Solo filtrar acordes con confianza muy baja
-        filtered = [chord for chord in chords if chord.confidence > 0.3]
+        # Filtro de confianza generoso
+        filtered = [chord for chord in chords if chord.confidence > 0.15]
         
-        # Si filtramos demasiados, usar umbral más bajo
-        if len(filtered) < len(chords) * 0.3:
-            filtered = [chord for chord in chords if chord.confidence > 0.2]
+        # Si filtramos demasiado, usar el umbral mínimo
+        if len(filtered) < len(chords) * 0.2:
+            filtered = [chord for chord in chords if chord.confidence > 0.1]
         
         return filtered
