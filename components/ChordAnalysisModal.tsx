@@ -7,6 +7,7 @@ import AdminModalLabel from './AdminModalLabel'
 interface ChordAnalysisModalProps {
   isOpen: boolean
   onClose: () => void
+  isPremium: boolean
 }
 
 interface ChordInfo {
@@ -15,7 +16,7 @@ interface ChordInfo {
   confidence: number
 }
 
-const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose }) => {
+const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose, isPremium }) => {
   const [audioFile, setAudioFile] = useState<File | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [chords, setChords] = useState<ChordInfo[]>([])
@@ -24,6 +25,9 @@ const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose
 
   // Análisis de acordes usando el backend
   const analyzeChords = async (file: File) => {
+    if (!isPremium) {
+      throw new Error("PRO Feature: Chord analysis requires a PRO account.")
+    }
     console.log('🎸 Enviando al backend para análisis de acordes...')
     
     try {

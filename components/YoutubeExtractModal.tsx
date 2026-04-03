@@ -8,12 +8,14 @@ interface YoutubeExtractModalProps {
   isOpen: boolean
   onClose: () => void
   onSeparateTrack?: (file: File) => void
+  isPremium: boolean
 }
 
 const YoutubeExtractModal: React.FC<YoutubeExtractModalProps> = ({ 
   isOpen, 
   onClose,
-  onSeparateTrack
+  onSeparateTrack,
+  isPremium
 }) => {
   const [youtubeUrl, setYoutubeUrl] = useState('')
   const [isExtracting, setIsExtracting] = useState(false)
@@ -36,6 +38,11 @@ const YoutubeExtractModal: React.FC<YoutubeExtractModalProps> = ({
 
     if (!isValidYoutubeUrl(youtubeUrl)) {
       setError('URL de YouTube inválida')
+      return
+    }
+
+    if (!isPremium) {
+      setError('⭐️ La extracción de audio por YouTube es exclusiva para PRO Bro.')
       return
     }
 

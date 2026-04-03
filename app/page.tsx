@@ -46,6 +46,7 @@ import { getUserSongs, subscribeToUserSongs, deleteSong, Song } from '@/lib/fire
 
 export default function Home() {
   const { user, loading, logout } = useAuth()
+  const isPremium = user?.email === 'ueservicesllc1@gmail.com';
   const router = useRouter()
   
   // Component render
@@ -2531,6 +2532,7 @@ export default function Home() {
         <ChordAnalysisModal
           isOpen={showChordAnalysisModal}
           onClose={closeChordAnalysisModal}
+          isPremium={isPremium}
         />
       )}
 
@@ -2539,6 +2541,7 @@ export default function Home() {
         <YoutubeExtractModal
           isOpen={showYoutubeExtractModal}
           onClose={closeYoutubeExtractModal}
+          isPremium={isPremium}
           onSeparateTrack={(file) => {
             setPreloadedAudioFile(file)
             setShowMoisesStyleModal(true)
