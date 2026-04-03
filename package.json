@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "start:client": "next start",
+    "start:client": "next start -p ${PORT:-3000}",
     "start:backend": "cd backend && /opt/venv/bin/python main.py",
     "start:full": "concurrently \"npm run start:client\" \"npm run start:backend\""
   },

@@ -57,4 +57,4 @@ RUN mkdir -p uploads temp_conversion temp_analysis
 
 EXPOSE 3000
 
-CMD concurrently "next start -p ${PORT:-3000}" "cd backend && /opt/venv/bin/python main.py"
+CMD ["npm", "run", "start:full"]
