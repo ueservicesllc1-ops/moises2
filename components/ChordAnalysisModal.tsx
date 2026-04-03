@@ -64,7 +64,12 @@ const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose
     }
   }, [audioUrl])
 
-  // Auto-scroll logic
+  // Update cards ref size
+  useEffect(() => {
+    cardsRef.current = cardsRef.current.slice(0, chords.length)
+  }, [chords])
+
+  // Auto-scroll logic (Horizontal Centering)
   useEffect(() => {
     const activeIndex = chords.findIndex((c, i) => 
       currentTime >= c.time && (i === chords.length - 1 || currentTime < chords[i+1].time)
@@ -72,7 +77,7 @@ const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose
     if (activeIndex !== -1 && cardsRef.current[activeIndex]) {
       cardsRef.current[activeIndex]?.scrollIntoView({ 
         behavior: 'smooth', 
-        block: 'center',
+        block: 'nearest',
         inline: 'center'
       })
     }
@@ -305,54 +310,70 @@ const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose
                 </div>
               </div>
 
-              {/* Harmonic Timeline */}
-              <div className="flex-1 min-h-0 relative">
-                <div className="absolute inset-x-0 top-0 h-2 bg-gradient-to-b from-[#141417] to-transparent z-10" />
-                <div className="h-full overflow-y-auto px-1 custom-scrollbar pb-10 space-y-2">
-                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    {chords.map((chord, i) => {
-                      const isActive = currentTime >= chord.time && (i === chords.length - 1 || currentTime < chords[i+1].time)
-                      return (
-                        <div 
-                          key={i}
-                          ref={el => { cardsRef.current[i] = el }}
-                          onClick={() => { if(audioRef.current) { audioRef.current.currentTime = chord.time; setCurrentTime(chord.time); if(!isPlaying) togglePlay(); } }}
-                          className={`group/card relative h-36 rounded-3xl border transition-all duration-500 cursor-pointer overflow-hidden ${
-                            isActive 
-                              ? 'bg-blue-600 border-white/30 shadow-[0_20px_50px_rgba(37,99,235,0.3)] scale-[1.03] ring-1 ring-white/50' 
-                              : 'bg-[#1a1a1e] border-white/5 hover:border-white/10'
-                          }`}
-                        >
-                          <div className="absolute top-2 right-3 text-[9px] font-black opacity-30 group-hover/card:opacity-100 transition-opacity">
-                            {formatTime(chord.time)}
-                          </div>
-                          <div className="flex flex-col items-center justify-center h-full p-4">
-                             <div className={`text-4xl font-black mb-1 drop-shadow-xl ${isActive ? 'text-white scale-110' : 'text-gray-200'} transition-transform duration-500`}>
-                              {chord.chord}
-                             </div>
-                             <div className={`text-[10px] uppercase tracking-widest font-black ${isActive ? 'text-blue-100' : 'text-gray-500'}`}>
-                               {isActive ? 'Active Harmony' : 'Detection Layer'}
-                             </div>
-                             {/* Confidence Bar */}
-                             <div className="w-16 h-1 bg-black/20 rounded-full mt-4 overflow-hidden">
-                               <div 
-                                 className={`h-full ${isActive ? 'bg-white' : 'bg-blue-500/40'} transition-all`}
-                                 style={{ width: `${chord.confidence * 100}%` }}
-                               />
-                             </div>
-                          </div>
+              {/* Harmonic Timeline (Horizontal Strip) */}
+              <div className="flex-1 min-h-0 relative flex flex-col justify-center">
+                
+                {/* Central Indicator Line */}
+                <div className="absolute left-1/2 top-0 bottom-0 w-px bg-blue-500/30 z-20 pointer-events-none shadow-[0_0_15px_rgba(59,130,246,0.5)]">
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-2 h-2 bg-blue-500 rounded-full" />
+                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-2 h-2 bg-blue-500 rounded-full" />
+                </div>
+
+                {/* Fade Overlays */}
+                <div className="absolute inset-y-0 left-0 w-32 bg-gradient-to-r from-[#141417] to-transparent z-10 pointer-events-none" />
+                <div className="absolute inset-y-0 right-0 w-32 bg-gradient-to-l from-[#141417] to-transparent z-10 pointer-events-none" />
+
+                <div 
+                  className="flex items-center space-x-6 overflow-x-auto px-[45%] py-12 custom-scrollbar-h no-scrollbar select-none"
+                  style={{ scrollSnapType: 'x proximity' }}
+                >
+                  {chords.map((chord, i) => {
+                    const isActive = currentTime >= chord.time && (i === chords.length - 1 || currentTime < chords[i+1].time)
+                    return (
+                      <div 
+                        key={i}
+                        ref={el => { cardsRef.current[i] = el }}
+                        onClick={() => { if(audioRef.current) { audioRef.current.currentTime = chord.time; setCurrentTime(chord.time); if(!isPlaying) togglePlay(); } }}
+                        className={`flex-shrink-0 relative w-48 h-56 rounded-[2.5rem] border transition-all duration-700 cursor-pointer overflow-hidden flex flex-col items-center justify-center ${
+                          isActive 
+                            ? 'bg-blue-600 border-white/40 shadow-[0_32px_64px_rgba(37,99,235,0.4)] scale-110 ring-2 ring-white/20 z-30' 
+                            : 'bg-[#1a1a1e] border-white/5 opacity-40 hover:opacity-100 hover:scale-105 active:scale-95'
+                        }`}
+                        style={{ scrollSnapAlign: 'center' }}
+                      >
+                        <div className={`absolute top-6 text-[10px] font-black tracking-widest ${isActive ? 'text-white/60' : 'text-gray-500'}`}>
+                          {formatTime(chord.time)}
                         </div>
-                      )
-                    })}
-                  </div>
+                        
+                        <div className={`text-6xl font-black mb-1 drop-shadow-2xl transition-all duration-700 ${isActive ? 'text-white scale-110' : 'text-gray-400'}`}>
+                          {chord.chord}
+                        </div>
+                        
+                        {isActive && (
+                          <div className="absolute bottom-10 flex flex-col items-center animate-in fade-in slide-in-from-bottom-2 duration-500">
+                             <div className="text-[9px] uppercase tracking-[0.2em] font-black text-blue-100 mb-2">Current Harmony</div>
+                             <div className="w-12 h-1 bg-white/40 rounded-full overflow-hidden">
+                               <div className="h-full bg-white animate-[progress_2s_linear_infinite]" style={{ width: '100%' }} />
+                             </div>
+                          </div>
+                        )}
+                        
+                        {!isActive && (
+                          <div className="w-8 h-1 bg-white/5 rounded-full mt-4" />
+                        )}
+                      </div>
+                    )
+                  })}
+                  
                   {chords.length === 0 && !isAnalyzing && (
-                    <div className="flex flex-col items-center justify-center py-20 bg-white/[0.02] border border-white/5 rounded-[2rem]">
-                      <Info className="w-10 h-10 text-gray-700 mb-4" />
-                      <p className="text-gray-500 font-bold">No harmony data available in this region</p>
+                    <div className="flex-1 flex flex-col items-center justify-center py-20 min-w-full">
+                      <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6">
+                        <Activity className="w-8 h-8 text-gray-700" />
+                      </div>
+                      <p className="text-gray-500 font-bold uppercase tracking-widest text-sm">Harmonic Data Pending</p>
                     </div>
                   )}
                 </div>
-                <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[#141417] via-[#141417]/80 to-transparent z-10" />
               </div>
 
               {/* Analysis Footer */}
@@ -384,18 +405,26 @@ const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose
           0%, 100% { transform: scaleY(1); }
           50% { transform: scaleY(1.8); }
         }
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 5px;
+        .custom-scrollbar-h::-webkit-scrollbar {
+          height: 4px;
         }
-        .custom-scrollbar::-webkit-scrollbar-track {
+        .custom-scrollbar-h::-webkit-scrollbar-track {
           background: transparent;
         }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
+        .custom-scrollbar-h::-webkit-scrollbar-thumb {
           background: rgba(255, 255, 255, 0.05);
           border-radius: 10px;
         }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(255, 255, 255, 0.1);
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+        @keyframes progress {
+          from { transform: translateX(-100%); }
+          to { transform: translateX(100%); }
         }
       `}</style>
     </div>
