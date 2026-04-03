@@ -64,7 +64,7 @@ const ChordAnalysisModal: React.FC<ChordAnalysisModalProps> = ({ isOpen, onClose
           console.log('✅ Análisis completado!')
           
           // Convertir formato del backend al formato del componente
-          const detectedChords: ChordInfo[] = statusData.chords.map((c: any) => ({
+          const detectedChords: ChordInfo[] = (statusData.chords || []).map((c: any) => ({
             time: c.start_time,
             chord: c.chord,
             confidence: c.confidence

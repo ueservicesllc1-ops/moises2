@@ -734,14 +734,12 @@ async def get_chord_analysis(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     
     # Chords are already stored as dictionaries, so we can return them directly
-    chords_data = None
-    if hasattr(task, 'chords') and task.chords:
-        chords_data = task.chords  # Already stored as dictionaries
-    
+    chords_data = getattr(task, 'chords', [])
+    if chords_data is None:
+        chords_data = []
+
     # Key is already stored as dictionary, so we can return it directly
-    key_data = None
-    if hasattr(task, 'key') and task.key:
-        key_data = task.key  # Already stored as dictionary
+    key_data = getattr(task, 'key', None)
     
     return {
         "task_id": task_id,
