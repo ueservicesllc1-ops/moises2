@@ -513,94 +513,98 @@ async def get_status(task_id: str):
 async def serve_audio(path: str):
     """Serve audio files from local filesystem or B2"""
     try:
-        # Try multiple local paths
+        # Resolve multiple possible local paths
         possible_paths = [
-            f"uploads/{path}",  # Archivos originales y stems
+            f"uploads/{path}",
             f"../uploads/{path}",
-            path  # Ruta absoluta o relativa directa
+            path
         ]
+        
+        # SPECIAL MAPPING FOR STEMS: 
+        # 1. Match 'stems/{task_id}/{stem}.wav' (B2 Proxy format)
+        if path.startswith("stems/"):
+            parts = path.split("/")
+            if len(parts) >= 3:
+                task_id = parts[1]
+                stem_name = parts[2]
+                stems_mapping = f"uploads/{task_id}/demucs_output/{stem_name}"
+                possible_paths.append(stems_mapping)
+                print(f"[SERVE_AUDIO] Mapeamento stems (B2 format): {stems_mapping}")
+        
+        # 2. Match '{task_id}/{stem}.wav' (Fallback format)
+        parts = path.split("/")
+        if len(parts) == 2 and parts[1].endswith(".wav"):
+            task_id = parts[0]
+            stem_name = parts[1]
+            fallback_mapping = f"uploads/{task_id}/demucs_output/{stem_name}"
+            possible_paths.append(fallback_mapping)
+            print(f"[SERVE_AUDIO] Mapeamento stems (Fallback format): {fallback_mapping}")
         
         local_path = None
         for p in possible_paths:
-            if os.path.exists(p):
+            if os.path.exists(p) and os.path.isfile(p):
                 local_path = p
                 break
         
-        # Try local file first
         if local_path:
-            # Determine media type based on file extension
-            if path.endswith('.mp3'):
-                media_type = "audio/mpeg"
-            elif path.endswith('.wav'):
-                media_type = "audio/wav"
-            else:
-                media_type = "audio/wav"  # Default
+            # Determine media type
+            media_type = "audio/mpeg" if path.lower().endswith('.mp3') else "audio/wav"
+            print(f"[SERVE_AUDIO] serving LOCAL: {local_path}")
+
             
-            print(f"[SERVE_AUDIO] Serving from: {local_path}")
-            
-            # Return file response
             return FileResponse(
                 local_path,
                 media_type=media_type,
                 headers={
                     "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "GET",
-                    "Access-Control-Allow-Headers": "Range",
-                    "Cache-Control": "public, max-age=3600"
+                    "Cache-Control": "public, max-age=3600",
+                    "Accept-Ranges": "bytes"
                 }
             )
         
-        # If not found locally, try to stream from B2
-        print(f"Audio file not found locally: {local_path}, trying B2 proxy...")
-        try:
-            # Construct B2 Native URL
-            b2_bucket = os.getenv("B2_BUCKET_NAME", "Multitrack")
-            # f005 is the Native B2 CDN which allows direct reads
-            b2_url = f"https://f005.backblazeb2.com/file/{b2_bucket}/audio/{path}"
-            print(f"Streaming from B2 URL: {b2_url}")
-            
-            # Stream the file from B2 through backend
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                async with session.get(b2_url) as response:
-                    if response.status == 200:
-                        content = await response.read()
-                        
-                        # Determine media type
-                        if path.endswith('.mp3'):
-                            media_type = "audio/mpeg"
-                        elif path.endswith('.wav'):
-                            media_type = "audio/wav"
-                        else:
-                            media_type = "audio/wav"
-                        
-                        from fastapi.responses import Response
-                        return Response(
-                            content=content,
-                            media_type=media_type,
-                            headers={
-                                "Access-Control-Allow-Origin": "*",
-                                "Access-Control-Allow-Methods": "GET",
-                                "Access-Control-Allow-Headers": "Range",
-                                "Cache-Control": "public, max-age=3600",
-                                "Accept-Ranges": "bytes"
-                            }
-                        )
-                    else:
-                        print(f"B2 returned status: {response.status}")
-                        raise HTTPException(status_code=404, detail="Audio file not found in B2")
-        except Exception as b2_error:
-            print(f"Error streaming from B2: {b2_error}")
+        # If not local, try B2 Proxy
+        import aiohttp
+        from fastapi.responses import StreamingResponse
         
-        # If still not found, raise 404
-        print(f"Audio file not found anywhere: {path}")
-        raise HTTPException(status_code=404, detail="Audio file not found")
+        b2_bucket = os.getenv("B2_BUCKET_NAME", "Multitrack")
+        # f005 is the Native B2 cluster for cluster ID 005
+        # The key prefix is 'audio/' for stems and uploads
+        b2_url = f"https://f005.backblazeb2.com/file/{b2_bucket}/audio/{path}"
+        print(f"[SERVE_AUDIO] B2 Proxy -> {b2_url}")
         
+        # Use ClientSession to stream the file to the client
+        async with aiohttp.ClientSession() as session:
+            async with session.get(b2_url, timeout=60) as b2_resp:
+                if b2_resp.status == 200:
+                    media_type = "audio/mpeg" if path.lower().endswith('.mp3') else "audio/wav"
+                    
+                    # Log the size for debugging
+                    file_size = b2_resp.headers.get("Content-Length", "unknown")
+                    print(f"[SERVE_AUDIO] Streaming from B2: {path} ({file_size} bytes)")
+                    
+                    # Return StreamingResponse to save RAM and handle large files
+                    return StreamingResponse(
+                        b2_resp.content.iter_any(),
+                        media_type=media_type,
+                        headers={
+                            "Access-Control-Allow-Origin": "*",
+                            "Cache-Control": "public, max-age=3600",
+                            "Accept-Ranges": "bytes",
+                            "Content-Length": file_size
+                        }
+                    )
+                else:
+                    print(f"[SERVE_AUDIO] B2 returned error {b2_resp.status} for {b2_url}")
+                    raise HTTPException(status_code=404, detail=f"Audio not found in B2 (Status {b2_resp.status})")
+                    
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error serving audio {path}: {e}")
-        raise HTTPException(status_code=404, detail="Audio file not found")
+        print(f"[SERVE_AUDIO] ERROR serving {path}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/download/{task_id}/{stem_name}")
 async def download_stem(task_id: str, stem_name: str):
