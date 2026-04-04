@@ -26,8 +26,8 @@ image = (
     .run_function(download_models)
 )
 
-# 2. Configuración de ejecución en GPU T4
-@app.function(image=image, gpu="T4", timeout=600)
+# 2. Configuración de ejecución en GPU T4 - Aumentamos timeout a 1200s (20 min)
+@app.function(image=image, gpu="T4", timeout=1200)
 def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
     import torch
     import tempfile
@@ -54,8 +54,6 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
         wav = torch.from_numpy(wav_numpy).transpose(0, 1)
         
         # --- LÓGICA HÍBRIDA DE MODELOS ---
-        # Si se pide guitarra o piano, usamos el modelo de 6 pistas.
-        # Si solo se pide Voz/Pista o las 4 básicas, usamos htdemucs_ft (Fine-Tuned) que es superior en calidad.
         needs_6s = any(t in requested_tracks for t in ["guitar", "piano"])
         model_name = 'htdemucs_6s' if needs_6s else 'htdemucs_ft'
         
@@ -70,9 +68,9 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
         ref = wav.mean(0)
         wav = (wav - ref.mean()) / ref.std()
 
-        # Configuración HI-FI vinculada
-        shifts_amt = 12 if is_hi_fi else 2
-        overlap_amt = 0.75 if is_hi_fi else 0.25 # Overlap 0.75 en HiFi para máxima suavidad absoluta
+        # Configuración HI-FI vinculada - Ajuste para evitar timeout garantizando ultra calidad
+        shifts_amt = 8 if is_hi_fi else 2
+        overlap_amt = 0.6 if is_hi_fi else 0.25 # Overlap 0.6 para suavidad extrema sin colapsar el sistema
         
         print(f"[MODAL GPU] Iniciando disección ⚡ (Shifts: {shifts_amt}, Overlap: {overlap_amt})")
         with torch.no_grad():
@@ -121,5 +119,5 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
             sf.write(buf, combined_audio, model.samplerate, format='WAV')
             stems_bytes["instrumental"] = buf.getvalue()
             
-        print(f"[MODAL GPU] Completado. Enviando {len(stems_bytes)} tracks.")    
+        print(f"[MODAL GPU] Completado satisfactoriamente.")    
         return stems_bytes

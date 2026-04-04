@@ -71,8 +71,8 @@ class AudioProcessor:
             
             # Configurar Calidad (HiFi vs Standar/Fast)
             # shifts = evalúa música múltiples veces para cancelar artefactos robóticos en IA
-            shifts_amt = 12 if is_hi_fi else 2
-            overlap_amt = 0.75 if is_hi_fi else 0.25 # Overlap 0.75 para suavidad extrema en HiFi
+            shifts_amt = 8 if is_hi_fi else 2
+            overlap_amt = 0.6 if is_hi_fi else 0.25 # Overlap 0.6 para suavidad masiva en HiFi
             
             if is_hi_fi:
                 print(f">>> RUNNING IN HI-FI MODE (Ultra Quality) - Model: {model_name}, Shifts: 12, Overlap: {overlap_amt}")
