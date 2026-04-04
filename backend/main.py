@@ -511,79 +511,38 @@ async def get_status(task_id: str):
 
 @app.get("/audio/test")
 async def audio_test():
-    """Test endpoint to verify audio proxy is alive"""
-    return {"status": "ok", "message": "Audio proxy is reachable"}
+    return {"status": "ok", "backend": "FastAPI is active"}
 
 @app.get("/audio/{path:path}")
 async def serve_audio(path: str):
-    """Serve audio files from local filesystem or B2 with absolute path resolution"""
+    """Minimalist B2 Proxy - Matches yesterday's working state"""
     try:
-        # Resolve absolute paths to avoid issues with CWD in Docker/Railway
-        base_dir = Path(__file__).parent.parent.absolute()
-        uploads_dir = base_dir / "uploads"
-        
-        possible_local_paths = [
-            uploads_dir / path,
-            base_dir / path,
-            Path(path)
-        ]
-        
-        # Mapeo de stems: stems/ID/NAME.wav -> uploads/ID/demucs_output/NAME.wav
-        if path.startswith("stems/"):
-            parts = path.split("/")
-            if len(parts) >= 3:
-                task_id = parts[1]
-                stem_name = parts[2]
-                possible_local_paths.append(uploads_dir / task_id / "demucs_output" / stem_name)
-        
-        # Mapeo fallback: ID/NAME.wav -> uploads/ID/demucs_output/NAME.wav
-        parts = path.split("/")
-        if len(parts) == 2 and parts[1].endswith(".wav"):
-            possible_local_paths.append(uploads_dir / parts[0] / "demucs_output" / parts[1])
-            
-        local_path = None
-        for p in possible_local_paths:
-            if p.exists() and p.is_file():
-                local_path = str(p)
-                break
-        
-        if local_path:
-            media_type = "audio/mpeg" if path.lower().endswith(".mp3") else "audio/wav"
-            print(f"[AUDIO] Serving LOCAL: {local_path}")
-            return FileResponse(local_path, media_type=media_type)
-
-        # 2. B2 PROXY - Using httpx for better async support
-        import httpx
+        import aiohttp
         b2_bucket = os.getenv("B2_BUCKET_NAME", "Multitrack")
         b2_url = f"https://f005.backblazeb2.com/file/{b2_bucket}/audio/{path}"
-        print(f"[AUDIO] Not local, B2 Proxying -> {b2_url}")
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(b2_url)
-            
-            if response.status_code == 200:
-                media_type = "audio/mpeg" if path.lower().endswith(".mp3") else "audio/wav"
-                return Response(
-                    content=response.content,
-                    media_type=media_type,
-                    headers={
-                        "Access-Control-Allow-Origin": "*",
-                        "Cache-Control": "public, max-age=3600",
-                        "Accept-Ranges": "bytes",
-                        "Content-Length": str(len(response.content))
-                    }
-                )
-            else:
-                print(f"[AUDIO] B2 Error {response.status_code} for {path}")
-                raise HTTPException(status_code=404, detail=f"Audio not found (B2 {response.status_code})")
-                
-    except HTTPException:
-        raise
+        print(f"[PROXY] Loading from B2: {b2_url}")
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(b2_url) as response:
+                if response.status == 200:
+                    content = await response.read()
+                    return Response(
+                        content=content,
+                        media_type="audio/wav",
+                        headers={
+                            "Access-Control-Allow-Origin": "*",
+                            "Cache-Control": "public, max-age=3600",
+                            "Content-Length": str(len(content))
+                        }
+                    )
+                else:
+                    print(f"[PROXY] B2 error: {response.status}")
+                    raise HTTPException(status_code=404, detail="File not found in B2")
     except Exception as e:
-        print(f"[AUDIO] CRITICAL ERROR serving {path}: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        print(f"[PROXY] CRITICAL: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 
