@@ -77,9 +77,9 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
         wav = (wav - ref.mean()) / ref.std()
 
         # Configuración Inteligente y Rentabilidad ($)
-        # Nivel PRO: 6 pasadas. Mantiene de maravilla los márgenes de ganancia (aprox 1 minuto de CPU ~ 1 centavo).
+        # Nivel PRO: 12 pasadas. Máxima calidad de disección sonora.
         # Nivel Free: 2 pasadas (15 segs ~ 1/3 de centavo).
-        shifts_amt = 6 if is_hi_fi else 2
+        shifts_amt = 12 if is_hi_fi else 2
         overlap_amt = 0.25
         
         print(f"[MODAL GPU] Iniciando disección matemática ⚡ (Shifts: {shifts_amt}, Overlap: {overlap_amt})")

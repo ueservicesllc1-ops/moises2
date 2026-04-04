@@ -65,11 +65,11 @@ class AudioProcessor:
             
             # Configurar Calidad (HiFi vs Standar/Fast)
             # shifts = evalúa música múltiples veces para cancelar artefactos robóticos en IA
-            shifts_amt = 5 if is_hi_fi else 2
+            shifts_amt = 12 if is_hi_fi else 2
             overlap_amt = 0.25
             
             if is_hi_fi:
-                print(">>> RUNNING IN HI-FI MODE (Max Quality) - Shifts: 5")
+                print(">>> RUNNING IN HI-FI MODE (Ultra Quality) - Shifts: 12")
             else:
                 print(">>> RUNNING IN FAST MODE (Standard) - Shifts: 2")
             
