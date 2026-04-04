@@ -509,14 +509,23 @@ async def get_status(task_id: str):
     
     return response
 
+@app.get("/audio/test")
+async def audio_test():
+    """Test endpoint to verify audio proxy is alive"""
+    return {"status": "ok", "message": "Audio proxy is reachable"}
+
 @app.get("/audio/{path:path}")
 async def serve_audio(path: str):
-    """Serve audio files from local filesystem or B2 with robust proxying"""
+    """Serve audio files from local filesystem or B2 with absolute path resolution"""
     try:
-        # 1. LOCAL SEARCH - Use intelligent mapping for stems
-        possible_paths = [
-            f"uploads/{path}",
-            path
+        # Resolve absolute paths to avoid issues with CWD in Docker/Railway
+        base_dir = Path(__file__).parent.parent.absolute()
+        uploads_dir = base_dir / "uploads"
+        
+        possible_local_paths = [
+            uploads_dir / path,
+            base_dir / path,
+            Path(path)
         ]
         
         # Mapeo de stems: stems/ID/NAME.wav -> uploads/ID/demucs_output/NAME.wav
@@ -525,17 +534,17 @@ async def serve_audio(path: str):
             if len(parts) >= 3:
                 task_id = parts[1]
                 stem_name = parts[2]
-                possible_paths.append(f"uploads/{task_id}/demucs_output/{stem_name}")
+                possible_local_paths.append(uploads_dir / task_id / "demucs_output" / stem_name)
         
         # Mapeo fallback: ID/NAME.wav -> uploads/ID/demucs_output/NAME.wav
         parts = path.split("/")
         if len(parts) == 2 and parts[1].endswith(".wav"):
-            possible_paths.append(f"uploads/{parts[0]}/demucs_output/{parts[1]}")
+            possible_local_paths.append(uploads_dir / parts[0] / "demucs_output" / parts[1])
             
         local_path = None
-        for p in possible_paths:
-            if os.path.exists(p) and os.path.isfile(p):
-                local_path = p
+        for p in possible_local_paths:
+            if p.exists() and p.is_file():
+                local_path = str(p)
                 break
         
         if local_path:
@@ -543,38 +552,35 @@ async def serve_audio(path: str):
             print(f"[AUDIO] Serving LOCAL: {local_path}")
             return FileResponse(local_path, media_type=media_type)
 
-        # 2. B2 PROXY - Re-using logic that worked yesterday
+        # 2. B2 PROXY - Using httpx for better async support
+        import httpx
         b2_bucket = os.getenv("B2_BUCKET_NAME", "Multitrack")
         b2_url = f"https://f005.backblazeb2.com/file/{b2_bucket}/audio/{path}"
-        print(f"[AUDIO] Local not found, B2 download -> {b2_url}")
+        print(f"[AUDIO] Not local, B2 Proxying -> {b2_url}")
         
-        # Usamos requests de forma síncrona en un hilo para mayor estabilidad si aiohttp da problemas
-        import requests
-        def fetch_b2():
-            return requests.get(b2_url, timeout=30)
-        
-        response = await asyncio.to_thread(fetch_b2)
-        
-        if response.status_code == 200:
-            media_type = "audio/mpeg" if path.lower().endswith(".mp3") else "audio/wav"
-            return Response(
-                content=response.content,
-                media_type=media_type,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Cache-Control": "public, max-age=3600",
-                    "Accept-Ranges": "bytes",
-                    "Content-Length": str(len(response.content))
-                }
-            )
-        else:
-            print(f"[AUDIO] B2 Error {response.status_code} for {path}")
-            raise HTTPException(status_code=404, detail=f"Audio not found (B2 {response.status_code})")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(b2_url)
             
+            if response.status_code == 200:
+                media_type = "audio/mpeg" if path.lower().endswith(".mp3") else "audio/wav"
+                return Response(
+                    content=response.content,
+                    media_type=media_type,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "public, max-age=3600",
+                        "Accept-Ranges": "bytes",
+                        "Content-Length": str(len(response.content))
+                    }
+                )
+            else:
+                print(f"[AUDIO] B2 Error {response.status_code} for {path}")
+                raise HTTPException(status_code=404, detail=f"Audio not found (B2 {response.status_code})")
+                
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[AUDIO] CRITICAL ERROR: {str(e)}")
+        print(f"[AUDIO] CRITICAL ERROR serving {path}: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
