@@ -26,10 +26,11 @@ image = (
     .run_function(download_models)
 )
 
-# 2. Configuración de ejecución en GPU T4 - Aumentamos timeout a 1200s (20 min)
+# 2. Configuración de ejecución en GPU T4 - Timeout de 20 min
 @app.function(image=image, gpu="T4", timeout=1200)
 def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
     import torch
+    import numpy as np
     import tempfile
     import soundfile as sf
     from demucs.pretrained import get_model
@@ -37,7 +38,7 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
     from demucs.audio import convert_audio
     import subprocess
     
-    print(f"[MODAL GPU] Nueva solicitud: {requested_tracks} (HiFi: {is_hi_fi})")
+    print(f"[MODAL GPU] Request: {requested_tracks} (HiFi: {is_hi_fi})")
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         input_mp3 = os.path.join(tmp_dir, "input_audio.mp3")
@@ -53,11 +54,11 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
             
         wav = torch.from_numpy(wav_numpy).transpose(0, 1)
         
-        # --- LÓGICA HÍBRIDA DE MODELOS ---
+        # --- LÓGICA HÍBRIDA ---
         needs_6s = any(t in requested_tracks for t in ["guitar", "piano"])
         model_name = 'htdemucs_6s' if needs_6s else 'htdemucs_ft'
         
-        print(f"[MODAL GPU] Seleccionado modelo: {model_name}")
+        print(f"[MODAL GPU] Modelo: {model_name}")
         model = get_model(model_name)
         model.cuda()
         model.eval()
@@ -68,11 +69,11 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
         ref = wav.mean(0)
         wav = (wav - ref.mean()) / ref.std()
 
-        # Configuración HI-FI vinculada - Ajuste para evitar timeout garantizando ultra calidad
+        # HiFi Settings
         shifts_amt = 8 if is_hi_fi else 2
-        overlap_amt = 0.6 if is_hi_fi else 0.25 # Overlap 0.6 para suavidad extrema sin colapsar el sistema
+        overlap_amt = 0.6 if is_hi_fi else 0.25 
         
-        print(f"[MODAL GPU] Iniciando disección ⚡ (Shifts: {shifts_amt}, Overlap: {overlap_amt})")
+        print(f"[MODAL GPU] Procesando shifts={shifts_amt}, overlap={overlap_amt}...")
         with torch.no_grad():
             sources = apply_model(
                 model, 
@@ -86,38 +87,35 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
         
         sources = sources * ref.std() + ref.mean()
         
-        # Mapeo universal de stems
-        stem_mapping = {
-            "vocals": "vocals", 
-            "drums": "drums", 
-            "bass": "bass", 
-            "other": "other",
-            "guitar": "guitar", 
-            "piano": "piano"
-        }
-        
         stems_bytes = {}
+        # Mapeo de stems individuales
         for idx, stem_name in enumerate(model.sources):
-            my_stem_name = stem_mapping.get(stem_name, stem_name)
-            
-            if my_stem_name in requested_tracks or (my_stem_name == "vocals" and "vocals" in requested_tracks):
+            if stem_name in requested_tracks:
                 stem_audio = sources[idx].cpu().numpy().T
                 buf = io.BytesIO()
                 sf.write(buf, stem_audio, model.samplerate, format='WAV')
-                stems_bytes[my_stem_name] = buf.getvalue()
+                stems_bytes[stem_name] = buf.getvalue()
         
+        # --- MEZCLA INSTRUMENTAL PROFESIONAL ---
         if "instrumental" in requested_tracks:
-            combined_audio = None
+            print("[MODAL GPU] Creando mezcla instrumental optimizada...")
+            instrumental_audio = None
             for idx, stem_name in enumerate(model.sources):
                 if stem_name != "vocals":
                     audio = sources[idx].cpu().numpy().T
-                    if combined_audio is None:
-                        combined_audio = audio
+                    if instrumental_audio is None:
+                        instrumental_audio = audio
                     else:
-                        combined_audio += audio
+                        instrumental_audio += audio
+            
+            # NORMALIZACIÓN: Evita distorsión y mantiene el "punch"
+            max_val = np.max(np.abs(instrumental_audio))
+            if max_val > 0.99:
+                print(f"[MODAL GPU] Normalizando instrumental (Peak: {max_val:.2f})")
+                instrumental_audio = instrumental_audio / max_val * 0.98
+                
             buf = io.BytesIO()
-            sf.write(buf, combined_audio, model.samplerate, format='WAV')
+            sf.write(buf, instrumental_audio, model.samplerate, format='WAV')
             stems_bytes["instrumental"] = buf.getvalue()
             
-        print(f"[MODAL GPU] Completado satisfactoriamente.")    
         return stems_bytes
