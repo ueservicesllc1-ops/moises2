@@ -567,43 +567,55 @@ async def serve_audio(path: str):
         from fastapi.responses import StreamingResponse
         
         b2_bucket = os.getenv("B2_BUCKET_NAME", "Multitrack")
-        # f005 is the Native B2 cluster for cluster ID 005
-        # The key prefix is 'audio/' for stems and uploads
         b2_url = f"https://f005.backblazeb2.com/file/{b2_bucket}/audio/{path}"
         print(f"[SERVE_AUDIO] B2 Proxy -> {b2_url}")
         
-        # Use ClientSession to stream the file to the client
+        async def stream_generator():
+            timeout = aiohttp.ClientTimeout(total=300) # 5 min timeout for large files
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(b2_url) as b2_resp:
+                    if b2_resp.status == 200:
+                        async for chunk in b2_resp.content.iter_any():
+                            yield chunk
+                    else:
+                        print(f"[SERVE_AUDIO] B2 Error {b2_resp.status}")
+                        # We can't raise HTTPException here easily because it's a generator
+                        # but the outer code will handle the initial response
+        
+        # We need a quick head check to see if it exists before returning StreamingResponse
+        # to handle 404s gracefully
         async with aiohttp.ClientSession() as session:
-            async with session.get(b2_url, timeout=60) as b2_resp:
-                if b2_resp.status == 200:
-                    media_type = "audio/mpeg" if path.lower().endswith('.mp3') else "audio/wav"
-                    
-                    # Log the size for debugging
-                    file_size = b2_resp.headers.get("Content-Length", "unknown")
-                    print(f"[SERVE_AUDIO] Streaming from B2: {path} ({file_size} bytes)")
-                    
-                    # Return StreamingResponse to save RAM and handle large files
-                    return StreamingResponse(
-                        b2_resp.content.iter_any(),
-                        media_type=media_type,
-                        headers={
-                            "Access-Control-Allow-Origin": "*",
-                            "Cache-Control": "public, max-age=3600",
-                            "Accept-Ranges": "bytes",
-                            "Content-Length": file_size
-                        }
-                    )
-                else:
-                    print(f"[SERVE_AUDIO] B2 returned error {b2_resp.status} for {b2_url}")
-                    raise HTTPException(status_code=404, detail=f"Audio not found in B2 (Status {b2_resp.status})")
+            async with session.head(b2_url) as head_resp:
+                if head_resp.status != 200:
+                    print(f"[SERVE_AUDIO] B2 Head Check failed: {head_resp.status}")
+                    raise HTTPException(status_code=404, detail="Audio not found in B2")
+                
+                content_length = head_resp.headers.get("Content-Length")
+                media_type = "audio/mpeg" if path.lower().endswith('.mp3') else "audio/wav"
+                
+                return StreamingResponse(
+                    stream_generator(),
+                    media_type=media_type,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "public, max-age=3600",
+                        "Accept-Ranges": "bytes",
+                        "Content-Length": content_length
+                    } if content_length else {
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "public, max-age=3600",
+                        "Accept-Ranges": "bytes"
+                    }
+                )
                     
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[SERVE_AUDIO] ERROR serving {path}: {str(e)}")
+        print(f"[SERVE_AUDIO] CRITICAL ERROR serving {path}: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.get("/download/{task_id}/{stem_name}")
