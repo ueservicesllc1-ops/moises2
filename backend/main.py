@@ -160,11 +160,15 @@ async def separate_audio_handler(
             print(f"[DATABASE ERROR] No se pudo guardar tarea inicial: {db_e}")
 
         # Procesar en background
+        is_hifi_bool = hi_fi.lower() == "true"
+        print(f"[DEBUG] HiFi Mode: {'ON' if is_hifi_bool else 'OFF'} (Value received: '{hi_fi}')")
+        print(f"[DEBUG] Requested Tracks: {requested_tracks}")
+        
         background_tasks.add_task(
             process_audio, 
             task, 
             custom_tracks,
-            hi_fi == "true"
+            is_hifi_bool
         )
         
         return {

@@ -72,7 +72,7 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
 
         # Configuración HI-FI vinculada
         shifts_amt = 12 if is_hi_fi else 2
-        overlap_amt = 0.5 if is_hi_fi else 0.25 # Overlap 0.5 en HiFi para máxima suavidad
+        overlap_amt = 0.75 if is_hi_fi else 0.25 # Overlap 0.75 en HiFi para máxima suavidad absoluta
         
         print(f"[MODAL GPU] Iniciando disección ⚡ (Shifts: {shifts_amt}, Overlap: {overlap_amt})")
         with torch.no_grad():
