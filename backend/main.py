@@ -511,83 +511,55 @@ async def get_status(task_id: str):
 
 @app.get("/audio/{path:path}")
 async def serve_audio(path: str):
-    """Verbose diagnostic proxy (Python version of JS snippet)"""
+    """Fallback proxy using standard requests - Ultra-stable version"""
     try:
-        # 1. Definir KEY y URL
+        import requests
         b2_bucket = os.getenv("B2_BUCKET_NAME", "Multitrack")
-        # El prefix es 'audio/' según b2_uploader.py
-        b2_url = f"https://f005.backblazeb2.com/file/{b2_bucket}/audio/{path}"
         
-        print(f"[AUDIO] Diagnostic request for: {path}")
-        print(f"[AUDIO] Target B2 URL: {b2_url}")
+        # Unificamos el path para B2: audio/stems/ID/drums.wav
+        # Si path ya empieza con 'stems/', le ponemos 'audio/' delante
+        b2_key = f"audio/{path}" if not path.startswith("audio/") else path
+        b2_url = f"https://f005.backblazeb2.com/file/{b2_bucket}/{b2_key}"
         
-        import httpx
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.get(b2_url)
-            except Exception as conn_err:
-                print(f"[AUDIO] Connection to B2 failed: {str(conn_err)}")
-                return {
-                    "error": "B2 connection failed",
-                    "details": str(conn_err),
-                    "url": b2_url
-                }
-                
-            print(f"[AUDIO] B2 Status: {response.status_code}")
+        print(f"[RESCUE] Proxying to B2 --> {b2_url}")
+        
+        def fetch():
+            return requests.get(b2_url, timeout=30)
             
-            # Si B2 falla, devolvemos JSON con el detalle (Paso 1, 2 y 3 del diagnóstico)
-            if response.status_code != 200:
-                print(f"[AUDIO] B2 error body: {response.text}")
-                return Response(
-                    content=json.dumps({
-                        "error": "B2 download failed",
-                        "status": response.status_code,
-                        "details": response.text,
-                        "path_attempted": path,
-                        "url_attempted": b2_url
-                    }),
-                    media_type="application/json",
-                    status_code=response.status_code
-                )
-            
-            # Si B2 responde 200, validamos el contenido (Paso 4)
-            content = response.content
-            content_type = response.headers.get('content-type', 'audio/wav')
-            
-            print(f"[AUDIO] Bytes received: {len(content)}")
-            print(f"[AUDIO] Content-type: {content_type}")
-            
-            if not content:
-                return Response(
-                    content=json.dumps({"error": "Archivo vacío recibido de B2"}),
-                    media_type="application/json",
-                    status_code=500
-                )
-            
-            # Devolvemos el audio
+        r = await asyncio.to_thread(fetch)
+        print(f"[RESCUE] B2 Status: {r.status_code}")
+        
+        if r.status_code == 200:
             return Response(
-                content=content,
-                media_type=content_type,
+                content=r.content,
+                media_type="audio/wav",
                 headers={
                     "Access-Control-Allow-Origin": "*",
-                    "Content-Length": str(len(content)),
-                    "Cache-Control": "public, max-age=3600",
-                    "Accept-Ranges": "bytes"
+                    "Content-Length": str(len(r.content)),
+                    "Cache-Control": "public, max-age=3600"
                 }
+            )
+        else:
+            print(f"[RESCUE] B2 Error: {r.status_code}")
+            return Response(
+                content=json.dumps({
+                    "error": "B2 failure",
+                    "status": r.status_code,
+                    "url_tried": b2_url,
+                    "reason": r.reason
+                }),
+                media_type="application/json",
+                status_code=r.status_code
             )
             
     except Exception as e:
-        print(f"[AUDIO] Endpoint crash: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        print(f"[RESCUE] Crash: {str(e)}")
         return Response(
-            content=json.dumps({
-                "error": "Internal audio server error",
-                "details": str(e)
-            }),
+            content=json.dumps({"error": str(e)}),
             media_type="application/json",
             status_code=500
         )
+
 
 
 
