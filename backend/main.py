@@ -511,35 +511,27 @@ async def get_status(task_id: str):
 
 @app.get("/audio/{path:path}")
 async def serve_audio(path: str):
-    """Serve audio files from local filesystem or B2"""
+    """Serve audio files from local filesystem or B2 with robust proxying"""
     try:
-        # Resolve multiple possible local paths
+        # 1. LOCAL SEARCH - Use intelligent mapping for stems
         possible_paths = [
             f"uploads/{path}",
-            f"../uploads/{path}",
             path
         ]
         
-        # SPECIAL MAPPING FOR STEMS: 
-        # 1. Match 'stems/{task_id}/{stem}.wav' (B2 Proxy format)
+        # Mapeo de stems: stems/ID/NAME.wav -> uploads/ID/demucs_output/NAME.wav
         if path.startswith("stems/"):
             parts = path.split("/")
             if len(parts) >= 3:
                 task_id = parts[1]
                 stem_name = parts[2]
-                stems_mapping = f"uploads/{task_id}/demucs_output/{stem_name}"
-                possible_paths.append(stems_mapping)
-                print(f"[SERVE_AUDIO] Mapeamento stems (B2 format): {stems_mapping}")
+                possible_paths.append(f"uploads/{task_id}/demucs_output/{stem_name}")
         
-        # 2. Match '{task_id}/{stem}.wav' (Fallback format)
+        # Mapeo fallback: ID/NAME.wav -> uploads/ID/demucs_output/NAME.wav
         parts = path.split("/")
         if len(parts) == 2 and parts[1].endswith(".wav"):
-            task_id = parts[0]
-            stem_name = parts[1]
-            fallback_mapping = f"uploads/{task_id}/demucs_output/{stem_name}"
-            possible_paths.append(fallback_mapping)
-            print(f"[SERVE_AUDIO] Mapeamento stems (Fallback format): {fallback_mapping}")
-        
+            possible_paths.append(f"uploads/{parts[0]}/demucs_output/{parts[1]}")
+            
         local_path = None
         for p in possible_paths:
             if os.path.exists(p) and os.path.isfile(p):
@@ -547,74 +539,46 @@ async def serve_audio(path: str):
                 break
         
         if local_path:
-            # Determine media type
-            media_type = "audio/mpeg" if path.lower().endswith('.mp3') else "audio/wav"
-            print(f"[SERVE_AUDIO] serving LOCAL: {local_path}")
+            media_type = "audio/mpeg" if path.lower().endswith(".mp3") else "audio/wav"
+            print(f"[AUDIO] Serving LOCAL: {local_path}")
+            return FileResponse(local_path, media_type=media_type)
 
-            
-            return FileResponse(
-                local_path,
+        # 2. B2 PROXY - Re-using logic that worked yesterday
+        b2_bucket = os.getenv("B2_BUCKET_NAME", "Multitrack")
+        b2_url = f"https://f005.backblazeb2.com/file/{b2_bucket}/audio/{path}"
+        print(f"[AUDIO] Local not found, B2 download -> {b2_url}")
+        
+        # Usamos requests de forma síncrona en un hilo para mayor estabilidad si aiohttp da problemas
+        import requests
+        def fetch_b2():
+            return requests.get(b2_url, timeout=30)
+        
+        response = await asyncio.to_thread(fetch_b2)
+        
+        if response.status_code == 200:
+            media_type = "audio/mpeg" if path.lower().endswith(".mp3") else "audio/wav"
+            return Response(
+                content=response.content,
                 media_type=media_type,
                 headers={
                     "Access-Control-Allow-Origin": "*",
                     "Cache-Control": "public, max-age=3600",
-                    "Accept-Ranges": "bytes"
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(len(response.content))
                 }
             )
-        
-        # If not local, try B2 Proxy
-        import aiohttp
-        from fastapi.responses import StreamingResponse
-        
-        b2_bucket = os.getenv("B2_BUCKET_NAME", "Multitrack")
-        b2_url = f"https://f005.backblazeb2.com/file/{b2_bucket}/audio/{path}"
-        print(f"[SERVE_AUDIO] B2 Proxy -> {b2_url}")
-        
-        async def stream_generator():
-            timeout = aiohttp.ClientTimeout(total=300) # 5 min timeout for large files
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(b2_url) as b2_resp:
-                    if b2_resp.status == 200:
-                        async for chunk in b2_resp.content.iter_any():
-                            yield chunk
-                    else:
-                        print(f"[SERVE_AUDIO] B2 Error {b2_resp.status}")
-                        # We can't raise HTTPException here easily because it's a generator
-                        # but the outer code will handle the initial response
-        
-        # We need a quick head check to see if it exists before returning StreamingResponse
-        # to handle 404s gracefully
-        async with aiohttp.ClientSession() as session:
-            async with session.head(b2_url) as head_resp:
-                if head_resp.status != 200:
-                    print(f"[SERVE_AUDIO] B2 Head Check failed: {head_resp.status}")
-                    raise HTTPException(status_code=404, detail="Audio not found in B2")
-                
-                content_length = head_resp.headers.get("Content-Length")
-                media_type = "audio/mpeg" if path.lower().endswith('.mp3') else "audio/wav"
-                
-                return StreamingResponse(
-                    stream_generator(),
-                    media_type=media_type,
-                    headers={
-                        "Access-Control-Allow-Origin": "*",
-                        "Cache-Control": "public, max-age=3600",
-                        "Accept-Ranges": "bytes",
-                        "Content-Length": content_length
-                    } if content_length else {
-                        "Access-Control-Allow-Origin": "*",
-                        "Cache-Control": "public, max-age=3600",
-                        "Accept-Ranges": "bytes"
-                    }
-                )
-                    
+        else:
+            print(f"[AUDIO] B2 Error {response.status_code} for {path}")
+            raise HTTPException(status_code=404, detail=f"Audio not found (B2 {response.status_code})")
+            
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[SERVE_AUDIO] CRITICAL ERROR serving {path}: {str(e)}")
+        print(f"[AUDIO] CRITICAL ERROR: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 
