@@ -7,13 +7,12 @@ app = modal.App("moises-demucs-worker")
 
 def download_models():
     """Descarga los modelos permanentemente en el disco de la nube durante la compilación"""
-    import torch
     from demucs.pretrained import get_model
-    print("Pre-descargando Demucs Model para evitar tiempos de espera y ahorrar dinero...")
+    print("Pre-descargando Demucs Models (6s y FT) para evitar tiempos de espera...")
     get_model('htdemucs_6s')
+    get_model('htdemucs_ft')
 
-# 1. Definimos el ADN de nuestro servidor virtual (Software e Inteligencia Artificial)
-# Cuando esto despierte, auto-instalará todo esto en la GPU
+# 1. Definimos el ADN de nuestro servidor virtual
 image = (
     modal.Image.debian_slim(python_version="3.10")
     .apt_install("ffmpeg")
@@ -27,23 +26,18 @@ image = (
     .run_function(download_models)
 )
 
-# 2. Le pedimos formalmente a Modal una tarjeta NVIDIA T4 con un tiempo máximo de 10 min
+# 2. Configuración de ejecución en GPU T4
 @app.function(image=image, gpu="T4", timeout=600)
 def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
-    """
-    Función que vivirá en los servidores de Modal, recibirá bytes de música
-    por red local e inyectará toda la matemática usando el poder CUDA (GPU).
-    """
     import torch
     import tempfile
     import soundfile as sf
     from demucs.pretrained import get_model
     from demucs.apply import apply_model
     from demucs.audio import convert_audio
-    import torchaudio
     import subprocess
     
-    print("[MODAL GPU] Nueva solicitud de extracción recibida!")
+    print(f"[MODAL GPU] Nueva solicitud: {requested_tracks} (HiFi: {is_hi_fi})")
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         input_mp3 = os.path.join(tmp_dir, "input_audio.mp3")
@@ -51,39 +45,36 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
         with open(input_mp3, "wb") as f:
             f.write(audio_bytes)
             
-        print("[MODAL GPU] Convirtiendo audio a WAV de forma segura con ffmpeg...")
-        # Usa subprocess para convertir sin depender de los códecs rotos de torchaudio
         subprocess.run(["ffmpeg", "-y", "-i", input_mp3, input_wav], capture_output=True, check=True)
         
-        print("[MODAL GPU] Cargando bytes usando soundfile (anulando torchaudio)...")
-        # sf.read devuelve (frames, channels), asi que necesitamos transponerlo a (channels, frames)
         wav_numpy, sr = sf.read(input_wav, dtype='float32')
         if len(wav_numpy.shape) == 1:
             wav_numpy = wav_numpy.reshape(-1, 1)
             
         wav = torch.from_numpy(wav_numpy).transpose(0, 1)
         
-        # Cargar Modelo avanzado (la GPU lo absorbe en 1 segundo a su VRAM)
-        print("[MODAL GPU] Cargando modelo htdemucs_6s a Memoria de Vídeo...")
-        model = get_model('htdemucs_6s')
-        model.cuda() # MAGIA: Transferir Cerebro a Nvidia
+        # --- LÓGICA HÍBRIDA DE MODELOS ---
+        # Si se pide guitarra o piano, usamos el modelo de 6 pistas.
+        # Si solo se pide Voz/Pista o las 4 básicas, usamos htdemucs_ft (Fine-Tuned) que es superior en calidad.
+        needs_6s = any(t in requested_tracks for t in ["guitar", "piano"])
+        model_name = 'htdemucs_6s' if needs_6s else 'htdemucs_ft'
+        
+        print(f"[MODAL GPU] Seleccionado modelo: {model_name}")
+        model = get_model(model_name)
+        model.cuda()
         model.eval()
 
         wav = convert_audio(wav, sr, model.samplerate, model.audio_channels)
-        wav = wav.cuda() # MAGIA: Transferir Canción a Nvidia
+        wav = wav.cuda()
         
-        # Normalización matemática
         ref = wav.mean(0)
         wav = (wav - ref.mean()) / ref.std()
 
-        # Configuración Inteligente y Rentabilidad ($)
-        # Nivel PRO: 12 pasadas. Máxima calidad de disección sonora.
-        # Nivel Free: 2 pasadas (15 segs ~ 1/3 de centavo).
+        # Configuración HI-FI vinculada
         shifts_amt = 12 if is_hi_fi else 2
-        overlap_amt = 0.25
+        overlap_amt = 0.5 if is_hi_fi else 0.25 # Overlap 0.5 en HiFi para máxima suavidad
         
-        print(f"[MODAL GPU] Iniciando disección matemática ⚡ (Shifts: {shifts_amt}, Overlap: {overlap_amt})")
-        # Procesamiento en la Tarjeta de Video 
+        print(f"[MODAL GPU] Iniciando disección ⚡ (Shifts: {shifts_amt}, Overlap: {overlap_amt})")
         with torch.no_grad():
             sources = apply_model(
                 model, 
@@ -97,28 +88,27 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
         
         sources = sources * ref.std() + ref.mean()
         
+        # Mapeo universal de stems
         stem_mapping = {
-            "vocals.wav": "vocals", "drums.wav": "drums", 
-            "bass.wav": "bass", "other.wav": "other",
-            "guitar.wav": "guitar", "piano.wav": "piano"
+            "vocals": "vocals", 
+            "drums": "drums", 
+            "bass": "bass", 
+            "other": "other",
+            "guitar": "guitar", 
+            "piano": "piano"
         }
         
-        # Empacar las ondas en trozos de bytes para mandarlos por internet de vuelta a tu NextJS
-        print("[MODAL GPU] Empaquetando piezas extraídas...")
         stems_bytes = {}
         for idx, stem_name in enumerate(model.sources):
-            expected_filename = f"{stem_name}.wav"
-            my_stem_name = stem_mapping.get(expected_filename)
+            my_stem_name = stem_mapping.get(stem_name, stem_name)
             
             if my_stem_name in requested_tracks or (my_stem_name == "vocals" and "vocals" in requested_tracks):
                 stem_audio = sources[idx].cpu().numpy().T
-                
                 buf = io.BytesIO()
                 sf.write(buf, stem_audio, model.samplerate, format='WAV')
                 stems_bytes[my_stem_name] = buf.getvalue()
         
         if "instrumental" in requested_tracks:
-            # Mezclar pista de kareoke combinando todo menos la voz
             combined_audio = None
             for idx, stem_name in enumerate(model.sources):
                 if stem_name != "vocals":
@@ -131,5 +121,5 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
             sf.write(buf, combined_audio, model.samplerate, format='WAV')
             stems_bytes["instrumental"] = buf.getvalue()
             
-        print("[MODAL GPU] ¡Misión Cumplida! Devolviendo los paquetes de audio a la central.")    
+        print(f"[MODAL GPU] Completado. Enviando {len(stems_bytes)} tracks.")    
         return stems_bytes

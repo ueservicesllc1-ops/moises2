@@ -33,14 +33,20 @@ class AudioProcessor:
             from demucs.pretrained import get_model
             from demucs.apply import apply_model
             
-            print("Loading Demucs model 'htdemucs_6s'...")
-            model = get_model('htdemucs_6s')
+            # --- LÓGICA HÍBRIDA DE MODELOS ---
+            # Si se pide guitarra o piano, usamos el modelo de 6 pistas.
+            # Si solo se pide Voz/Pista o las 4 básicas, usamos htdemucs_ft (Fine-Tuned) que es superior.
+            needs_6s = any(t in (requested_tracks or []) for t in ["guitar", "piano"]) 
+            model_name = 'htdemucs_6s' if needs_6s else 'htdemucs_ft'
+            
+            print(f"Loading Demucs model '{model_name}'...")
+            model = get_model(model_name)
             model.cpu()
             model.eval()
             
             # Update progress: Processing with Demucs
             if task_callback:
-                task_callback(40, "Processing with Demucs AI...")
+                task_callback(40, f"Processing with Demucs AI ({model_name})...")
             
             print(f"Loading audio file: {file_path}")
             # Use librosa instead of torchaudio.load to bypass torchcodec MP3 decoding issues on Windows
@@ -66,12 +72,12 @@ class AudioProcessor:
             # Configurar Calidad (HiFi vs Standar/Fast)
             # shifts = evalúa música múltiples veces para cancelar artefactos robóticos en IA
             shifts_amt = 12 if is_hi_fi else 2
-            overlap_amt = 0.25
+            overlap_amt = 0.5 if is_hi_fi else 0.25 # Overlap 0.5 para suavidad en HiFi
             
             if is_hi_fi:
-                print(">>> RUNNING IN HI-FI MODE (Ultra Quality) - Shifts: 12")
+                print(f">>> RUNNING IN HI-FI MODE (Ultra Quality) - Model: {model_name}, Shifts: 12, Overlap: {overlap_amt}")
             else:
-                print(">>> RUNNING IN FAST MODE (Standard) - Shifts: 2")
+                print(f">>> RUNNING IN FAST MODE (Standard) - Model: {model_name}, Shifts: 2")
             
             # Apply model sin progress=True para evitar el crash de caracteres unicode en la terminal de Windows
             with torch.no_grad():
@@ -88,7 +94,7 @@ class AudioProcessor:
             sources = sources * ref.std() + ref.mean()
             
             # Save stems
-            model_dir = output_dir / "htdemucs_6s" / Path(file_path).stem
+            model_dir = output_dir / model_name / Path(file_path).stem
             model_dir.mkdir(parents=True, exist_ok=True)
             
             print("Saving stems...")
@@ -109,7 +115,7 @@ class AudioProcessor:
             file_name = Path(file_path).stem
             
             # Demucs creates a folder with the model name
-            model_dir = output_dir / "htdemucs_6s" / file_name
+            model_dir = output_dir / model_name / file_name
             
             if model_dir.exists():
                 # Map Demucs output to our expected format
