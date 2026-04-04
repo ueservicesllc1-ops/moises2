@@ -132,10 +132,10 @@ class AudioProcessor:
                 if requested_tracks:
                     print(f"Creating only requested tracks: {requested_tracks}")
                     
-                    # Para vocals-instrumental, usar método sustractivo (Original - Voz)
+                    # Para vocals-instrumental, usar método sustractivo (Original - Voz) CORREGIDO
                     if "vocals" in requested_tracks and "instrumental" in requested_tracks:
-                        print(f"Modo: Vocals + Instrumental Sustractivo")
-                        # Vocals
+                        print(f"Modo: Vocals + Instrumental Sustractivo Corregido")
+                        
                         vocals_idx = -1
                         for idx, name in enumerate(model.sources):
                             if name == "vocals":
@@ -143,15 +143,24 @@ class AudioProcessor:
                                 break
                         
                         if vocals_idx != -1:
-                            # Vocals
-                            vocals_audio = sources[vocals_idx].numpy().T
+                            # 1. Vocals (Real Amplitude)
+                            vocals_real = sources[vocals_idx] # sources ya está escalado atrás en este punto
+                            vocals_audio = vocals_real.numpy().T
                             vocals_path = model_dir / "vocals.wav"
                             sf.write(str(vocals_path), vocals_audio, model.samplerate)
                             stems["vocals"] = str(vocals_path)
                             
-                            # Instrumental Sustractivo (Original - Voz)
-                            # Usamos la señal normalizada (wav) para que coincida con la voz separada
-                            instrumental_audio = (wav - sources[vocals_idx]).numpy().T
+                            # 2. Instrumental Sustractivo (Original - Voz) 
+                            # IMPORTANTE: wav ya está normalizado antes de apply_model (line 62)
+                            # sources (line 88) ya fue escalado de vuelta: sources = sources * ref.std() + ref.mean()
+                            # Así que mezclamos en espacio REAL usando el audio original antes del STD
+                            audio_orig_real, _ = librosa.load(file_path, sr=model.samplerate, mono=False)
+                            if audio_orig_real.ndim == 1:
+                                audio_orig_real = np.expand_dims(audio_orig_real, axis=0)
+                            
+                            # Restar voz en amplitud real del audio original real
+                            instrumental_audio = (audio_orig_real - vocals_audio.T)
+                            instrumental_audio = instrumental_audio.T
                             
                             # Normalización suave
                             max_val = np.max(np.abs(instrumental_audio))
