@@ -162,7 +162,6 @@ async def separate_audio_handler(
         # Procesar en background
         is_hifi_bool = hi_fi.lower() == "true"
         print(f"[DEBUG] HiFi Mode: {'ON' if is_hifi_bool else 'OFF'} (Value received: '{hi_fi}')")
-        print(f"[DEBUG] Requested Tracks: {requested_tracks}")
         
         background_tasks.add_task(
             process_audio, 
