@@ -26,7 +26,7 @@ image = (
     .run_function(download_models)
 )
 
-# 2. Configuración de ejecución en GPU T4 - Timeout de 20 min
+# 2. Configuración de ejecución en GPU T4 - Timeout de 20 min (1200s)
 @app.function(image=image, gpu="T4", timeout=1200)
 def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
     import torch
@@ -38,7 +38,7 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
     from demucs.audio import convert_audio
     import subprocess
     
-    print(f"[MODAL GPU] Request: {requested_tracks} (HiFi: {is_hi_fi})")
+    print(f"[MODAL GPU] Iniciando Separación SUSTRACTIVA: {requested_tracks} (HiFi: {is_hi_fi})")
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         input_mp3 = os.path.join(tmp_dir, "input_audio.mp3")
@@ -52,32 +52,33 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
         if len(wav_numpy.shape) == 1:
             wav_numpy = wav_numpy.reshape(-1, 1)
             
-        wav = torch.from_numpy(wav_numpy).transpose(0, 1)
+        wav_orig = torch.from_numpy(wav_numpy).transpose(0, 1)
         
         # --- LÓGICA HÍBRIDA ---
         needs_6s = any(t in requested_tracks for t in ["guitar", "piano"])
         model_name = 'htdemucs_6s' if needs_6s else 'htdemucs_ft'
         
-        print(f"[MODAL GPU] Modelo: {model_name}")
+        print(f"[MODAL GPU] Usando Modelo de Extracción: {model_name}")
         model = get_model(model_name)
         model.cuda()
         model.eval()
 
-        wav = convert_audio(wav, sr, model.samplerate, model.audio_channels)
-        wav = wav.cuda()
+        # Convertir original a los specs del modelo
+        wav_proc = convert_audio(wav_orig, sr, model.samplerate, model.audio_channels)
+        wav_proc = wav_proc.cuda()
         
-        ref = wav.mean(0)
-        wav = (wav - ref.mean()) / ref.std()
+        ref = wav_proc.mean(0)
+        wav_proc = (wav_proc - ref.mean()) / ref.std()
 
-        # HiFi Settings
-        shifts_amt = 8 if is_hi_fi else 2
-        overlap_amt = 0.6 if is_hi_fi else 0.25 
+        # Configuración Ultra Calidad
+        shifts_amt = 10 if is_hi_fi else 2
+        overlap_amt = 0.75 if is_hi_fi else 0.25 
         
-        print(f"[MODAL GPU] Procesando shifts={shifts_amt}, overlap={overlap_amt}...")
+        print(f"[MODAL GPU] Procesando ({shifts_amt} pasadas, {overlap_amt} solapamiento)...")
         with torch.no_grad():
             sources = apply_model(
                 model, 
-                wav[None], 
+                wav_proc[None], 
                 device='cuda', 
                 shifts=shifts_amt, 
                 split=True, 
@@ -85,37 +86,45 @@ def separate_audio(audio_bytes: bytes, requested_tracks: list, is_hi_fi: bool):
                 progress=True
             )[0]
         
+        # Deshacer normalización para volver a amplitud real
         sources = sources * ref.std() + ref.mean()
         
         stems_bytes = {}
-        # Mapeo de stems individuales
+        vocals_idx = -1
+        
+        # Identificar índice de voz y guardar pistas individuales
         for idx, stem_name in enumerate(model.sources):
+            if stem_name == "vocals":
+                vocals_idx = idx
+            
             if stem_name in requested_tracks:
                 stem_audio = sources[idx].cpu().numpy().T
                 buf = io.BytesIO()
                 sf.write(buf, stem_audio, model.samplerate, format='WAV')
                 stems_bytes[stem_name] = buf.getvalue()
         
-        # --- MEZCLA INSTRUMENTAL PROFESIONAL ---
+        # --- MÉTODO SUSTRACTIVO PARA INSTRUMENTAL ---
         if "instrumental" in requested_tracks:
-            print("[MODAL GPU] Creando mezcla instrumental optimizada...")
-            instrumental_audio = None
-            for idx, stem_name in enumerate(model.sources):
-                if stem_name != "vocals":
-                    audio = sources[idx].cpu().numpy().T
-                    if instrumental_audio is None:
-                        instrumental_audio = audio
-                    else:
-                        instrumental_audio += audio
+            print("[MODAL GPU] Aplicando sustracción (Original - Voz)...")
             
-            # NORMALIZACIÓN: Evita distorsión y mantiene el "punch"
-            max_val = np.max(np.abs(instrumental_audio))
-            if max_val > 0.99:
-                print(f"[MODAL GPU] Normalizando instrumental (Peak: {max_val:.2f})")
-                instrumental_audio = instrumental_audio / max_val * 0.98
+            # Encontrar la voz detectada (escalada a la frecuencia original)
+            if vocals_idx != -1:
+                # La voz separada por Demucs
+                vocals_source = sources[vocals_idx].cpu() # (channels, frames)
                 
-            buf = io.BytesIO()
-            sf.write(buf, instrumental_audio, model.samplerate, format='WAV')
-            stems_bytes["instrumental"] = buf.getvalue()
+                # Para mayor pureza, en lugar de sumar bajo/batería/otros, 
+                # restamos la voz del archivo procesado original
+                # Así mantenemos CUALQUER otro sonido (incluso los no identificados)
+                instrumental_audio = (wav_proc.cpu() - vocals_source).numpy().T
+                
+                # Normalización suave para evitar clipping
+                max_val = np.max(np.abs(instrumental_audio))
+                if max_val > 0.99:
+                    instrumental_audio = instrumental_audio / max_val * 0.98
+                    
+                buf = io.BytesIO()
+                sf.write(buf, instrumental_audio, model.samplerate, format='WAV')
+                stems_bytes["instrumental"] = buf.getvalue()
             
+        print(f"[MODAL GPU] Finalizado con éxito.")    
         return stems_bytes

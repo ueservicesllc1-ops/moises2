@@ -132,44 +132,36 @@ class AudioProcessor:
                 if requested_tracks:
                     print(f"Creating only requested tracks: {requested_tracks}")
                     
-                    # Para vocals-instrumental, combinar drums + bass + other
+                    # Para vocals-instrumental, usar método sustractivo (Original - Voz)
                     if "vocals" in requested_tracks and "instrumental" in requested_tracks:
-                        print(f"Modo: Vocals + Instrumental")
+                        print(f"Modo: Vocals + Instrumental Sustractivo")
                         # Vocals
-                        vocals_path = model_dir / "vocals.wav"
-                        if vocals_path.exists():
+                        vocals_idx = -1
+                        for idx, name in enumerate(model.sources):
+                            if name == "vocals":
+                                vocals_idx = idx
+                                break
+                        
+                        if vocals_idx != -1:
+                            # Vocals
+                            vocals_audio = sources[vocals_idx].numpy().T
+                            vocals_path = model_dir / "vocals.wav"
+                            sf.write(str(vocals_path), vocals_audio, model.samplerate)
                             stems["vocals"] = str(vocals_path)
-                            print(f"Found vocals: {vocals_path}")
-                        
-                        # Instrumental = ALL EXCEPT vocals
-                        instrumental_tracks = []
-                        for track in stem_mapping.values():
-                            if track != "vocals":
-                                track_path = model_dir / f"{track}.wav"
-                                if track_path.exists():
-                                    instrumental_tracks.append(track_path)
-                        
-                        if instrumental_tracks:
-                            # Combinar los tracks instrumentales
-                            combined_audio = None
-                            sr = None
                             
-                            for track_path in instrumental_tracks:
-                                audio, sample_rate = librosa.load(str(track_path), sr=None)
-                                sr = sample_rate
+                            # Instrumental Sustractivo (Original - Voz)
+                            # Usamos la señal normalizada (wav) para que coincida con la voz separada
+                            instrumental_audio = (wav - sources[vocals_idx]).numpy().T
+                            
+                            # Normalización suave
+                            max_val = np.max(np.abs(instrumental_audio))
+                            if max_val > 0.99:
+                                instrumental_audio = instrumental_audio / max_val * 0.98
                                 
-                                if combined_audio is None:
-                                    combined_audio = audio
-                                else:
-                                    # Asegurar que tengan la misma longitud
-                                    min_length = min(len(combined_audio), len(audio))
-                                    combined_audio = combined_audio[:min_length] + audio[:min_length]
-                            
-                            # Guardar track instrumental combinado
                             instrumental_path = model_dir.parent / "instrumental.wav"
-                            sf.write(str(instrumental_path), combined_audio, sr)
+                            sf.write(str(instrumental_path), instrumental_audio, model.samplerate)
                             stems["instrumental"] = str(instrumental_path)
-                            print(f"Created instrumental: {instrumental_path}")
+                            print(f"Created subtractive instrumental: {instrumental_path}")
                     
                     else:
                         # ≡ƒöÑ FIX: Procesar tracks individuales solicitados
