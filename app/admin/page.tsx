@@ -250,7 +250,7 @@ export default function AdminPage() {
               
               {/* Aviso de restricciones */}
               <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4 mb-6">
-                <h3 className="text-yellow-400 font-bold mb-2">⚠️ Restricciones a partir del 1 de Noviembre 2025</h3>
+                <h3 className="text-yellow-400 font-bold mb-2">⚠️ Restricciones a partir del 1 de Agosto 2026</h3>
                 <ul className="text-yellow-200 text-sm space-y-1">
                   <li>• Usuarios FREE: Solo 3 canciones en su lista</li>
                   <li>• Usuarios FREE: No podrán separar nuevos multitracks</li>

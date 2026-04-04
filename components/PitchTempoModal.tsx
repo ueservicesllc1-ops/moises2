@@ -271,7 +271,7 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
     }
     const mp3buf = mp3encoder.flush()
     if (mp3buf.length > 0) mp3Data.push(mp3buf)
-    return new Blob(mp3Data, { type: 'audio/mp3' })
+    return new Blob(mp3Data as any, { type: 'audio/mp3' })
   }
 
   const getShiftedKey = () => {

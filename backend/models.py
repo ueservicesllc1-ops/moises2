@@ -28,7 +28,7 @@ class ProcessingTask(BaseModel):
     created_at: datetime = datetime.now()
     completed_at: Optional[datetime] = None
     chords: Optional[List[Dict]] = None
-    key: Optional[Dict] = None
+    key: Optional[str] = None
     bpm: Optional[int] = None
     duration: Optional[float] = None
     timeSignature: Optional[str] = None

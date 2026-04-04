@@ -122,9 +122,7 @@ const HeroPopup: React.FC<HeroPopupProps> = ({ isOpen, onClose }) => {
               ¡Bienvenido al futuro de la música!
             </h2>
             <div className="text-xl text-gray-400 leading-relaxed">
-              <p className="mb-4">
-                <span className="text-gray-300 font-bold">¡GRATIS hasta el 31 de octubre de 2025!</span>
-              </p>
+                <span className="text-gray-300 font-bold">¡GRATIS hasta Julio de 2026!</span>
               <p className="text-gray-500">
                 Después de este período, Judith será de uso limitado para quienes no obtengan una suscripción premium.
               </p>
@@ -182,7 +180,7 @@ const HeroPopup: React.FC<HeroPopupProps> = ({ isOpen, onClose }) => {
             }}
           >
             <div className="text-sm text-gray-400">
-              Oferta válida hasta el <span className="text-yellow-400 font-bold">31 de octubre, 2025</span>
+              Oferta válida hasta <span className="text-yellow-400 font-bold">Julio, 2026</span>
             </div>
           </div>
         </div>

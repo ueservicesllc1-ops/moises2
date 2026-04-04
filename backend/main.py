@@ -9,11 +9,12 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional, Dict
 import json
-
 from audio_processor_real import audio_processor
 from chord_analyzer import ChordAnalyzer
 from models import ProcessingTask, TaskStatus
-# from database import get_db, init_db  # Commented out - not using database
+from database import get_db, init_db, TaskDB, SessionLocal
+from datetime import datetime
+
 from b2_storage import b2_storage
 import librosa
 import numpy as np
@@ -50,7 +51,7 @@ app.add_middleware(
 # Initialize B2 only (database not used)
 @app.on_event("startup")
 async def startup_event():
-    # init_db()  # Commented out - not using database
+    init_db()
     await b2_storage.initialize()
 
 # Audio processor instance (already imported)
@@ -139,6 +140,25 @@ async def separate_audio_handler(
         )
         tasks_storage[task_id] = task
         
+        # Guardar en base de datos para persistencia y Metabase
+        try:
+            from database import TaskDB, SessionLocal
+            db = SessionLocal()
+            db_task = TaskDB(
+                id=task_id,
+                original_filename=file.filename,
+                file_path=str(file_path),
+                separation_type=separation_type,
+                status=TaskStatus.PROCESSING,
+                progress=0
+            )
+            db.add(db_task)
+            db.commit()
+            db.close()
+            print(f"[DATABASE] Tarea de separación inicializada: {task_id}")
+        except Exception as db_e:
+            print(f"[DATABASE ERROR] No se pudo guardar tarea inicial: {db_e}")
+
         # Procesar en background
         background_tasks.add_task(
             process_audio, 
@@ -177,7 +197,7 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
         tasks_storage[task.id] = task
         print(f"[PROCESS] Task stored in memory: {task.id}")
         
-        # Callback para actualizar progreso
+        # Callback para actualizar progreso (en memoria y DB)
         def update_progress(progress: int, message: str = ""):
             current_task = tasks_storage.get(task.id)
             if current_task:
@@ -187,6 +207,16 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
                 task.progress = progress
                 tasks_storage[task.id] = task
             print(f"[PROGRESS] {progress}% - {message} [Task ID: {task.id}]")
+            
+            # Persistir progreso en DB cada vez que cambia significativamente
+            try:
+                from database import TaskDB, SessionLocal
+                db = SessionLocal()
+                db.query(TaskDB).filter(TaskDB.id == task.id).update({"progress": progress})
+                db.commit()
+                db.close()
+            except:
+                pass
         
         # Determinar qué tracks solicitar
         requested_tracks = None
@@ -248,10 +278,10 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
         task.progress = 95
         tasks_storage[task.id] = task
         
-        # Analizar metadata del audio original
+        # Analizar metadata del audio original (En hilo separado para NO bloquear el event loop)
         print(f"[PROCESS] Analizando metadata del audio...")
         try:
-            bpm, duration = detect_bpm_and_duration(task.file_path)
+            bpm, duration = await asyncio.to_thread(detect_bpm_and_duration, task.file_path)
             print(f"[PROCESS] BPM detectado: {bpm}, Duración: {duration}s")
         except Exception as e:
             print(f"[PROCESS] Error detectando BPM: {e}")
@@ -264,9 +294,9 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
             from collections import Counter
             analyzer = ChordAnalyzer()
             
-            # Analizar acordes
+            # Analizar acordes (En hilo separado para NO bloquear el event loop)
             print(f"[PROCESS] Analizando acordes...")
-            chords_list = analyzer.analyze_chords(task.file_path)
+            chords_list = await asyncio.to_thread(analyzer.analyze_chords, task.file_path)
             
             # Convertir acordes a dict
             chords_data = [
@@ -283,8 +313,7 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
             
             # Detectar key basándose en la escala (más preciso)
             if len(chords_list) > 0:
-                # Definir escalas diatónicas (7 acordes por tonalidad)
-                # Formato: tonalidad -> [I, ii, iii, IV, V, vi, vii°]
+                # [Scales definitions...]
                 major_scales = {
                     'C': ['C', 'Dm', 'Em', 'F', 'G', 'Am', 'Bdim'],
                     'C#': ['C#', 'D#m', 'E#m', 'F#', 'G#', 'A#m', 'B#dim'],
@@ -325,8 +354,8 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
                 }
                 print(f"[PROCESS] Key detectada por escala: {key} major (coincidencia: {best_match_score:.2f})")
             else:
-                # Fallback: usar análisis espectral
-                key_result = analyzer.analyze_key(task.file_path)
+                # Fallback: usar análisis espectral (en hilo separado)
+                key_result = await asyncio.to_thread(analyzer.analyze_key, task.file_path)
                 key = key_result.key if key_result else "E"
                 keyInfo_data = {
                     "key": key_result.key if key_result else "Unknown",
@@ -357,6 +386,30 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
         
         tasks_storage[task.id] = task
         
+        # PERSISTIR RESULTADOS EN BASE DE DATOS PARA METABASE
+        try:
+            from database import TaskDB, SessionLocal
+            import json
+            db = SessionLocal()
+            db_update = {
+                "status": task.status,
+                "progress": 100,
+                "stems": json.dumps(stem_urls),
+                "bpm": bpm,
+                "key": key,
+                "duration": duration,
+                "chords": json.dumps(chords_data),
+                "completed_at": datetime.utcnow()
+            }
+            db.query(TaskDB).filter(TaskDB.id == task.id).update(db_update)
+            db.commit()
+            db.close()
+            print(f"[DATABASE] Resultados guardados en Metabase para tarea: {task.id}")
+        except Exception as db_e:
+            print(f"[DATABASE ERROR] No se pudieron guardar resultados finales: {db_e}")
+            import traceback
+            traceback.print_exc()
+
         print(f"\n{'='*60}")
         print(f"[PROCESS] Audio processing COMPLETED for task: {task.id}")
         print(f"   - Status: {task.status}")
@@ -574,8 +627,43 @@ async def download_stem(task_id: str, stem_name: str):
     )
 
 async def get_task_status(task_id: str) -> Optional[ProcessingTask]:
-    """Get task status from memory storage"""
-    return tasks_storage.get(task_id)
+    """Get task status from memory storage or database fallback"""
+    # 1. Intentar memoria (más rápido para tareas activas)
+    task = tasks_storage.get(task_id)
+    if task:
+        return task
+        
+    # 2. Intentar Base de Datos (para tareas persistentes/Metabase)
+    try:
+        from database import TaskDB, SessionLocal
+        import json
+        db = SessionLocal()
+        db_task = db.query(TaskDB).filter(TaskDB.id == task_id).first()
+        db.close()
+        
+        if db_task:
+            # Convertir de DB a ProcessingTask (Pydantic)
+            stems = json.loads(db_task.stems) if db_task.stems else None
+            chords = json.loads(db_task.chords) if db_task.chords else None
+            
+            return ProcessingTask(
+                id=db_task.id,
+                original_filename=db_task.original_filename,
+                file_path=db_task.file_path,
+                separation_type=db_task.separation_type,
+                status=db_task.status,
+                progress=db_task.progress,
+                stems=stems,
+                error=db_task.error,
+                bpm=db_task.bpm,
+                key=db_task.key,
+                duration=db_task.duration,
+                chords=chords
+            )
+    except Exception as e:
+        print(f"[DATABASE ERROR] Error consultando tarea {task_id}: {e}")
+        
+    return None
 
 # Chord Analysis Endpoints
 @app.post("/api/analyze-chords")

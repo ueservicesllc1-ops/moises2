@@ -22,6 +22,10 @@ class TaskDB(Base):
     progress = Column(Integer, default=0)
     stems = Column(Text)  # JSON string
     error = Column(Text)
+    bpm = Column(Integer)
+    key = Column(String)
+    duration = Column(Float)
+    chords = Column(Text)  # JSON string
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime)
 
