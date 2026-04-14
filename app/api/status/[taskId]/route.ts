@@ -11,8 +11,7 @@ export async function GET(
   try {
     const { taskId } = params
     
-    // En Railway, el backend está en el mismo contenedor
-    const backendUrl = 'http://127.0.0.1:8000'
+    const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
     
     console.log('🔍 Checking status for task:', taskId)
     

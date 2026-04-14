@@ -282,23 +282,40 @@ const AudioSeparationModal: React.FC<AudioSeparationModalProps> = ({
         </div>
 
         {/* HI-FI Toggle */}
-        <div className="flex items-center justify-between p-4 bg-gray-700 rounded-lg mb-6">
-          <div className="flex items-center space-x-3">
-            <Zap className="h-5 w-5 text-gray-300" />
-            <span className="text-white font-medium">HI-FI</span>
-          </div>
-          <button
-            onClick={() => setHiFiMode(!hiFiMode)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              hiFiMode ? 'bg-blue-600' : 'bg-gray-600'
-            }`}
-          >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                hiFiMode ? 'translate-x-6' : 'translate-x-1'
+        <div
+          className={`p-4 rounded-lg border-2 cursor-pointer transition-all mb-6 ${
+            hiFiMode
+              ? 'border-yellow-500 bg-yellow-500/10'
+              : 'border-gray-600 bg-gray-800/30 hover:border-gray-500'
+          }`}
+          onClick={() => setHiFiMode(!hiFiMode)}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <Zap className={`h-5 w-5 ${hiFiMode ? 'text-yellow-400' : 'text-gray-400'}`} />
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className={`font-bold ${hiFiMode ? 'text-yellow-300' : 'text-white'}`}>HI-FI</span>
+                  <span className="text-[10px] bg-yellow-500 text-black font-bold px-1.5 py-0.5 rounded">PRO</span>
+                </div>
+                <div className="text-xs text-gray-400 mt-0.5">
+                  Motor MDX-Net Espectral · Pistas Instrumentales Perfectas · 24-bit
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); setHiFiMode(!hiFiMode); }}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                hiFiMode ? 'bg-yellow-500' : 'bg-gray-600'
               }`}
-            />
-          </button>
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  hiFiMode ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
         </div>
 
         {/* Save Button */}

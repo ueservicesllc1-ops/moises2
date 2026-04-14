@@ -29,6 +29,20 @@ class TaskDB(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime)
 
+
+class SeparationCacheDB(Base):
+    __tablename__ = "separation_cache"
+
+    cache_key = Column(String, primary_key=True, index=True)
+    stems = Column(Text)  # JSON string
+    bpm = Column(Integer)
+    key = Column(String)
+    duration = Column(Float)
+    chords = Column(Text)  # JSON string
+    key_info = Column(Text)  # JSON string
+    model_version = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 def init_db():
     """Initialize database tables"""
     Base.metadata.create_all(bind=engine)

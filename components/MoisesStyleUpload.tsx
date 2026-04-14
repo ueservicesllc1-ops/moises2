@@ -28,6 +28,7 @@ interface SeparationOptions {
   guitar?: boolean;
   piano?: boolean;
   hiFiMode: boolean;
+  qualityProfile: 'fast' | 'pro_balanced' | 'hifi';
 }
 
 const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete, preloadedFile }) => {
@@ -54,7 +55,8 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
     other: false,
     guitar: false,
     piano: false,
-    hiFiMode: false
+    hiFiMode: false,
+    qualityProfile: 'pro_balanced'
   });
 
   // Efecto para manejar archivo precargado
@@ -221,6 +223,8 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
       formData.append('separation_type', getSeparationType(separationOptions));
       formData.append('hi_fi', separationOptions.hiFiMode.toString());
       formData.append('user_id', user.uid);
+      const effectiveQualityProfile = separationOptions.hiFiMode ? 'hifi' : separationOptions.qualityProfile;
+      formData.append('quality_profile', effectiveQualityProfile);
       
       // 🔥 FIX: Enviar tracks seleccionados cuando es custom
       if (separationOptions.separationType === 'custom') {
@@ -450,12 +454,13 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
             const prefetchPromises = stemUrls.map(async (url: any) => {
               if (typeof url !== 'string') return;
               
-              // Transmutar al proxy igual que hace el Mixer
+              // Siempre usar el proxy del backend → el backend tiene fallback local en disco
+              // (uploads/{task_id}/demucs_output/) antes de intentar B2
               let proxyUrl = url;
               const b2Regex = /^https?:\/\/(?:s3\.us-east-005|f005)\.backblazeb2\.com\/(?:file\/)?(?:moises2|Multitrack)\/audio\/(.+)$/i;
               const match = url.match(b2Regex);
               if (match && match[1]) {
-                 proxyUrl = `/backend-audio/${match[1]}`;
+                proxyUrl = `/backend-audio/${match[1]}`;
               }
               
               // Revisar si ya está en caché
@@ -688,20 +693,21 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
              className={`w-full p-2 text-sm border transition-all duration-300 text-left relative shadow-lg overflow-hidden bg-black ${
                !isPremium ? 'opacity-60 cursor-not-allowed border-gray-700 bg-gray-900' :
                separationOptions.hiFiMode
-                 ? 'border-white/30 bg-gradient-to-b from-white/20 via-white/10 to-transparent text-white hover:from-white/25 hover:via-white/15'
+                 ? 'border-yellow-400/60 bg-gradient-to-b from-yellow-500/20 via-yellow-400/10 to-transparent text-white hover:from-yellow-500/25'
                  : 'border-white/20 bg-gradient-to-b from-white/10 via-white/5 to-transparent text-white hover:from-white/15 hover:via-white/8'
              }`}
            >
              <div className={`w-4 h-2 rounded transition-colors absolute top-2 right-2 ${
-               separationOptions.hiFiMode ? 'bg-blue-500 animate-pulse' : 'bg-gray-500'
+               separationOptions.hiFiMode ? 'bg-yellow-400 animate-pulse' : 'bg-gray-500'
              }`}></div>
              <div className="flex items-center justify-between">
                <div>
-                 <div className="font-medium text-sm flex items-center">
-                   🎚️ Modo Hi-Fi
-                   {!isPremium && <span className="text-[10px] text-yellow-500 font-bold ml-2 border border-yellow-500 rounded px-1">PRO</span>}
+                 <div className="font-medium text-sm flex items-center gap-1.5">
+                   ✨ Modo Hi-Fi
+                   {!isPremium && <span className="text-[10px] text-yellow-500 font-bold border border-yellow-500 rounded px-1">PRO</span>}
+                   {separationOptions.hiFiMode && isPremium && <span className="text-[10px] text-black bg-yellow-400 font-bold rounded px-1">ACTIVO</span>}
                  </div>
-                 <div className="text-xs opacity-75">Calidad superior nivel audiófilo</div>
+                 <div className="text-[10px] opacity-70 mt-0.5">Motor MDX-Net Espectral · Pistas Puras a 24-bit</div>
                </div>
              </div>
            </button>
@@ -735,6 +741,12 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
               <p className="text-white font-medium text-base animate-pulse">
                 {uploadMessage || 'Procesando...'}
               </p>
+              {separationOptions.hiFiMode && (
+                <div className="flex items-center justify-center gap-1.5">
+                  <span className="text-[11px] bg-yellow-500 text-black font-bold px-2 py-0.5 rounded">✨ HI-FI ACTIVO</span>
+                  <span className="text-[10px] text-yellow-400">MDX-Net Espectral · 24-bit</span>
+                </div>
+              )}
               
               {/* Contador de tiempo */}
               <div className="text-blue-400 text-xl font-bold">

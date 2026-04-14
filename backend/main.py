@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 import os
 import uuid
 import asyncio
+import hashlib
 import tempfile
 from pathlib import Path
 from typing import List, Optional, Dict
@@ -12,8 +13,9 @@ import json
 from audio_processor_real import audio_processor
 from chord_analyzer import ChordAnalyzer
 from models import ProcessingTask, TaskStatus
-from database import get_db, init_db, TaskDB, SessionLocal
+from database import get_db, init_db, TaskDB, SessionLocal, SeparationCacheDB
 from datetime import datetime
+from datetime import timedelta
 
 from b2_storage import b2_storage
 import librosa
@@ -27,6 +29,35 @@ app = FastAPI(
     description="AI-powered audio separation service",
     version="1.0.0"
 )
+
+CACHE_MODEL_VERSION = os.getenv("SEPARATION_MODEL_VERSION", "demucs_pro_v3")
+CACHE_TTL_HOURS = int(os.getenv("SEPARATION_CACHE_TTL_HOURS", "168"))
+
+
+def determine_requested_tracks(separation_type: str, custom_tracks: Optional[Dict]) -> List[str]:
+    if separation_type == "custom" and custom_tracks:
+        requested = [track for track, enabled in custom_tracks.items() if enabled]
+    elif separation_type == "vocals-instrumental":
+        requested = ["vocals", "instrumental"]
+    elif separation_type == "vocals-drums-bass-other":
+        requested = ["vocals", "drums", "bass", "other", "guitar", "piano"]
+    else:
+        requested = ["vocals", "drums", "bass", "other", "guitar", "piano"]
+
+    if not requested:
+        requested = ["vocals", "drums", "bass", "other", "guitar", "piano"]
+    return requested
+
+
+def build_cache_key(audio_bytes: bytes, requested_tracks: List[str], quality_profile: str, hi_fi: bool) -> str:
+    payload = {
+        "audio_sha256": hashlib.sha256(audio_bytes).hexdigest(),
+        "requested_tracks": sorted(requested_tracks),
+        "quality_profile": (quality_profile or "pro_balanced").lower(),
+        "hi_fi": bool(hi_fi),
+        "model_version": CACHE_MODEL_VERSION,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 # CORS middleware
 app.add_middleware(
@@ -72,9 +103,10 @@ async def separate_with_demucs(
     separation_type: str = Form("vocals-instrumental"),
     hi_fi: str = Form("false"),
     separation_options: Optional[str] = Form(None),
-    user_id: Optional[str] = Form(None)
+    user_id: Optional[str] = Form(None),
+    quality_profile: Optional[str] = Form("pro_balanced"),
 ):
-    return await separate_audio_handler(background_tasks, file, separation_type, hi_fi, separation_options, user_id)
+    return await separate_audio_handler(background_tasks, file, separation_type, hi_fi, separation_options, user_id, quality_profile)
 
 @app.post("/separate")
 async def separate_alias(
@@ -83,9 +115,10 @@ async def separate_alias(
     separation_type: str = Form("vocals-instrumental"),
     hi_fi: str = Form("false"),
     separation_options: Optional[str] = Form(None),
-    user_id: Optional[str] = Form(None)
+    user_id: Optional[str] = Form(None),
+    quality_profile: Optional[str] = Form("pro_balanced"),
 ):
-    return await separate_audio_handler(background_tasks, file, separation_type, hi_fi, separation_options, user_id)
+    return await separate_audio_handler(background_tasks, file, separation_type, hi_fi, separation_options, user_id, quality_profile)
 
 async def separate_audio_handler(
     background_tasks: BackgroundTasks,
@@ -93,7 +126,8 @@ async def separate_audio_handler(
     separation_type: str = Form("vocals-instrumental"),
     hi_fi: str = Form("false"),
     separation_options: Optional[str] = Form(None),
-    user_id: Optional[str] = Form(None)
+    user_id: Optional[str] = Form(None),
+    quality_profile: Optional[str] = Form("pro_balanced"),
 ):
     """Separar audio usando Demucs"""
     try:
@@ -129,6 +163,85 @@ async def separate_audio_handler(
             except Exception as e:
                 print(f"[SEPARATE] Error parsing separation_options: {e}")
         
+        is_hifi_bool = hi_fi.lower() == "true"
+        profile_name = (quality_profile or "pro_balanced").lower()
+        if is_hifi_bool and profile_name != "hifi":
+            profile_name = "hifi"
+        requested_tracks = determine_requested_tracks(separation_type, custom_tracks)
+        if profile_name == "pro_balanced" and len(requested_tracks) > 8:
+            requested_tracks = requested_tracks[:8]
+
+        cache_key = build_cache_key(content, requested_tracks, profile_name, is_hifi_bool)
+        try:
+            db = SessionLocal()
+            cached = db.query(SeparationCacheDB).filter(SeparationCacheDB.cache_key == cache_key).first()
+            if cached:
+                cache_expired = False
+                if cached.created_at:
+                    expires_at = cached.created_at + timedelta(hours=CACHE_TTL_HOURS)
+                    cache_expired = datetime.utcnow() > expires_at
+                if cached.model_version and cached.model_version != CACHE_MODEL_VERSION:
+                    cache_expired = True
+
+                if cache_expired:
+                    print(f"[CACHE] Entry expired or version mismatch, key {cache_key[:12]}...")
+                    db.delete(cached)
+                    db.commit()
+                    db.close()
+                    cached = None
+
+            if cached:
+                task = ProcessingTask(
+                    id=task_id,
+                    original_filename=file.filename,
+                    file_path=str(file_path),
+                    separation_type=separation_type,
+                    status=TaskStatus.COMPLETED,
+                    progress=100
+                )
+                task.stems = json.loads(cached.stems) if cached.stems else {}
+                task.bpm = cached.bpm or 126
+                task.key = cached.key or "E"
+                task.duration = cached.duration or 0
+                task.chords = json.loads(cached.chords) if cached.chords else []
+                task.keyInfo = json.loads(cached.key_info) if cached.key_info else None
+                task.quality_profile = profile_name
+                task.estimated_cost_usd = 0.0
+                task.cache_hit = True
+                tasks_storage[task_id] = task
+
+                db_task = TaskDB(
+                    id=task_id,
+                    original_filename=file.filename,
+                    file_path=str(file_path),
+                    separation_type=separation_type,
+                    status=TaskStatus.COMPLETED,
+                    progress=100,
+                    stems=json.dumps(task.stems),
+                    bpm=task.bpm,
+                    key=task.key,
+                    duration=task.duration,
+                    chords=json.dumps(task.chords),
+                    completed_at=datetime.utcnow(),
+                )
+                db.add(db_task)
+                db.commit()
+                db.close()
+                print(f"[CACHE] Hit for task {task_id} with key {cache_key[:12]}...")
+                return {
+                    "success": True,
+                    "data": {
+                        "task_id": task_id,
+                        "status": "completed",
+                        "message": "Separación resuelta desde cache",
+                        "filename": file.filename,
+                        "cache_hit": True
+                    }
+                }
+            db.close()
+        except Exception as cache_e:
+            print(f"[CACHE] Cache lookup failed: {cache_e}")
+
         # Crear tarea
         task = ProcessingTask(
             id=task_id,
@@ -138,6 +251,9 @@ async def separate_audio_handler(
             status=TaskStatus.PROCESSING,
             progress=0
         )
+        task.quality_profile = profile_name
+        task.requested_tracks = requested_tracks
+        task.cache_key = cache_key
         tasks_storage[task_id] = task
         
         # Guardar en base de datos para persistencia y Metabase
@@ -160,14 +276,14 @@ async def separate_audio_handler(
             print(f"[DATABASE ERROR] No se pudo guardar tarea inicial: {db_e}")
 
         # Procesar en background
-        is_hifi_bool = hi_fi.lower() == "true"
         print(f"[DEBUG] HiFi Mode: {'ON' if is_hifi_bool else 'OFF'} (Value received: '{hi_fi}')")
         
         background_tasks.add_task(
-            process_audio, 
-            task, 
+            process_audio,
+            task,
             custom_tracks,
-            is_hifi_bool
+            is_hifi_bool,
+            task.quality_profile
         )
         
         return {
@@ -184,7 +300,12 @@ async def separate_audio_handler(
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = None, hi_fi: bool = False):
+async def process_audio(
+    task: ProcessingTask,
+    custom_tracks: Optional[Dict] = None,
+    hi_fi: bool = False,
+    quality_profile: str = "pro_balanced",
+):
     """Background task to process audio"""
     try:
         print(f"\n{'='*60}")
@@ -222,19 +343,12 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
                 pass
         
         # Determinar qué tracks solicitar
-        requested_tracks = None
-        
-        if task.separation_type == "custom" and custom_tracks:
-            requested_tracks = [track for track, enabled in custom_tracks.items() if enabled]
-        elif task.separation_type == "vocals-instrumental":
-            requested_tracks = ["vocals", "instrumental"]
-        elif task.separation_type == "vocals-drums-bass-other":
-            requested_tracks = ["vocals", "drums", "bass", "other", "guitar", "piano"]
-        else:
-            requested_tracks = ["vocals", "drums", "bass", "other", "guitar", "piano"]
-            
-        if not requested_tracks:
-            requested_tracks = ["vocals", "drums", "bass", "other", "guitar", "piano"]
+        requested_tracks = getattr(task, "requested_tracks", None) or determine_requested_tracks(task.separation_type, custom_tracks)
+
+        quality_profile = (quality_profile or getattr(task, "quality_profile", "pro_balanced") or "pro_balanced").lower()
+        if quality_profile == "pro_balanced" and len(requested_tracks) > 8:
+            # Guardrail: en perfil balanceado evitamos costos/latenicas extremos.
+            requested_tracks = requested_tracks[:8]
             
         print(f"[MODAL] Tracks a extraer: {requested_tracks}")
         update_progress(20, "Subiendo audio a Instancias Base de Inteligencia Artificial (Nvidia T4 GPU)...")
@@ -245,15 +359,21 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
 
         # 2. Conectar e Invocar el Cerebro en Modal
         import modal
-        print(f"[MODAL] 🚀 Disparando Cálculos Matriciales Serverless...")
+        print("[MODAL] Starting remote GPU separation...")
         update_progress(50, "Cocinando magia sonora con Tarjetas Gráficas de última generación...")
         
         remote_gpu_func = modal.Function.from_name("moises-demucs-worker", "separate_audio")
         # Esto suspende el hilo principal 15-20 segs pero ¡SIN USAR tu procesador! Todo se opera en la Nube
-        stems_bytes = await asyncio.to_thread(remote_gpu_func.remote, audio_bytes, requested_tracks, hi_fi)
+        stems_bytes = await asyncio.to_thread(
+            remote_gpu_func.remote,
+            audio_bytes,
+            requested_tracks,
+            hi_fi,
+            quality_profile
+        )
         
         # 3. Extraer Tracks De Vueltos por internet y escupirlos al Disco para subida a B2
-        print(f"[MODAL] ✨ Extracción terminada en tiempo récord! Serializando audios a disco físico...")
+        print("[MODAL] Remote extraction finished, writing stems to disk...")
         update_progress(80, "¡La cirugía fue un éxito! Recibiendo partes diseccionadas desde el Espacio Exterior...")
         
         stems = {}
@@ -376,6 +496,12 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
             chords_data = []
             keyInfo_data = None
         
+        estimated_cost_usd = estimate_processing_cost(duration, requested_tracks, quality_profile, hi_fi)
+        if quality_profile == "pro_balanced" and estimated_cost_usd > 0.35:
+            task.cost_guardrail_triggered = True
+        else:
+            task.cost_guardrail_triggered = False
+
         # Update task with results
         task.stems = stem_urls
         task.status = TaskStatus.COMPLETED
@@ -386,6 +512,9 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
         task.duration = duration
         task.chords = chords_data
         task.keyInfo = keyInfo_data
+        task.quality_profile = quality_profile
+        task.requested_tracks = requested_tracks
+        task.estimated_cost_usd = estimated_cost_usd
         
         tasks_storage[task.id] = task
         
@@ -406,6 +535,22 @@ async def process_audio(task: ProcessingTask, custom_tracks: Optional[Dict] = No
             }
             db.query(TaskDB).filter(TaskDB.id == task.id).update(db_update)
             db.commit()
+
+            cache_key = getattr(task, "cache_key", None)
+            if cache_key:
+                cache_entry = SeparationCacheDB(
+                    cache_key=cache_key,
+                    stems=json.dumps(stem_urls),
+                    bpm=bpm,
+                    key=key,
+                    duration=duration,
+                    chords=json.dumps(chords_data),
+                    key_info=json.dumps(keyInfo_data) if keyInfo_data else None,
+                    model_version=CACHE_MODEL_VERSION,
+                    created_at=datetime.utcnow(),
+                )
+                db.merge(cache_entry)
+                db.commit()
             db.close()
             print(f"[DATABASE] Resultados guardados en Metabase para tarea: {task.id}")
         except Exception as db_e:
@@ -509,29 +654,72 @@ async def get_status(task_id: str):
         "chords": chords,
         "keyInfo": keyInfo
     }
+    if hasattr(task, "quality_profile"):
+        response["quality_profile"] = task.quality_profile
+    if hasattr(task, "estimated_cost_usd"):
+        response["estimated_cost_usd"] = task.estimated_cost_usd
+    if hasattr(task, "cost_guardrail_triggered"):
+        response["cost_guardrail_triggered"] = task.cost_guardrail_triggered
+    if hasattr(task, "cache_hit"):
+        response["cache_hit"] = task.cache_hit
     
     return response
 
 @app.get("/audio/{path:path}")
 async def serve_audio(path: str):
-    """Fallback proxy using standard requests - Ultra-stable version"""
+    """
+    Serve audio stems.
+    Priority order:
+      1. Exact local path (Path.cwd() / path)
+      2. Demucs output fallback: stems/{task_id}/{stem}.wav → uploads/{task_id}/demucs_output/{stem}.wav
+      3. B2 proxy (production / when B2 is reachable)
+    """
     try:
+        cwd = Path.cwd()
+
+        # 1. Exact local path check
+        local_path = Path(path) if Path(path).is_absolute() else cwd / path
+        if local_path.exists() and local_path.is_file():
+            print(f"[AUDIO] Serving from local path: {local_path}")
+            return FileResponse(
+                path=str(local_path),
+                media_type="audio/wav",
+                headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600"}
+            )
+
+        # 2. Demucs output fallback
+        # B2 path format:   stems/{task_id}/{stem}.wav
+        # Local disk format: uploads/{task_id}/demucs_output/{stem}.wav
+        import re
+        stems_match = re.match(r'^stems/([^/]+)/([^/]+\.wav)$', path)
+        if stems_match:
+            task_id = stems_match.group(1)
+            stem_file = stems_match.group(2)
+            demucs_path = cwd / "uploads" / task_id / "demucs_output" / stem_file
+            if demucs_path.exists() and demucs_path.is_file():
+                print(f"[AUDIO] Serving from demucs_output fallback: {demucs_path}")
+                return FileResponse(
+                    path=str(demucs_path),
+                    media_type="audio/wav",
+                    headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600"}
+                )
+            else:
+                print(f"[AUDIO] demucs_output path not found: {demucs_path}")
+
+        # 3. B2 proxy fallback (production)
         import requests
         b2_bucket = os.getenv("B2_BUCKET_NAME", "Multitrack")
-        
-        # Unificamos el path para B2: audio/stems/ID/drums.wav
-        # Si path ya empieza con 'stems/', le ponemos 'audio/' delante
         b2_key = f"audio/{path}" if not path.startswith("audio/") else path
         b2_url = f"https://f005.backblazeb2.com/file/{b2_bucket}/{b2_key}"
-        
+
         print(f"[RESCUE] Proxying to B2 --> {b2_url}")
-        
+
         def fetch():
-            return requests.get(b2_url, timeout=30)
-            
+            return requests.get(b2_url, timeout=8)  # 8s timeout — fail fast locally
+
         r = await asyncio.to_thread(fetch)
         print(f"[RESCUE] B2 Status: {r.status_code}")
-        
+
         if r.status_code == 200:
             return Response(
                 content=r.content,
@@ -545,16 +733,11 @@ async def serve_audio(path: str):
         else:
             print(f"[RESCUE] B2 Error: {r.status_code}")
             return Response(
-                content=json.dumps({
-                    "error": "B2 failure",
-                    "status": r.status_code,
-                    "url_tried": b2_url,
-                    "reason": r.reason
-                }),
+                content=json.dumps({"error": "B2 failure", "status": r.status_code, "url_tried": b2_url}),
                 media_type="application/json",
                 status_code=r.status_code
             )
-            
+
     except Exception as e:
         print(f"[RESCUE] Crash: {str(e)}")
         return Response(
@@ -654,7 +837,7 @@ async def analyze_chords(
             with open(file_path, "wb") as buffer:
                 content = await file.read()
                 buffer.write(content)
-            print(f"✅ Saved uploaded file for chord analysis: {file_path}")
+            print(f"[CHORD] Saved uploaded file for analysis: {file_path}")
         else:
             # No file provided, this endpoint now expects URL in request body
             return {"error": "No file provided. Use /api/analyze-chords-url endpoint for URL analysis."}
@@ -1013,6 +1196,8 @@ def detect_bpm_and_duration(audio_path: str):
     """Detecta BPM promedio y duración del audio con algoritmo mejorado."""
     y, sr = librosa.load(audio_path, sr=None, mono=True)
     
+    duration = float(len(y) / sr) if sr else 0.0
+
     # Usar múltiples métodos para detectar BPM más preciso
     # Método 1: beat_track con diferentes parámetros
     tempo1, beats1 = librosa.beat.beat_track(y=y, sr=sr, start_bpm=60, tightness=100)
@@ -1078,6 +1263,22 @@ def detect_bpm_and_duration(audio_path: str):
     print(f"BPM después del redondeo: {original_tempo} -> {tempo}")
     print(f"BPM final que se devuelve: {tempo}")
     return tempo, duration
+
+
+def estimate_processing_cost(duration_seconds: float, requested_tracks: List[str], quality_profile: str, hi_fi: bool) -> float:
+    """Estimate relative processing cost in USD for monitoring/guardrails."""
+    minutes = max(duration_seconds / 60.0, 0.5)
+    profile_multipliers = {
+        "fast": 0.8,
+        "pro_balanced": 1.0,
+        "hifi": 1.6,
+    }
+    profile_factor = profile_multipliers.get((quality_profile or "pro_balanced").lower(), 1.0)
+    tracks_factor = 1.0 + max(len(requested_tracks) - 4, 0) * 0.08
+    hifi_factor = 1.2 if hi_fi else 1.0
+    baseline_per_minute = 0.08
+    estimated = minutes * baseline_per_minute * profile_factor * tracks_factor * hifi_factor
+    return round(float(estimated), 3)
 
 @app.post("/api/analyze-key")
 async def analyze_key(file: UploadFile = File(...)):
@@ -1164,6 +1365,89 @@ async def analyze_audio(file: UploadFile = File(...)):
     except Exception as e:
         print(f"Error analyzing audio: {e}")
         raise HTTPException(status_code=500, detail=f"Error analyzing audio: {str(e)}")
+
+def _validate_training_manifest(manifest: dict) -> None:
+    songs = manifest.get("songs")
+    if not isinstance(songs, list) or len(songs) == 0:
+        raise ValueError("manifest.songs debe ser una lista no vacía")
+    for s in songs:
+        if not isinstance(s, dict):
+            raise ValueError("cada canción debe ser un objeto")
+        sid = s.get("id")
+        if not sid:
+            raise ValueError("cada canción necesita id")
+        ai = s.get("ai_mapping") or {}
+        sources = s.get("trackSources") or {}
+        for k in ("vocals", "drums", "bass"):
+            if not ai.get(k):
+                raise ValueError(f"Canción {sid}: falta ai_mapping.{k}")
+        other = ai.get("other") or []
+        if not isinstance(other, list) or len(other) == 0:
+            raise ValueError(f"Canción {sid}: ai_mapping.other debe tener al menos un stem")
+        for stem_key in [ai["vocals"], ai["drums"], ai["bass"]] + list(other):
+            url = sources.get(stem_key)
+            if not url or not str(url).startswith(("http://", "https://")):
+                raise ValueError(f"Canción {sid}: URL http(s) requerida para stem {stem_key}")
+
+
+@app.post("/api/training/start")
+async def start_training(request: dict):
+    """
+    Inicia pipeline de entrenamiento en Modal:
+    1) sincroniza dataset (descarga stems según manifest)
+    2) lanza entrenamiento HTDemucs en segundo plano
+    """
+    try:
+        import modal
+
+        manifest = request.get("manifest")
+        if not manifest:
+            raise HTTPException(
+                status_code=400,
+                detail="Falta manifest: la UI debe enviar las canciones curadas con ai_mapping y URLs.",
+            )
+        try:
+            _validate_training_manifest(manifest)
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=str(ve))
+
+        epochs = int(request.get("epochs") or 20)
+        batch_size = request.get("batch_size")
+        bs = int(batch_size) if batch_size is not None else None
+
+        print(f"[TRAINING] Start: {len(manifest['songs'])} canciones, epochs={epochs}")
+
+        sync_func = modal.Function.from_name("moises-demucs-trainer", "sync_b2_dataset")
+        train_func = modal.Function.from_name("moises-demucs-trainer", "train_model")
+
+        sync_result = await asyncio.to_thread(sync_func.remote, {"manifest": manifest})
+        if isinstance(sync_result, dict) and sync_result.get("ok") is False:
+            raise HTTPException(
+                status_code=400,
+                detail=sync_result.get("error", "sync_b2_dataset falló"),
+            )
+
+        train_call = await asyncio.to_thread(
+            train_func.spawn,
+            epochs=epochs,
+            batch_size=bs,
+        )
+
+        call_id = getattr(train_call, "object_id", None) or getattr(train_call, "function_call_id", None)
+
+        return {
+            "success": True,
+            "message": "Entrenamiento lanzado en Modal (HTDemucs). Checkpoint: /dataset/checkpoints/latest.th en el volumen compartido.",
+            "sync_result": sync_result,
+            "training_call_id": call_id,
+            "epochs": epochs,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[TRAINING] Error launching training: {e}")
+        raise HTTPException(status_code=500, detail=f"No se pudo iniciar entrenamiento: {str(e)}")
 
 async def extract_with_ytdlp(youtube_url: str, video_id: str):
     """Extraer audio usando yt-dlp"""

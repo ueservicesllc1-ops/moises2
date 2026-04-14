@@ -50,7 +50,7 @@ class ChordAnalyzer:
     def analyze_chords(self, file_path: str) -> List[ChordResult]:
         """Análisis profesional de acordes usando HPSS y CQT"""
         try:
-            print(f"🎵 Iniciando análisis profesional en: {file_path}")
+            print(f"[CHORD] Starting analysis for: {file_path}")
             y, sr = librosa.load(file_path, sr=22050)
             if len(y) == 0: return []
             
@@ -113,7 +113,7 @@ class ChordAnalyzer:
             
             return final_chords
         except Exception as e:
-            print(f"❌ Error en analyze_chords: {e}")
+            print(f"[CHORD] Error in analyze_chords: {e}")
             return []
 
     def analyze_key(self, file_path: str) -> Optional[KeyResult]:

@@ -1146,20 +1146,20 @@ export default function Home() {
     // Si ya es una ruta relativa local, dejarla
     if (url.startsWith('/')) return url;
     
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-    
     // Si contiene el IP viejo, redirigir al proxy inverso
     const oldIp = '104.197.145.173';
     if (url.includes(oldIp)) {
       return url.replace(`http://${oldIp}:8000/audio`, '/backend-audio');
     }
     
-    // Convertir URLs de S3 o Native B2 al Proxy Inverso Interno Next.js
-    // Esto es CRUCIAL para entorno de producción en Railway
+    // Convertir URLs de B2 al proxy de Next.js → backend
+    // El backend ahora sirve primero desde disco local (uploads/{task_id}/demucs_output/)
+    // y solo hace proxy a B2 si no existe en disco. Esto funciona tanto en dev como en prod.
     const b2Regex = /^https?:\/\/(?:s3\.us-east-005|f005)\.backblazeb2\.com\/(?:file\/)?(?:moises2|Multitrack)\/audio\/(.+)$/i;
     const match = url.match(b2Regex);
     if (match && match[1]) {
       const proxyUrl = `/backend-audio/${match[1]}`;
+      console.log(`[PROXY] B2 URL → backend proxy: ${proxyUrl}`);
       return proxyUrl;
     }
     
