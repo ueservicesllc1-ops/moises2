@@ -23,14 +23,52 @@ export default function CheckoutPage() {
   const router = useRouter()
   const [error, setError] = useState('')
   const [prefetchedSecret, setPrefetchedSecret] = useState<string | null>(null)
+  const [runtimePublishableKey, setRuntimePublishableKey] = useState<string | null>(null)
+  const [keyLoading, setKeyLoading] = useState(true)
 
   const plan = normalizePlan(searchParams.get('plan'))
   const billing = normalizeBilling(searchParams.get('billing'))
 
-  const stripePromise = useMemo(() => {
-    const key = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
-    return key ? loadStripe(key) : null
+  useEffect(() => {
+    let mounted = true
+    const loadRuntimeKey = async () => {
+      try {
+        const compileTimeKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+        if (compileTimeKey) {
+          if (mounted) {
+            setRuntimePublishableKey(compileTimeKey)
+            setKeyLoading(false)
+          }
+          return
+        }
+
+        const res = await fetch('/api/stripe/public-key', { cache: 'no-store' })
+        const data = await res.json()
+        if (!res.ok || !data?.publishableKey) {
+          throw new Error(data?.error || 'No se pudo cargar clave publica de Stripe')
+        }
+
+        if (mounted) {
+          setRuntimePublishableKey(data.publishableKey as string)
+          setKeyLoading(false)
+        }
+      } catch (err) {
+        if (mounted) {
+          setError(err instanceof Error ? err.message : 'Error cargando clave de Stripe')
+          setKeyLoading(false)
+        }
+      }
+    }
+
+    loadRuntimeKey()
+    return () => {
+      mounted = false
+    }
   }, [])
+
+  const stripePromise = useMemo(() => {
+    return runtimePublishableKey ? loadStripe(runtimePublishableKey) : null
+  }, [runtimePublishableKey])
 
   useEffect(() => {
     if (!loading && !user) {
@@ -100,10 +138,18 @@ export default function CheckoutPage() {
 
   if (!loading && !user) return null
 
+  if (keyLoading) {
+    return (
+      <main className="min-h-[100dvh] bg-[#0b0b10] text-white flex items-center justify-center p-6">
+        <p>Cargando Stripe...</p>
+      </main>
+    )
+  }
+
   if (!stripePromise) {
     return (
       <main className="min-h-[100dvh] bg-[#0b0b10] text-white flex items-center justify-center p-6">
-        <p>Falta NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY en entorno.</p>
+        <p>Falta clave publica de Stripe en entorno.</p>
       </main>
     )
   }
