@@ -2,10 +2,10 @@
 
 import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Image as ImageIcon, Users, Crown, Eye } from 'lucide-react'
+import { ArrowLeft, Image as ImageIcon, Users, Crown, Eye, Mail } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { db } from '@/lib/firebase'
-import { collection, getDocs, doc, updateDoc, query, orderBy } from 'firebase/firestore'
+import { collection, getDocs, doc, updateDoc, query, orderBy, where } from 'firebase/firestore'
 import { getUserSongs } from '@/lib/firestore'
 
 interface User {
@@ -24,14 +24,28 @@ interface VisitStats {
   today_unique_visitors: number
 }
 
+interface ContactMessage {
+  id: string
+  name: string
+  email: string
+  subject: string
+  message: string
+  status: string
+  createdAtLabel: string
+}
+
 export default function AdminPage() {
   const router = useRouter()
   const [showCoverAdmin, setShowCoverAdmin] = useState(false)
   const [showUsersAdmin, setShowUsersAdmin] = useState(false)
+  const [showContactsAdmin, setShowContactsAdmin] = useState(false)
   const [users, setUsers] = useState<User[]>([])
+  const [contactMessages, setContactMessages] = useState<ContactMessage[]>([])
   const [loading, setLoading] = useState(false)
+  const [contactsLoading, setContactsLoading] = useState(false)
   const [visitStats, setVisitStats] = useState<VisitStats | null>(null)
   const [visitLoading, setVisitLoading] = useState(false)
+  const [newMessagesCount, setNewMessagesCount] = useState(0)
 
   const coverList = [
     { id: 1, name: 'Extraer de YouTube', file: 'cover1.jpg', active: true },
@@ -55,7 +69,21 @@ export default function AdminPage() {
   }, [showUsersAdmin])
 
   useEffect(() => {
+    if (showContactsAdmin) {
+      loadContactMessages()
+    }
+  }, [showContactsAdmin])
+
+  useEffect(() => {
     loadVisitStats()
+  }, [])
+
+  useEffect(() => {
+    loadNewMessagesCount()
+    const timer = setInterval(() => {
+      loadNewMessagesCount()
+    }, 30000)
+    return () => clearInterval(timer)
   }, [])
 
   const loadUsers = async () => {
@@ -112,6 +140,47 @@ export default function AdminPage() {
     }
   }
 
+  async function loadContactMessages() {
+    setContactsLoading(true)
+    try {
+      const ref = collection(db, 'contact_messages')
+      const q = query(ref, orderBy('createdAt', 'desc'))
+      const snapshot = await getDocs(q)
+
+      const rows: ContactMessage[] = snapshot.docs.map((item) => {
+        const data = item.data() as any
+        return {
+          id: item.id,
+          name: data.name || 'Sin nombre',
+          email: data.email || 'Sin correo',
+          subject: data.subject || 'Sin asunto',
+          message: data.message || '',
+          status: data.status || 'new',
+          createdAtLabel: data.createdAt?.toDate?.()?.toLocaleString() || 'N/A',
+        }
+      })
+
+      setContactMessages(rows)
+      loadNewMessagesCount()
+    } catch (error) {
+      console.error('Error cargando mensajes de contacto:', error)
+      toast.error('Error al cargar mensajes de contacto')
+    } finally {
+      setContactsLoading(false)
+    }
+  }
+
+  async function loadNewMessagesCount() {
+    try {
+      const ref = collection(db, 'contact_messages')
+      const q = query(ref, where('status', '==', 'new'))
+      const snapshot = await getDocs(q)
+      setNewMessagesCount(snapshot.size)
+    } catch (error) {
+      console.error('Error contando mensajes nuevos:', error)
+    }
+  }
+
   const togglePremium = async (userId: string) => {
     try {
       const user = users.find(u => u.id === userId)
@@ -155,7 +224,7 @@ export default function AdminPage() {
 
       {/* Main Content */}
       <div className="p-4 sm:p-8">
-        {!showCoverAdmin && !showUsersAdmin ? (
+        {!showCoverAdmin && !showUsersAdmin && !showContactsAdmin ? (
           /* Dashboard Principal */
           <div className="max-w-4xl mx-auto">
             <h2 className="text-2xl font-bold text-white mb-8">Opciones de Administración</h2>
@@ -208,6 +277,28 @@ export default function AdminPage() {
                     <h3 className="text-xl font-bold text-white mb-2">Usuarios</h3>
                     <p className="text-sm text-green-100">
                       Gestionar usuarios y suscripciones
+                    </p>
+                  </div>
+                </div>
+              </button>
+              {/* Botón Mensajes de contacto */}
+              <button
+                onClick={() => setShowContactsAdmin(true)}
+                className="group relative bg-gradient-to-br from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700 p-6 sm:p-8 rounded-xl transition-all duration-300 transform hover:scale-[1.02] sm:hover:scale-105 shadow-lg hover:shadow-2xl"
+              >
+                {newMessagesCount > 0 && (
+                  <span className="absolute right-3 top-3 rounded-full bg-red-500 px-2 py-0.5 text-xs font-bold text-white shadow-lg">
+                    {newMessagesCount}
+                  </span>
+                )}
+                <div className="flex flex-col items-center space-y-4">
+                  <div className="p-4 bg-white/10 rounded-full group-hover:bg-white/20 transition-colors">
+                    <Mail className="w-12 h-12 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white mb-2">Mensajes</h3>
+                    <p className="text-sm text-cyan-100">
+                      Ver contactos enviados desde la web
                     </p>
                   </div>
                 </div>
@@ -292,6 +383,83 @@ export default function AdminPage() {
                 <li>• Formato recomendado: JPG (también funciona PNG, JPEG, WebP)</li>
                 <li>• Las imágenes se actualizan automáticamente al recargar la página</li>
               </ul>
+            </div>
+          </div>
+        ) : showContactsAdmin ? (
+          <div>
+            <div className="mb-6">
+              <button
+                onClick={() => setShowContactsAdmin(false)}
+                className="flex items-center space-x-2 text-gray-400 hover:text-white transition-colors mb-4"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="text-sm">Volver al Dashboard</span>
+              </button>
+              <h2 className="text-xl font-bold text-white mb-2">Mensajes de contacto</h2>
+              <p className="text-gray-400 text-sm mb-4">
+                Formulario público de la página de contacto (Firestore)
+              </p>
+              {newMessagesCount > 0 && (
+                <div className="inline-flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                  <span className="h-2 w-2 rounded-full bg-red-400 animate-pulse" />
+                  Tienes {newMessagesCount} mensaje{newMessagesCount === 1 ? '' : 's'} nuevo{newMessagesCount === 1 ? '' : 's'}.
+                </div>
+              )}
+            </div>
+
+            <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-x-auto">
+              {contactsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500 mx-auto mb-4"></div>
+                    <p className="text-gray-400">Cargando mensajes...</p>
+                  </div>
+                </div>
+              ) : contactMessages.length === 0 ? (
+                <div className="flex items-center justify-center py-12">
+                  <p className="text-gray-400">No hay mensajes todavía</p>
+                </div>
+              ) : (
+                <table className="w-full">
+                  <thead className="bg-gray-700">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Fecha</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Nombre</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Correo</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Asunto</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Estado</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Mensaje</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-700">
+                    {contactMessages.map((item) => (
+                      <tr
+                        key={item.id}
+                        className={`align-top transition-colors hover:bg-gray-750 ${
+                          item.status === 'new' ? 'bg-cyan-900/10' : ''
+                        }`}
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-400">{item.createdAtLabel}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{item.name}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-cyan-300">{item.email}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{item.subject}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-xs">
+                          {item.status === 'new' ? (
+                            <span className="rounded-full border border-red-500/40 bg-red-500/15 px-2 py-1 font-semibold text-red-300">
+                              NUEVO
+                            </span>
+                          ) : (
+                            <span className="rounded-full border border-gray-500/30 bg-gray-500/10 px-2 py-1 font-semibold text-gray-300">
+                              LEIDO
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-300 max-w-xl whitespace-pre-wrap">{item.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         ) : (
