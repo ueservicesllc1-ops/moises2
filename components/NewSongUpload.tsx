@@ -88,7 +88,7 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
         year: undefined,
         album: '',
         track: undefined,
-        thumbnail: '🎵',
+        thumbnail: '',
         fileUrl: downloadUrl,
         uploadedAt: new Date().toISOString(),
         userId: user!.uid,

@@ -3,7 +3,9 @@
   "version": "1.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/ensure-dev-port.mjs && next dev -p 3000",
+    "dev:any": "next dev",
+    "dev:clean": "node scripts/clean-next.mjs && node scripts/ensure-dev-port.mjs && next dev -p 3000",
     "build": "next build",
     "start": "next start",
     "start:client": "next start -p ${PORT:-3000}",

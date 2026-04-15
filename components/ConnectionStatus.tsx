@@ -16,13 +16,15 @@ export default function ConnectionStatus() {
         // En Railway, usar el proxy de Next.js para verificar el backend
         const response = await fetch('/api/health')
         const data = await response.json()
-        
-        if (data.status === 'ok') {
+
+        if (data.backend === 'up') {
           setB2Status('connected')
           setB2Error(null)
         } else {
           setB2Status('disconnected')
-          setB2Error('Backend not responding')
+          setB2Error(
+            typeof data.detail === 'string' ? data.detail : 'Backend no disponible'
+          )
         }
       } catch (error) {
         setB2Status('disconnected')

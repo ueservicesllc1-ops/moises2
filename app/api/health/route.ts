@@ -2,8 +2,15 @@ import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
+/** Siempre HTTP 200: el propio Next responde; el backend Python es opcional en local. */
 export async function GET() {
   const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
+  const base = {
+    status: 'ok' as const,
+    service: 'moises-clone-frontend',
+    timestamp: new Date().toISOString(),
+  }
+
   try {
     const response = await fetch(`${backendUrl}/api/health`, {
       cache: 'no-store',
@@ -11,33 +18,27 @@ export async function GET() {
     })
 
     if (!response.ok) {
-      return NextResponse.json(
-        {
-          status: 'degraded',
-          backend: 'down',
-          service: 'moises-clone-frontend',
-          timestamp: new Date().toISOString(),
-        },
-        { status: 503 }
-      )
+      return NextResponse.json({
+        ...base,
+        backend: 'down' as const,
+        backendUrl,
+        detail: `HTTP ${response.status}`,
+      })
     }
 
-    const backendHealth = await response.json()
+    const backendHealth = await response.json().catch(() => ({}))
     return NextResponse.json({
-      status: 'ok',
-      backend: backendHealth?.status || 'ok',
-      service: 'moises-clone-frontend',
-      timestamp: new Date().toISOString(),
+      ...base,
+      backend: 'up' as const,
+      backendHealth: backendHealth?.status ?? 'ok',
+      backendUrl,
     })
-  } catch (error) {
-    return NextResponse.json(
-      {
-        status: 'degraded',
-        backend: 'down',
-        service: 'moises-clone-frontend',
-        timestamp: new Date().toISOString(),
-      },
-      { status: 503 }
-    )
+  } catch {
+    return NextResponse.json({
+      ...base,
+      backend: 'down' as const,
+      backendUrl,
+      detail: 'Backend no alcanzable (¿Python en :8000?)',
+    })
   }
 }

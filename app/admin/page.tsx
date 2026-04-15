@@ -114,7 +114,7 @@ export default function AdminPage() {
       <div className="h-16 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6">
         <div className="flex items-center space-x-4">
           <button
-            onClick={() => router.push('/')}
+            onClick={() => router.push('/studio')}
             className="flex items-center space-x-2 text-gray-300 hover:text-white transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />

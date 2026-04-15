@@ -19,7 +19,7 @@ export default function LoginPage() {
   // Redirigir automáticamente si el usuario ya está autenticado
   useEffect(() => {
     if (user && !authLoading) {
-      router.push('/')
+      router.push('/studio')
     }
   }, [user, authLoading, router])
 

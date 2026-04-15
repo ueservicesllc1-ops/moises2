@@ -500,7 +500,12 @@ export default function AITrainingFactory() {
                               className="hidden"
                             />
                             {tk}
-                            {isExcluded && <AlertTriangle className="w-3 h-3 text-red-500" title="Posible Click Detectado" />}
+                            {isExcluded && (
+                              <AlertTriangle
+                                className="w-3 h-3 text-red-500"
+                                aria-label="Posible click detectado"
+                              />
+                            )}
                           </label>
                         )
                       })}

@@ -1,6 +1,13 @@
 /** @type {import('next').NextConfig} */
-/** @type {import('next').NextConfig} */
 const nextConfig = {
+  webpack: (config, { dev, isServer }) => {
+    // Evita eval-source-map en cliente: bundles enormes (p. ej. Firebase) en una sola línea
+    // pueden provocar SyntaxError al parsear en algunos navegadores o con caché corrupta.
+    if (dev && !isServer) {
+      config.devtool = 'cheap-module-source-map'
+    }
+    return config
+  },
   images: {
     domains: ['localhost', 'moises2-production.up.railway.app', 'judith.life', 'railway.app', 'github.com'],
   },

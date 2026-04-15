@@ -3,11 +3,11 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { gsap } from 'gsap'
-import { Draggable } from 'gsap/Draggable'
-
-// Registrar el plugin Draggable
+// Evita conflicto de casing Draggable.d.ts vs draggable.d.ts en Windows (resolución de tipos de gsap)
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const DraggablePlugin = require('gsap/Draggable.js').default
 if (typeof window !== 'undefined') {
-  gsap.registerPlugin(Draggable)
+  gsap.registerPlugin(DraggablePlugin)
 }
 
 interface Cover {
@@ -137,7 +137,7 @@ const ProfessionalCoverFlow: React.FC<ProfessionalCoverFlowProps> = ({ covers, o
   useEffect(() => {
     if (!containerRef.current || typeof window === 'undefined') return
 
-    draggableRef.current = Draggable.create(containerRef.current, {
+    draggableRef.current = DraggablePlugin.create(containerRef.current, {
       type: "x",
       edgeResistance: 0.65,
       inertia: true,

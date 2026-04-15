@@ -102,7 +102,7 @@ const MixerPage: React.FC = () => {
       
       if (!song) {
         console.error('Canción no encontrada')
-        router.push('/')
+        router.push('/studio')
         return
       }
 
@@ -349,7 +349,7 @@ const MixerPage: React.FC = () => {
         <div className="text-center">
           <h1 className="text-2xl font-bold text-white mb-4">Canción no encontrada</h1>
           <button
-            onClick={() => router.push('/')}
+            onClick={() => router.push('/studio')}
             className="bg-teal-500 hover:bg-teal-600 text-white px-6 py-3 rounded-lg"
           >
             Volver al inicio
@@ -366,7 +366,7 @@ const MixerPage: React.FC = () => {
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <button
-              onClick={() => router.push('/')}
+              onClick={() => router.push('/studio')}
               className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
             >
               <ArrowLeft className="w-5 h-5" />
