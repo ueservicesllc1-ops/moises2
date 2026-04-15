@@ -19,6 +19,11 @@ import {
   Wand2,
   Radio,
   Headphones,
+  CreditCard,
+  CircleDollarSign,
+  Infinity as InfinityIcon,
+  GaugeCircle,
+  HelpCircle,
 } from 'lucide-react'
 
 /* ─────────────────────────────────── helpers ─────────────────────────────── */
@@ -162,10 +167,38 @@ const FEATURES = [
   },
 ]
 
+type BillingCycle = 'monthly' | 'annually'
+
+const PRICING_FEATURES = {
+  starter: [
+    '10 Minutes',
+    'Free Result Previews',
+    '200MB Upload File Limit',
+  ],
+  lite: [
+    'Unlimited Minutes in Relaxed Queue',
+    '90 Minutes/mo in Fast Queue',
+    '2GB Upload File Limit',
+    'Result Downloads',
+    'Batch Processing',
+  ],
+  pro: [
+    'Unlimited Minutes in Relaxed Queue',
+    '250 Minutes/mo in Fast Queue',
+    '2GB Upload File Limit',
+    'Result Downloads',
+    'Batch Processing',
+    'VST Plugin',
+    'API Access',
+    'New Features Early Access',
+  ],
+}
+
 /* ═══════════════════════════════ MAIN COMPONENT ═══════════════════════════ */
 export default function JudithLanding() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>('annually')
 
   return (
     <div className="min-h-screen bg-[#060608] text-white overflow-x-hidden selection:bg-violet-500/30">
@@ -540,6 +573,188 @@ export default function JudithLanding() {
                 </div>
               ))}
             </div>
+          </div>
+        </section>
+
+        {/* ══════════════════════ PRICING ══════════════════════ */}
+        <section id="planes" className="py-24 md:py-28">
+          <div className="max-w-7xl mx-auto px-5 md:px-8">
+            <div className="flex justify-center mb-10">
+              <div className="inline-flex items-center rounded-xl border border-white/10 bg-[#1a1a22] p-1">
+                <button
+                  type="button"
+                  onClick={() => setBillingCycle('monthly')}
+                  className={`rounded-lg px-4 py-2 text-[13px] font-semibold transition ${
+                    billingCycle === 'monthly' ? 'bg-[#50505a] text-white' : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Monthly
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBillingCycle('annually')}
+                  className={`rounded-lg px-4 py-2 text-[13px] font-semibold transition ${
+                    billingCycle === 'annually' ? 'bg-[#50505a] text-white' : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Annually <span className="text-amber-300">- Save 3 Months</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-3">
+              <div className="rounded-2xl border border-white/10 bg-[#4a4a4f] p-7">
+                <h3 className="text-3xl font-semibold text-white">Starter</h3>
+                <div className="mt-2 flex items-end gap-1">
+                  <span className="text-5xl font-semibold text-white">$0</span>
+                </div>
+                <p className="mt-1 text-sm text-zinc-200">Always free</p>
+
+                <Link
+                  href="/login"
+                  className="mt-6 inline-flex h-11 w-full items-center justify-center rounded-md bg-white text-lg font-medium text-[#101014] hover:bg-zinc-100 transition-colors"
+                >
+                  Get Free
+                </Link>
+                <p className="mt-5 text-center text-sm text-zinc-200">
+                  Try out our service.
+                  <br />
+                  No credit card needed.
+                </p>
+
+                <div className="mt-8 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <Check className="h-5 w-5 text-zinc-100" />
+                    <span className="text-[28px] leading-none text-white">10 Minutes</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Check className="h-5 w-5 text-zinc-100" />
+                    <span className="text-[28px] leading-none text-white">Free Result Previews</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Check className="h-5 w-5 text-zinc-100" />
+                    <span className="text-[28px] leading-none text-white">200MB Upload File Limit</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-[#4a4a4f] p-7">
+                <h3 className="text-3xl font-semibold text-white">Lite</h3>
+                <div className="mt-2 flex items-end gap-1">
+                  <span className="text-5xl font-semibold text-white">
+                    {billingCycle === 'annually' ? '$7.5' : '$9'}
+                  </span>
+                  <span className="mb-1 text-3xl text-zinc-300">/mo</span>
+                </div>
+                <p className="mt-1 text-sm text-zinc-200">
+                  {billingCycle === 'annually' ? '$90 billed annually' : '$9 billed monthly'}
+                </p>
+
+                <div className="mt-6 space-y-2">
+                  <Link
+                    href={`/login?plan=lite&billing=${billingCycle === 'annually' ? 'yearly' : 'monthly'}`}
+                    className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#f3d12f] text-[30px] font-semibold text-[#111] hover:brightness-105 transition"
+                  >
+                    <CreditCard className="h-4 w-4" /> Card
+                  </Link>
+                  <button
+                    type="button"
+                    className="inline-flex h-11 w-full items-center justify-center rounded-md bg-[#6b6b6f] text-[30px] font-semibold italic text-zinc-200"
+                  >
+                    PayPal
+                  </button>
+                </div>
+
+                <div className="mt-7 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <InfinityIcon className="h-5 w-5 text-zinc-100" />
+                    <span className="text-2xl text-white">Unlimited Minutes</span>
+                    <HelpCircle className="h-4 w-4 text-amber-300" />
+                  </div>
+                  <p className="-mt-2 ml-8 text-xl text-zinc-300">in Relaxed Queue</p>
+
+                  <div className="flex items-center gap-3">
+                    <GaugeCircle className="h-5 w-5 text-zinc-100" />
+                    <span className="text-2xl text-white">90 Minutes/mo</span>
+                  </div>
+                  <p className="-mt-2 ml-8 text-xl text-zinc-300">in Fast Queue</p>
+
+                  {PRICING_FEATURES.lite.slice(2).map((feature) => (
+                    <div key={feature} className="flex items-center gap-3 text-[30px]">
+                      <Check className="h-5 w-5 text-zinc-100" />
+                      <span className="text-2xl text-white">{feature}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="relative rounded-2xl border border-amber-400 bg-[#4a4a4f] p-7">
+                <span className="absolute right-4 top-4 rounded-lg bg-amber-300 px-3 py-1 text-xs font-bold text-black">Best value</span>
+                <h3 className="text-3xl font-semibold text-white">Pro</h3>
+                <div className="mt-2 flex items-end gap-1">
+                  <span className="text-5xl font-semibold text-white">
+                    {billingCycle === 'annually' ? '$15' : '$19'}
+                  </span>
+                  <span className="mb-1 text-3xl text-zinc-300">/mo</span>
+                </div>
+                <p className="mt-1 text-sm text-zinc-200">
+                  {billingCycle === 'annually' ? '$180 billed annually' : '$19 billed monthly'}
+                </p>
+
+                <div className="mt-6 space-y-2">
+                  <Link
+                    href={`/login?plan=pro&billing=${billingCycle === 'annually' ? 'yearly' : 'monthly'}`}
+                    className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#f3d12f] text-[30px] font-semibold text-[#111] hover:brightness-105 transition"
+                  >
+                    <CreditCard className="h-4 w-4" /> Card
+                  </Link>
+                  <button
+                    type="button"
+                    className="inline-flex h-11 w-full items-center justify-center rounded-md bg-[#6b6b6f] text-[30px] font-semibold italic text-zinc-200"
+                  >
+                    PayPal
+                  </button>
+                </div>
+
+                <div className="mt-7 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <InfinityIcon className="h-5 w-5 text-zinc-100" />
+                    <span className="text-2xl text-white">Unlimited Minutes</span>
+                    <HelpCircle className="h-4 w-4 text-amber-300" />
+                  </div>
+                  <p className="-mt-2 ml-8 text-xl text-zinc-300">in Relaxed Queue</p>
+
+                  <div className="flex items-center gap-3">
+                    <GaugeCircle className="h-5 w-5 text-zinc-100" />
+                    <span className="text-2xl text-white">250 Minutes/mo</span>
+                  </div>
+                  <p className="-mt-2 ml-8 text-xl text-zinc-300">in Fast Queue</p>
+
+                  {PRICING_FEATURES.pro.slice(2).map((feature) => (
+                    <div key={feature} className="flex items-center gap-3 text-[30px]">
+                      <Check className="h-5 w-5 text-zinc-100" />
+                      <span className="text-2xl text-white">
+                        {feature}
+                        {(feature === 'VST Plugin' || feature === 'API Access') && (
+                          <HelpCircle className="ml-1 inline h-4 w-4 text-amber-300" />
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <p className="mt-8 text-sm text-zinc-300">
+              By making a purchase you agree to our{' '}
+              <Link href="/refund-policy" className="underline">
+                Refund Policy
+              </Link>{' '}
+              and{' '}
+              <Link href="/privacy" className="underline">
+                Privacy Policy
+              </Link>
+            </p>
           </div>
         </section>
 

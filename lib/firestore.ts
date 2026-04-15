@@ -158,6 +158,33 @@ export async function getTodayUserSongsCount(userId: string): Promise<number> {
   }
 }
 
+export async function getCurrentMonthProcessedSeconds(userId: string): Promise<number> {
+  try {
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const monthStartIso = monthStart.toISOString()
+
+    const q = query(
+      collection(db, 'songs'),
+      where('userId', '==', userId),
+      where('uploadedAt', '>=', monthStartIso)
+    )
+    const querySnapshot = await getDocs(q)
+
+    let totalSeconds = 0
+    querySnapshot.forEach((songDoc) => {
+      const data = songDoc.data() as { durationSeconds?: number }
+      const seconds = typeof data.durationSeconds === 'number' ? data.durationSeconds : 0
+      totalSeconds += Math.max(0, seconds)
+    })
+
+    return totalSeconds
+  } catch (error) {
+    console.error('Error getting monthly processed seconds:', error)
+    return 0
+  }
+}
+
 // Actualizar estado de canción
 export async function updateSongStatus(songId: string, status: Song['status']): Promise<void> {
   try {

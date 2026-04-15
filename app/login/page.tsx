@@ -2,10 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Music, Mail, Lock, Eye, EyeOff } from 'lucide-react'
 import toast from 'react-hot-toast'
-
 export default function LoginPage() {
   const [isLogin, setIsLogin] = useState(true)
   const [email, setEmail] = useState('')
@@ -15,13 +14,30 @@ export default function LoginPage() {
   
   const { user, loading: authLoading, signIn, signUp, signInWithGoogle } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   // Redirigir automáticamente si el usuario ya está autenticado
   useEffect(() => {
     if (user && !authLoading) {
+      const selectedPlan = searchParams.get('plan')
+      const billing = searchParams.get('billing')
+      const canceled = searchParams.get('canceled') === '1'
+      const normalizedBilling = billing === 'yearly' || billing === 'monthly' ? billing : 'monthly'
+
+      if (canceled) {
+        toast('Checkout cancelado', { icon: 'ℹ️' })
+        router.push('/studio')
+        return
+      }
+
+      if (selectedPlan === 'lite' || selectedPlan === 'pro') {
+        router.push(`/checkout?plan=${selectedPlan}&billing=${normalizedBilling}`)
+        return
+      }
+
       router.push('/studio')
     }
-  }, [user, authLoading, router])
+  }, [user, authLoading, router, searchParams])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -52,6 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           email: user.email,
           displayName: user.displayName || user.email?.split('@')[0] || 'Usuario',
           photoURL: user.photoURL || null,
+          planId: 'starter',
           isPremium: false,
           createdAt: serverTimestamp(),
           lastLogin: serverTimestamp()

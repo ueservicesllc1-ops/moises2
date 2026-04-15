@@ -46,6 +46,7 @@ import BpmDetectorModal from '@/components/BpmDetectorModal'
 import ChordAnalysisModal from '@/components/ChordAnalysisModal'
 import YoutubeExtractModal from '@/components/YoutubeExtractModal'
 import HeroPopup from '@/components/HeroPopup'
+import { resolvePlanIdFromUserData, type PlanId } from '@/lib/pricing'
 
 // import ChordAnalyzer from '@/components/ChordAnalyzer'
 import { getUserSongs, subscribeToUserSongs, deleteSong, Song } from '@/lib/firestore'
@@ -82,7 +83,8 @@ function TrackWavePlaceholder() {
 
 export default function Home() {
   const { user, loading, logout } = useAuth()
-  const isPremium = user?.email === 'ueservicesllc1@gmail.com';
+  const [currentPlanId, setCurrentPlanId] = useState<PlanId>('starter')
+  const isPremium = currentPlanId !== 'starter' || user?.email === 'ueservicesllc1@gmail.com'
   const router = useRouter()
   
   // Component render
@@ -101,6 +103,8 @@ export default function Home() {
   const [showYoutubeExtractModal, setShowYoutubeExtractModal] = useState(false)
   const [showEQInMixer, setShowEQInMixer] = useState(false)
   const [showHeroPopup, setShowHeroPopup] = useState(false)
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false)
+  const [upgradeBilling, setUpgradeBilling] = useState<'monthly' | 'yearly'>('yearly')
   const [songs, setSongs] = useState<Song[]>([])
   const [songsLoading, setSongsLoading] = useState(true)
   const [showSongModal, setShowSongModal] = useState(false)
@@ -161,6 +165,28 @@ export default function Home() {
   
   // Estado para estilo de waveform
   const [waveformStyle, setWaveformStyle] = useState<'bars' | 'smooth' | 'dots'>('bars')
+
+  useEffect(() => {
+    const loadUserPlan = async () => {
+      if (!user?.uid) {
+        setCurrentPlanId('starter')
+        return
+      }
+      try {
+        const { doc, getDoc } = await import('firebase/firestore')
+        const { db } = await import('@/lib/firebase')
+        const userRef = doc(db, 'users', user.uid)
+        const userSnap = await getDoc(userRef)
+        const userData = userSnap.exists() ? userSnap.data() : null
+        setCurrentPlanId(resolvePlanIdFromUserData(userData))
+      } catch (error) {
+        console.error('Error loading user plan in studio:', error)
+        setCurrentPlanId('starter')
+      }
+    }
+
+    loadUserPlan()
+  }, [user?.uid])
 
   const displayedSongs = useMemo(() => {
     let list = [...songs]
@@ -547,6 +573,47 @@ export default function Home() {
     } catch (error) {
       console.error('Error al cerrar sesión:', error)
     }
+  }
+
+  const startUpgradeCheckout = async (plan: 'lite' | 'pro', billing: 'monthly' | 'yearly') => {
+    if (!user?.uid) {
+      router.push(`/login?plan=${plan}&billing=${billing}`)
+      return
+    }
+    if (plan === currentPlanId) {
+      return
+    }
+    try {
+      const res = await fetch('/api/stripe/create-embedded-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plan,
+          billing,
+          uid: user.uid,
+          email: user.email,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.clientSecret) {
+        throw new Error(data?.error || 'No se pudo iniciar checkout')
+      }
+
+      sessionStorage.setItem(
+        'judith_embedded_checkout_prefetch',
+        JSON.stringify({
+          clientSecret: data.clientSecret,
+          plan,
+          billing,
+          uid: user.uid,
+          at: Date.now(),
+        })
+      )
+    } catch (error) {
+      console.warn('No se pudo precargar checkout, continuando flujo normal:', error)
+    }
+
+    router.push(`/checkout?plan=${plan}&billing=${billing}`)
   }
 
 
@@ -1515,7 +1582,7 @@ export default function Home() {
   }
 
   return (
-    <div className="flex min-h-screen bg-[#0a0a0a] font-sans text-[#fafafa] antialiased">
+    <div className="flex h-screen overflow-hidden bg-[#0a0a0a] font-sans text-[#fafafa] antialiased">
       {sidebarOpen && (
         <button
           type="button"
@@ -1526,7 +1593,7 @@ export default function Home() {
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-[240px] shrink-0 flex-col border-r border-[#1f1f1f] bg-black transition-transform duration-200 ease-out md:static md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-[240px] shrink-0 flex-col border-r border-[#1f1f1f] bg-black transition-transform duration-200 ease-out md:static md:h-screen md:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -1616,6 +1683,40 @@ export default function Home() {
           <p className="mb-2 mt-5 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#737373]">
             Cuenta
           </p>
+          <div className="mb-3 rounded-lg border border-[#2a2a2a] bg-[#111111] p-3">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#737373]">
+              Plan
+            </div>
+            <div className="mt-1 text-sm font-medium text-white">
+              {currentPlanId === 'starter' ? 'Free' : currentPlanId.toUpperCase()}
+            </div>
+            {currentPlanId === 'starter' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setShowUpgradeModal(true)}
+                  className="mt-2 inline-flex w-full items-center justify-center rounded-md bg-[#f3d12f] px-3 py-2 text-xs font-semibold text-black transition hover:brightness-105"
+                >
+                  Upgrade
+                </button>
+              </>
+            )}
+            {currentPlanId === 'lite' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUpgradeBilling('yearly')
+                    setShowUpgradeModal(true)
+                  }}
+                  className="mt-2 inline-flex items-center justify-center rounded border border-amber-400/60 px-2 py-1 text-[11px] font-semibold text-amber-300 transition hover:bg-amber-300/10"
+                >
+                  Upgrade to Pro
+                </button>
+                <div className="mt-1 text-[10px] text-[#737373]">Elige mensual o anual</div>
+              </>
+            )}
+          </div>
           <a
             href="/"
             onClick={() => setSidebarOpen(false)}
@@ -1670,7 +1771,7 @@ export default function Home() {
         </div>
       </aside>
 
-      <div className="flex min-h-screen min-w-0 flex-1 flex-col bg-[#121212]">
+      <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden bg-[#121212]">
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-[#1f1f1f] px-4 md:px-6">
           <div className="flex items-center gap-2">
             <button
@@ -2776,6 +2877,100 @@ export default function Home() {
               >
                 Eliminar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showUpgradeModal && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-3xl rounded-xl border border-[#2a2a2a] bg-[#111] p-4 md:p-6">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white">Elige tu plan</h3>
+              <button
+                type="button"
+                onClick={() => setShowUpgradeModal(false)}
+                className="rounded p-2 text-[#a3a3a3] hover:bg-[#1a1a1a] hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mb-4 inline-flex rounded-lg border border-[#2a2a2a] bg-[#0d0d0d] p-1">
+              <button
+                type="button"
+                onClick={() => setUpgradeBilling('monthly')}
+                className={`rounded px-3 py-1.5 text-xs font-medium ${
+                  upgradeBilling === 'monthly' ? 'bg-[#2a2a2a] text-white' : 'text-[#a3a3a3]'
+                }`}
+              >
+                Mensual
+              </button>
+              <button
+                type="button"
+                onClick={() => setUpgradeBilling('yearly')}
+                className={`rounded px-3 py-1.5 text-xs font-medium ${
+                  upgradeBilling === 'yearly' ? 'bg-[#2a2a2a] text-white' : 'text-[#a3a3a3]'
+                }`}
+              >
+                Anual
+              </button>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-lg border border-[#2a2a2a] bg-[#151515] p-4">
+                <p className="text-sm text-[#a3a3a3]">Lite</p>
+                <p className="mt-1 text-2xl font-semibold text-white">
+                  {upgradeBilling === 'yearly' ? '$7.5/mo' : '$9/mo'}
+                </p>
+                <p className="text-xs text-[#737373]">
+                  {upgradeBilling === 'yearly' ? '$90 billed annually' : 'Facturación mensual'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (currentPlanId === 'lite') return
+                    setShowUpgradeModal(false)
+                    setSidebarOpen(false)
+                    startUpgradeCheckout('lite', upgradeBilling)
+                  }}
+                  disabled={currentPlanId === 'lite'}
+                  className={`mt-3 w-full rounded-md px-3 py-2 text-sm font-semibold transition ${
+                    currentPlanId === 'lite'
+                      ? 'cursor-not-allowed border border-[#3a3a3a] bg-[#1e1e1e] text-[#737373]'
+                      : 'bg-[#f3d12f] text-black hover:brightness-105'
+                  }`}
+                >
+                  {currentPlanId === 'lite' ? 'Plan actual' : 'Elegir Lite'}
+                </button>
+              </div>
+
+              <div className="rounded-lg border border-[#2a2a2a] bg-[#151515] p-4">
+                <p className="text-sm text-[#a3a3a3]">Pro</p>
+                <p className="mt-1 text-2xl font-semibold text-white">
+                  {upgradeBilling === 'yearly' ? '$15/mo' : '$19/mo'}
+                </p>
+                <p className="text-xs text-[#737373]">
+                  {upgradeBilling === 'yearly' ? '$180 billed annually' : 'Facturación mensual'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (currentPlanId === 'pro') return
+                    setShowUpgradeModal(false)
+                    setSidebarOpen(false)
+                    startUpgradeCheckout('pro', upgradeBilling)
+                  }}
+                  disabled={currentPlanId === 'pro'}
+                  className={`mt-3 w-full rounded-md px-3 py-2 text-sm font-semibold transition ${
+                    currentPlanId === 'pro'
+                      ? 'cursor-not-allowed border border-[#3a3a3a] bg-[#1e1e1e] text-[#737373]'
+                      : 'bg-[#f3d12f] text-black hover:brightness-105'
+                  }`}
+                >
+                  {currentPlanId === 'pro' ? 'Plan actual' : 'Elegir Pro'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

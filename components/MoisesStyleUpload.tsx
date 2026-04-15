@@ -9,8 +9,11 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { saveSong, getTodayUserSongsCount } from '../lib/firestore';
+import { saveSong, getCurrentMonthProcessedSeconds } from '../lib/firestore';
 import { getBackendUrl } from '../lib/config';
+import { db } from '@/lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { PLAN_LIMITS, resolvePlanIdFromUserData } from '@/lib/pricing';
 ;
 import SuccessWavePopup from './SuccessWavePopup';
 
@@ -33,8 +36,7 @@ interface SeparationOptions {
 
 const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete, preloadedFile }) => {
   const { user } = useAuth();
-  // TODO: Leer esto desde firestore userData.isPremium en el futuro. Por ahora quemado en el superusuario:
-  const isPremium = user?.email === 'ueservicesllc1@gmail.com';
+  const [currentPlanId, setCurrentPlanId] = useState<'starter' | 'lite' | 'pro'>('starter');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadMessage, setUploadMessage] = useState('');
@@ -47,6 +49,8 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
   const [b2ProxyOnline, setB2ProxyOnline] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [completedTrackCount, setCompletedTrackCount] = useState(2);
+  const [monthlyUsedSeconds, setMonthlyUsedSeconds] = useState(0);
+  const [usageLoading, setUsageLoading] = useState(false);
   const [separationOptions, setSeparationOptions] = useState<SeparationOptions>({
     separationType: 'vocals-instrumental',
     vocals: false,
@@ -67,6 +71,52 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
       console.log('📁 Archivo precargado desde YouTube:', preloadedFile.name);
     }
   }, [preloadedFile]);
+
+  useEffect(() => {
+    const loadPlan = async () => {
+      if (!user?.uid) {
+        setCurrentPlanId('starter');
+        return;
+      }
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        const userSnap = await getDoc(userRef);
+        const userData = userSnap.exists() ? userSnap.data() : null;
+        setCurrentPlanId(resolvePlanIdFromUserData(userData));
+      } catch (error) {
+        console.error('Error loading user plan:', error);
+        setCurrentPlanId('starter');
+      }
+    };
+
+    loadPlan();
+  }, [user?.uid]);
+
+  useEffect(() => {
+    const loadUsage = async () => {
+      if (!user?.uid) {
+        setMonthlyUsedSeconds(0);
+        return;
+      }
+      try {
+        setUsageLoading(true);
+        const usedSeconds = await getCurrentMonthProcessedSeconds(user.uid);
+        setMonthlyUsedSeconds(usedSeconds);
+      } catch (error) {
+        console.error('Error loading monthly usage:', error);
+      } finally {
+        setUsageLoading(false);
+      }
+    };
+
+    loadUsage();
+  }, [user?.uid, currentPlanId]);
+
+  const isPremium = currentPlanId !== 'starter';
+  const planLimits = PLAN_LIMITS[currentPlanId];
+  const monthlyLimitSeconds = planLimits.includedMinutesMonthly ? planLimits.includedMinutesMonthly * 60 : null;
+  const usedMinutes = monthlyUsedSeconds / 60;
+  const remainingMinutes = monthlyLimitSeconds !== null ? Math.max(0, (monthlyLimitSeconds - monthlyUsedSeconds) / 60) : null;
 
   // Timer para contador de tiempo transcurrido
   useEffect(() => {
@@ -180,16 +230,37 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
       return;
     }
 
-    if (!isPremium) {
+    if (uploadedFile.size > planLimits.maxUploadBytes) {
+      const maxMb = Math.floor(planLimits.maxUploadBytes / (1024 * 1024));
+      alert(`Tu plan ${planLimits.displayName} permite archivos de hasta ${maxMb}MB.`);
+      setUploadMessage(`❌ Límite de archivo excedido (máx. ${maxMb}MB)`);
+      return;
+    }
+
+    let nextAudioDurationSeconds = 0;
+    try {
+      const audioDuration = await getAudioDuration(uploadedFile);
+      nextAudioDurationSeconds = audioDuration.durationSeconds;
+    } catch (err) {
+      console.warn('No se pudo calcular duración antes de subir:', err);
+    }
+
+    if (planLimits.includedMinutesMonthly !== null) {
       try {
-        const todayCount = await getTodayUserSongsCount(user.uid);
-        if (todayCount >= 3) {
-          alert('Has alcanzado el límite de 3 canciones diarias para cuentas gratuitas. ¡Vuelve mañana o adquiere PRO!');
-          setUploadMessage('❌ Límite diario alcanzado (3/3)');
+        const usedSeconds = await getCurrentMonthProcessedSeconds(user.uid);
+        const monthlyLimitSeconds = planLimits.includedMinutesMonthly * 60;
+        const projectedTotal = usedSeconds + nextAudioDurationSeconds;
+        if (projectedTotal > monthlyLimitSeconds) {
+          const usedMinutes = (usedSeconds / 60).toFixed(1);
+          alert(
+            `Tu plan Starter incluye 10 minutos al mes. Ya llevas ${usedMinutes} min este mes. ` +
+            'Puedes ver resultados gratis y subir más minutos al pasar a Lite o Pro.'
+          );
+          setUploadMessage('❌ Límite mensual Starter alcanzado (10 min)');
           return;
         }
       } catch (err) {
-        console.error('Error checando limite diario', err);
+        console.error('Error validando minutos del plan Starter:', err);
       }
     }
 
@@ -436,6 +507,12 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
           console.log('[FIRESTORE] About to save song...');
           const firestoreSongId = await saveSong(songData);
           console.log('[FIRESTORE] Song saved successfully! ID:', firestoreSongId);
+          try {
+            const refreshedUsage = await getCurrentMonthProcessedSeconds(user.uid);
+            setMonthlyUsedSeconds(refreshedUsage);
+          } catch (error) {
+            console.warn('No se pudo refrescar consumo mensual:', error);
+          }
 
           setUploadProgress(100);
           setUploadMessage('¡Separación completada exitosamente! 💾 Pre-cacheando en Disco...');
@@ -539,6 +616,39 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
 
   return (
     <div className="max-w-lg mx-auto p-4 bg-gray-900 shadow-lg">
+
+      <div className="mb-3 rounded-md border border-white/15 bg-black/40 p-3 text-xs text-zinc-200">
+        <p className="font-semibold text-white">
+          Plan actual: {planLimits.displayName}
+        </p>
+        <p className="mt-1 text-zinc-300">
+          {monthlyLimitSeconds === null
+            ? 'Minutos relajados ilimitados.'
+            : usageLoading
+              ? 'Calculando consumo mensual...'
+              : `${usedMinutes.toFixed(1)} / ${planLimits.includedMinutesMonthly} min usados este mes (${remainingMinutes?.toFixed(1)} min disponibles)`}
+        </p>
+        <p className="mt-1 text-zinc-400">
+          Limite por archivo: {(planLimits.maxUploadBytes / (1024 * 1024)).toFixed(0)}MB
+          {!planLimits.requiresCard ? ' · sin tarjeta' : ''}
+        </p>
+        {currentPlanId === 'starter' && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            <a
+              href="/login?plan=lite&billing=yearly"
+              className="rounded bg-amber-300 px-2.5 py-1 font-semibold text-black"
+            >
+              Upgrade a Lite
+            </a>
+            <a
+              href="/login?plan=pro&billing=yearly"
+              className="rounded bg-violet-400 px-2.5 py-1 font-semibold text-black"
+            >
+              Upgrade a Pro
+            </a>
+          </div>
+        )}
+      </div>
 
       
       {/* Status Indicators */}
