@@ -641,13 +641,21 @@ export default function JudithLanding() {
               <div className="rounded-2xl border border-white/10 bg-[#4a4a4f] p-7">
                 <h3 className="text-3xl font-semibold text-white">Lite</h3>
                 <div className="mt-2 flex items-end gap-1">
-                  <span className="text-5xl font-semibold text-white">
-                    {billingCycle === 'annually' ? '$7.5' : '$9'}
-                  </span>
+                  {billingCycle === 'annually' ? (
+                    <div className="flex items-end gap-2">
+                      <span className="text-5xl font-semibold text-white">$4.17</span>
+                      <span className="mb-2 text-xl text-zinc-300 line-through">$7.5</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-end gap-2">
+                      <span className="text-5xl font-semibold text-white">$4.99</span>
+                      <span className="mb-2 text-xl text-zinc-300 line-through">$9</span>
+                    </div>
+                  )}
                   <span className="mb-1 text-3xl text-zinc-300">/mo</span>
                 </div>
                 <p className="mt-1 text-sm text-zinc-200">
-                  {billingCycle === 'annually' ? '$90 billed annually' : '$9 billed monthly'}
+                  {billingCycle === 'annually' ? '$49.99 billed annually · equivalent to $4.17/mo' : '$4.99 billed monthly · before $9'}
                 </p>
 
                 <div className="mt-6 space-y-2">
@@ -657,12 +665,6 @@ export default function JudithLanding() {
                   >
                     <CreditCard className="h-4 w-4" /> Card
                   </Link>
-                  <button
-                    type="button"
-                    className="inline-flex h-11 w-full items-center justify-center rounded-md bg-[#6b6b6f] text-[30px] font-semibold italic text-zinc-200"
-                  >
-                    PayPal
-                  </button>
                 </div>
 
                 <div className="mt-7 space-y-4">
@@ -692,13 +694,21 @@ export default function JudithLanding() {
                 <span className="absolute right-4 top-4 rounded-lg bg-amber-300 px-3 py-1 text-xs font-bold text-black">Best value</span>
                 <h3 className="text-3xl font-semibold text-white">Pro</h3>
                 <div className="mt-2 flex items-end gap-1">
-                  <span className="text-5xl font-semibold text-white">
-                    {billingCycle === 'annually' ? '$15' : '$19'}
-                  </span>
+                  {billingCycle === 'annually' ? (
+                    <div className="flex items-end gap-2">
+                      <span className="text-5xl font-semibold text-white">$8.33</span>
+                      <span className="mb-2 text-xl text-zinc-300 line-through">$15</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-end gap-2">
+                      <span className="text-5xl font-semibold text-white">$9.99</span>
+                      <span className="mb-2 text-xl text-zinc-300 line-through">$19</span>
+                    </div>
+                  )}
                   <span className="mb-1 text-3xl text-zinc-300">/mo</span>
                 </div>
                 <p className="mt-1 text-sm text-zinc-200">
-                  {billingCycle === 'annually' ? '$180 billed annually' : '$19 billed monthly'}
+                  {billingCycle === 'annually' ? '$99.99 billed annually · equivalent to $8.33/mo' : '$9.99 billed monthly · before $19'}
                 </p>
 
                 <div className="mt-6 space-y-2">
@@ -708,12 +718,6 @@ export default function JudithLanding() {
                   >
                     <CreditCard className="h-4 w-4" /> Card
                   </Link>
-                  <button
-                    type="button"
-                    className="inline-flex h-11 w-full items-center justify-center rounded-md bg-[#6b6b6f] text-[30px] font-semibold italic text-zinc-200"
-                  >
-                    PayPal
-                  </button>
                 </div>
 
                 <div className="mt-7 space-y-4">

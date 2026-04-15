@@ -3065,10 +3065,10 @@ export default function Home() {
               <div className="rounded-lg border border-[#2a2a2a] bg-[#151515] p-4">
                 <p className="text-sm text-[#a3a3a3]">Lite</p>
                 <p className="mt-1 text-2xl font-semibold text-white">
-                  {upgradeBilling === 'yearly' ? '$7.5/mo' : '$9/mo'}
+                  {upgradeBilling === 'yearly' ? '$4.17/mo' : '$4.99/mo'}
                 </p>
                 <p className="text-xs text-[#737373]">
-                  {upgradeBilling === 'yearly' ? '$90 billed annually' : 'Facturación mensual'}
+                  {upgradeBilling === 'yearly' ? '$49.99 billed annually' : 'Facturación mensual'}
                 </p>
                 <button
                   type="button"
@@ -3092,10 +3092,10 @@ export default function Home() {
               <div className="rounded-lg border border-[#2a2a2a] bg-[#151515] p-4">
                 <p className="text-sm text-[#a3a3a3]">Pro</p>
                 <p className="mt-1 text-2xl font-semibold text-white">
-                  {upgradeBilling === 'yearly' ? '$15/mo' : '$19/mo'}
+                  {upgradeBilling === 'yearly' ? '$8.33/mo' : '$9.99/mo'}
                 </p>
                 <p className="text-xs text-[#737373]">
-                  {upgradeBilling === 'yearly' ? '$180 billed annually' : 'Facturación mensual'}
+                  {upgradeBilling === 'yearly' ? '$99.99 billed annually' : 'Facturación mensual'}
                 </p>
                 <button
                   type="button"

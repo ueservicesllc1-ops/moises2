@@ -34,18 +34,18 @@ const PLANS: Plan[] = [
     name: 'Creador',
     badge: 'Popular',
     description: 'Más minutos y archivos grandes para producir cada semana.',
-    monthlyPrice: 9,
-    yearlyPricePerMonth: 7.5,
-    yearlyBilledTotal: 90,
+    monthlyPrice: 4.99,
+    yearlyPricePerMonth: 4.17,
+    yearlyBilledTotal: 49.99,
     cta: 'Suscribirse',
   },
   {
     id: 'pro',
     name: 'Pro',
     description: 'Prioridad, lotes y herramientas para equipos y sellos.',
-    monthlyPrice: 19,
-    yearlyPricePerMonth: 15,
-    yearlyBilledTotal: 180,
+    monthlyPrice: 9.99,
+    yearlyPricePerMonth: 8.33,
+    yearlyBilledTotal: 99.99,
     cta: 'Ir a Pro',
     highlighted: true,
   },
@@ -170,8 +170,9 @@ export default function PricingSection() {
   const [period, setPeriod] = useState<BillingPeriod>('yearly')
 
   const savingsPercent = useMemo(() => {
-    const monthly = 9
-    const yearlyPerMonth = 7.5
+    const litePlan = PLANS.find((plan) => plan.id === 'lite')
+    const monthly = litePlan?.monthlyPrice ?? 0
+    const yearlyPerMonth = litePlan?.yearlyPricePerMonth ?? 0
     if (monthly <= 0) return 0
     return Math.round((1 - yearlyPerMonth / monthly) * 100)
   }, [])

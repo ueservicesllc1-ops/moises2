@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getStripeServerClient, resolveStripePriceId, type CheckoutBilling, type CheckoutPlan } from '@/lib/stripe'
+import {
+  getStripeServerClient,
+  resolveStripePriceId,
+  type CheckoutBilling,
+  type CheckoutPlan,
+} from '@/lib/stripe'
 
 type Payload = {
   plan?: CheckoutPlan
