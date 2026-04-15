@@ -92,6 +92,7 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
         fileUrl: downloadUrl,
         uploadedAt: new Date().toISOString(),
         userId: user!.uid,
+        userEmail: user!.email || '',
         fileSize: songData.fileSize,
         fileName: songData.fileName,
         status: 'uploaded' as const,

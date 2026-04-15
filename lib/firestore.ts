@@ -30,6 +30,7 @@ export interface Song {
   fileUrl: string
   uploadedAt: string
   userId: string
+  userEmail?: string
   fileSize: number
   fileName: string
   status: 'uploaded' | 'processing' | 'completed' | 'failed'

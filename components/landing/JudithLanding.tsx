@@ -24,7 +24,6 @@ import {
   Infinity as InfinityIcon,
   GaugeCircle,
   HelpCircle,
-  Eye,
 } from 'lucide-react'
 
 /* ─────────────────────────────────── helpers ─────────────────────────────── */
@@ -200,46 +199,6 @@ export default function JudithLanding() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('annually')
-  const [visitStats, setVisitStats] = useState<{ total: number; today: number } | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    const trackAndLoadStats = async () => {
-      try {
-        const storageKey = 'judith_visitor_id'
-        let visitorId = localStorage.getItem(storageKey)
-        if (!visitorId) {
-          visitorId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-          localStorage.setItem(storageKey, visitorId)
-        }
-
-        await fetch('/api/visits/track', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            path: window.location.pathname || '/',
-            visitorId,
-          }),
-        })
-
-        const res = await fetch('/api/visits/stats', { cache: 'no-store' })
-        const data = await res.json()
-        if (!cancelled && res.ok) {
-          setVisitStats({
-            total: data?.total_visits ?? 0,
-            today: data?.today_visits ?? 0,
-          })
-        }
-      } catch {
-        // Evitar romper UI del landing si falla analytics.
-      }
-    }
-
-    trackAndLoadStats()
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   return (
     <div className="min-h-[100dvh] bg-[#060608] text-white overflow-x-hidden selection:bg-violet-500/30">
@@ -872,15 +831,7 @@ export default function JudithLanding() {
 
           <div className="mt-10 pt-6 border-t border-white/[0.04] flex flex-col sm:flex-row items-center justify-between gap-3 text-[12px] text-zinc-600">
             <p>© 2026 Judith. Todos los derechos reservados.</p>
-            <div className="flex items-center gap-4">
-              <p className="inline-flex items-center gap-1.5 text-zinc-500">
-                <Eye className="h-3.5 w-3.5" />
-                {visitStats
-                  ? `${visitStats.total.toLocaleString()} visitas totales · ${visitStats.today.toLocaleString()} hoy`
-                  : 'Visitas: no disponible'}
-              </p>
-              <p>Hecho con ♥ para músicos del mundo.</p>
-            </div>
+            <p>Hecho con ♥ para músicos del mundo.</p>
           </div>
         </div>
       </footer>
