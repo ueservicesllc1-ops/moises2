@@ -168,11 +168,11 @@ export default function CheckoutPage() {
           <p className="mt-2 text-zinc-300">
             {plan === 'pro'
               ? billing === 'yearly'
-                ? '$15/mo · $180 al año'
-                : '$19/mo'
+                ? '$8.33/mo · $99.99 al año'
+                : '$9.99/mo'
               : billing === 'yearly'
-                ? '$7.5/mo · $90 al año'
-                : '$9/mo'}
+                ? '$4.17/mo · $49.99 al año'
+                : '$4.99/mo'}
           </p>
           <p className="mt-6 text-sm text-zinc-400">
             Pagos procesados por Stripe. Puedes cancelar cuando quieras desde tu suscripción.
