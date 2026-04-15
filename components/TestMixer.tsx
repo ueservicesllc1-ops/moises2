@@ -16,11 +16,11 @@ const TestMixer: React.FC<TestMixerProps> = ({ isOpen, onClose, songData }) => {
   if (!isOpen || !songData) return null;
 
   return (
-    <div className="fixed inset-0 bg-gray-900 flex flex-col">
+    <div className="fixed inset-0 flex min-h-[100dvh] flex-col bg-gray-900">
       {/* Top Header */}
-      <div className="bg-gray-800 h-16 flex items-center justify-between px-6 border-b border-gray-700">
+      <div className="bg-gray-800 min-h-[64px] flex items-center justify-between px-3 sm:px-6 border-b border-gray-700">
         <div className="flex items-center space-x-4">
-          <button onClick={onClose} className="text-gray-400 hover:text-white">
+          <button onClick={onClose} className="mobile-touch-target inline-flex items-center justify-center text-gray-400 hover:text-white">
             <ArrowLeft className="h-5 w-5" />
           </button>
           <Music className="h-5 w-5 text-blue-400" />

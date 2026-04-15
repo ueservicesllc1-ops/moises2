@@ -109,23 +109,23 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="min-h-[100dvh] bg-gray-900 text-white">
       {/* Header */}
-      <div className="h-16 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6">
-        <div className="flex items-center space-x-4">
+      <div className="min-h-[64px] bg-gray-800 border-b border-gray-700 flex items-center justify-between px-3 sm:px-6">
+        <div className="flex items-center space-x-3 sm:space-x-4">
           <button
             onClick={() => router.push('/studio')}
-            className="flex items-center space-x-2 text-gray-300 hover:text-white transition-colors"
+            className="mobile-touch-target flex items-center space-x-2 text-gray-300 hover:text-white transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
-            <span className="font-medium">Volver</span>
+            <span className="hidden sm:inline font-medium">Volver</span>
           </button>
-          <h1 className="text-2xl font-bold text-white">Panel de Administración</h1>
+          <h1 className="text-lg sm:text-2xl font-bold text-white">Panel de Administración</h1>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {!showCoverAdmin && !showUsersAdmin ? (
           /* Dashboard Principal */
           <div className="max-w-4xl mx-auto">
@@ -135,7 +135,7 @@ export default function AdminPage() {
               {/* Botón Administrar Cover */}
               <button
                 onClick={() => setShowCoverAdmin(true)}
-                className="group relative bg-gradient-to-br from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 p-8 rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-2xl"
+                className="group relative bg-gradient-to-br from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 p-6 sm:p-8 rounded-xl transition-all duration-300 transform hover:scale-[1.02] sm:hover:scale-105 shadow-lg hover:shadow-2xl"
               >
                 <div className="flex flex-col items-center space-y-4">
                   <div className="p-4 bg-white/10 rounded-full group-hover:bg-white/20 transition-colors">
@@ -153,7 +153,7 @@ export default function AdminPage() {
               {/* Botón Usuarios */}
               <button
                 onClick={() => setShowUsersAdmin(true)}
-                className="group relative bg-gradient-to-br from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 p-8 rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-2xl"
+                className="group relative bg-gradient-to-br from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 p-6 sm:p-8 rounded-xl transition-all duration-300 transform hover:scale-[1.02] sm:hover:scale-105 shadow-lg hover:shadow-2xl"
               >
                 <div className="flex flex-col items-center space-y-4">
                   <div className="p-4 bg-white/10 rounded-full group-hover:bg-white/20 transition-colors">
@@ -170,7 +170,7 @@ export default function AdminPage() {
               {/* Botón IA Training */}
               <button
                 onClick={() => router.push('/admin/training')}
-                className="group relative bg-gradient-to-br from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 p-8 rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-2xl"
+                className="group relative bg-gradient-to-br from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 p-6 sm:p-8 rounded-xl transition-all duration-300 transform hover:scale-[1.02] sm:hover:scale-105 shadow-lg hover:shadow-2xl"
               >
                 <div className="flex flex-col items-center space-y-4">
                   <div className="p-4 bg-white/10 rounded-full group-hover:bg-white/20 transition-colors">
@@ -204,7 +204,7 @@ export default function AdminPage() {
             </div>
 
             {/* Tabla de referencia */}
-            <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+            <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-700">
                   <tr>
@@ -278,7 +278,7 @@ export default function AdminPage() {
             </div>
 
             {/* Tabla de usuarios */}
-            <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+            <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-x-auto">
               {loading ? (
                 <div className="flex items-center justify-center py-12">
                   <div className="text-center">

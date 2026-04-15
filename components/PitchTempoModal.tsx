@@ -13,9 +13,10 @@ import { getBackendUrl } from '@/lib/config'
 interface PitchTempoModalProps {
   isOpen: boolean
   onClose: () => void
+  embedded?: boolean
 }
 
-const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) => {
+const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose, embedded = false }) => {
   // Logic States
   const [audioFile, setAudioFile] = useState<File | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -35,6 +36,10 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
   const waveformContainerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const grainPlayerRef = useRef<any>(null)
+  const toneRef = useRef<any>(null)
+  const playbackStartOffsetRef = useRef(0)
+  const playbackStartContextTimeRef = useRef(0)
+  const lastTempoRef = useRef(tempo)
 
   // Engine Init
   useEffect(() => {
@@ -50,6 +55,7 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
         const WaveSurfer = WSModule.default
         const ToneModule = await import('tone')
         Tone = ToneModule
+        toneRef.current = ToneModule
         
         await Tone.start()
         const url = URL.createObjectURL(audioFile)
@@ -80,11 +86,15 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
 
         ws.on('ready', () => setDuration(ws.getDuration()))
 
-        ws.on('interaction', (newProgress: number) => {
+        ws.on('interaction', (value: number) => {
           if (grainPlayerRef.current) {
-            const time = newProgress * ws.getDuration()
+            const dur = ws.getDuration()
+            // Wavesurfer can emit normalized progress (0..1) or absolute seconds.
+            const time = value <= 1 ? value * dur : value
             if (grainPlayerRef.current.state === 'started') {
               grainPlayerRef.current.stop()
+              playbackStartOffsetRef.current = time
+              playbackStartContextTimeRef.current = Tone.getContext().rawContext.currentTime
               grainPlayerRef.current.start(undefined, time)
             } else {
               setCurrentTime(time)
@@ -97,11 +107,19 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
 
         interval = setInterval(() => {
           if (grainPlayerRef.current && grainPlayerRef.current.state === 'started') {
-            const time = grainPlayerRef.current.seconds
             const dur = ws.getDuration()
+            const now = Tone.getContext().rawContext.currentTime
+            const elapsed = now - playbackStartContextTimeRef.current
+            const rate = grainPlayerRef.current.playbackRate || 1
+            const time = playbackStartOffsetRef.current + elapsed * rate
             if (isFinite(time) && isFinite(dur) && dur > 0) {
-              setCurrentTime(time)
-              ws.seekTo(time / dur)
+              const clamped = Math.max(0, Math.min(time, dur))
+              setCurrentTime(clamped)
+              ws.seekTo(clamped / dur)
+              if (clamped >= dur) {
+                grainPlayerRef.current.stop()
+                setIsPlaying(false)
+              }
             }
           }
         }, 100)
@@ -130,9 +148,20 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
 
   useEffect(() => {
     if (grainPlayerRef.current) {
+      // Keep progress continuity when tempo changes during playback.
+      if (isPlaying) {
+        const now = toneRef.current?.getContext?.().rawContext?.currentTime
+        if (typeof now === 'number') {
+          const elapsed = now - playbackStartContextTimeRef.current
+          const currentAtOldRate = playbackStartOffsetRef.current + elapsed * (lastTempoRef.current / 100)
+          playbackStartOffsetRef.current = currentAtOldRate
+          playbackStartContextTimeRef.current = now
+        }
+      }
       grainPlayerRef.current.playbackRate = tempo / 100
+      lastTempoRef.current = tempo
     }
-  }, [tempo])
+  }, [tempo, isPlaying])
 
   useEffect(() => {
     if (grainPlayerRef.current) {
@@ -153,6 +182,12 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
     if (isPlaying) {
       grainPlayerRef.current.stop()
     } else {
+      const ToneApi = toneRef.current
+      if (ToneApi?.getContext?.().state !== 'running') {
+        void ToneApi?.start?.()
+      }
+      playbackStartOffsetRef.current = currentTime
+      playbackStartContextTimeRef.current = ToneApi?.getContext?.().rawContext?.currentTime ?? 0
       grainPlayerRef.current.start(undefined, currentTime)
     }
     setIsPlaying(!isPlaying)
@@ -163,6 +198,8 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
       grainPlayerRef.current.stop()
       setIsPlaying(false)
       setCurrentTime(0)
+      playbackStartOffsetRef.current = 0
+      playbackStartContextTimeRef.current = 0
       if (wavesurferRef.current) wavesurferRef.current.seekTo(0)
     }
   }
@@ -207,30 +244,37 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
     setIsExporting(true)
     const toastId = toast.loading(`Exportando Máster 24-bit (${exportFormat.toUpperCase()})...`)
     try {
-      const Tone = await import('tone')
-      const renderDuration = duration / (tempo / 100)
-      const offlineBuffer = await Tone.Offline(async () => {
-        const url = URL.createObjectURL(audioFile)
-        const shifter = new Tone.GrainPlayer(url).toDestination()
-        await shifter.buffer.load(url)
-        shifter.playbackRate = tempo / 100
-        shifter.detune = pitch * 100
-        shifter.start(0)
-      }, renderDuration)
-      let blob: Blob
-      if (exportFormat === 'wav') {
-        blob = audioBufferToWav24Bit(offlineBuffer)
-      } else {
-        blob = await audioBufferToMp3(offlineBuffer)
+      const formData = new FormData()
+      formData.append('file', audioFile)
+      formData.append('tempo_percent', String(tempo))
+      formData.append('pitch_semitones', String(pitch))
+      formData.append('export_format', exportFormat)
+      formData.append('filename', audioFile.name.replace(/\.[^/.]+$/, '') || 'export')
+
+      const response = await fetch('/api/export-audio', {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => null as any)
+        throw new Error(err?.details || err?.error || `Export failed: ${response.status}`)
       }
+
+      const blob = await response.blob()
+      const contentDisposition = response.headers.get('content-disposition') || ''
+      const match = /filename=\"?([^\";]+)\"?/.exec(contentDisposition)
+      const downloadName = match?.[1] || `moises_master_24bit_${pitch}st_${tempo}p.${exportFormat}`
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `moises_master_24bit_${pitch}st_${tempo}p.${exportFormat}`
+      a.download = downloadName
       a.click()
-      toast.success(`¡${exportFormat.toUpperCase()} Exportado con éxito!`, { id: toastId })
+      URL.revokeObjectURL(url)
+      toast.success(`¡${exportFormat.toUpperCase()} exportado con éxito!`, { id: toastId })
     } catch (err) {
-      toast.error('Error en exportación.', { id: toastId })
+      console.error('Export error:', err)
+      toast.error(`No se pudo exportar ${exportFormat.toUpperCase()}.`, { id: toastId })
     } finally {
       setIsExporting(false)
     }
@@ -256,9 +300,45 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
     return new Blob([bufferData], { type: 'audio/wav' })
   }
 
+  async function getBrowserLameEncoder() {
+    const w = window as any
+    if (w.lamejs?.Mp3Encoder) return w.lamejs
+
+    await new Promise<void>((resolve, reject) => {
+      const existing = document.querySelector('script[data-lamejs-cdn="1"]') as HTMLScriptElement | null
+      if (existing) {
+        if ((window as any).lamejs?.Mp3Encoder) return resolve()
+        existing.addEventListener('load', () => resolve(), { once: true })
+        existing.addEventListener('error', () => reject(new Error('Failed to load lamejs CDN script')), { once: true })
+        return
+      }
+
+      const script = document.createElement('script')
+      script.src = 'https://unpkg.com/lamejs@1.2.1/lame.min.js'
+      script.async = true
+      script.dataset.lamejsCdn = '1'
+      script.onload = () => resolve()
+      script.onerror = () => reject(new Error('Failed to load lamejs CDN script'))
+      document.head.appendChild(script)
+    })
+
+    if (!(window as any).lamejs?.Mp3Encoder) {
+      throw new Error('lamejs encoder not available after CDN load')
+    }
+    return (window as any).lamejs
+  }
+
   async function audioBufferToMp3(buffer: any) {
-    const lamejs = await import('lamejs')
-    const channels = buffer.numberOfChannels, sampleRate = buffer.sampleRate, mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, 320), mp3Data = [], sampleBlockSize = 576, leftData = buffer.getChannelData(0), rightData = channels > 1 ? buffer.getChannelData(1) : leftData
+    const lamejs: any = await getBrowserLameEncoder()
+    const Mp3EncoderCtor = lamejs.Mp3Encoder
+
+    const channels = buffer.numberOfChannels
+    const sampleRate = buffer.sampleRate
+    const mp3encoder = new Mp3EncoderCtor(channels, sampleRate, 320)
+    const mp3Data = []
+    const sampleBlockSize = 1152
+    const leftData = buffer.getChannelData(0)
+    const rightData = channels > 1 ? buffer.getChannelData(1) : leftData
     const leftPcm = new Int16Array(leftData.length), rightPcm = new Int16Array(rightData.length)
     for (let i = 0; i < leftData.length; i++) {
       leftPcm[i] = leftData[i] < 0 ? leftData[i] * 0x8000 : leftData[i] * 0x7FFF
@@ -271,7 +351,7 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
     }
     const mp3buf = mp3encoder.flush()
     if (mp3buf.length > 0) mp3Data.push(mp3buf)
-    return new Blob(mp3Data as any, { type: 'audio/mp3' })
+    return new Blob(mp3Data as any, { type: 'audio/mpeg' })
   }
 
   const getShiftedKey = () => {
@@ -290,53 +370,53 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
     return `${m}:${sec.toString().padStart(2, '0')}`
   }
 
-  if (!isOpen) return null
+  if (!embedded && !isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black/95 flex items-center justify-center z-[1100] p-4 backdrop-blur-xl">
-      <div className="bg-[#0f0f12] border border-white/10 rounded-[2.5rem] w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl relative">
+    <div className={embedded ? '' : 'fixed inset-0 z-[1100] flex items-center justify-center bg-black/95 p-2 md:p-4 backdrop-blur-xl'}>
+      <div className={`bg-[#0f0f12] border border-white/10 rounded-[2rem] md:rounded-[2.5rem] w-full max-w-[1500px] flex flex-col overflow-hidden shadow-2xl relative ${embedded ? 'h-[76vh]' : 'h-[100dvh] md:max-h-[90vh]'}`}>
         
         {/* Glows */}
         <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-blue-600/5 blur-[120px] pointer-events-none rounded-full" />
         <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-purple-600/5 blur-[120px] pointer-events-none rounded-full" />
 
         {/* Dynamic Header */}
-        <div className="px-10 py-6 flex items-center justify-between border-b border-white/5 bg-black/40 flex-shrink-0">
-           <div className="flex items-center space-x-6">
-              <div className="w-12 h-12 bg-gradient-to-tr from-blue-600 to-cyan-400 rounded-2xl flex items-center justify-center shadow-xl ring-1 ring-white/10">
-                <Disc className="w-6 h-6 text-white animate-spin-slow" />
+        <div className="px-6 py-3 flex items-center justify-between border-b border-white/5 bg-black/40 flex-shrink-0">
+           <div className="flex items-center space-x-3">
+              <div className="w-9 h-9 bg-gradient-to-tr from-blue-600 to-cyan-400 rounded-xl flex items-center justify-center shadow-xl ring-1 ring-white/10">
+                <Disc className="w-4 h-4 text-white animate-spin-slow" />
               </div>
               <div>
-                 <h2 className="text-2xl font-black text-white tracking-tighter italic">MASTER <span className="text-blue-500 font-bold">ENGINE</span></h2>
-                 <p className="text-[10px] font-black text-blue-500/50 uppercase tracking-widest">{audioFile ? 'Neural DSP Pro Session Active' : 'Waiting for Signal Interface'}</p>
+                 <h2 className="text-lg font-black text-white tracking-tighter italic">MASTER <span className="text-blue-500 font-bold">ENGINE</span></h2>
+                 <p className="text-[9px] font-black text-blue-500/50 uppercase tracking-wider">{audioFile ? 'Neural DSP Pro Session Active' : 'Waiting for Signal Interface'}</p>
               </div>
            </div>
-           <button onClick={onClose} className="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center text-gray-400 hover:text-white transition-all border border-white/5">
-             <X className="w-5 h-5" />
+           <button onClick={onClose} className="w-8 h-8 bg-white/5 rounded-lg flex items-center justify-center text-gray-400 hover:text-white transition-all border border-white/5">
+             <X className="w-4 h-4" />
            </button>
         </div>
 
         {/* Content Interior */}
-        <div className="flex-1 overflow-y-auto px-10 py-8 space-y-8 custom-scrollbar">
+        <div className={`flex-1 ${embedded ? 'overflow-hidden' : 'overflow-y-auto'} px-4 xl:px-6 py-4 space-y-4 custom-scrollbar`}>
           
-          <div className="grid grid-cols-12 gap-10">
+          <div className="grid grid-cols-12 gap-4">
             
             {/* Sidebar Data */}
-            <div className="col-span-12 lg:col-span-4 space-y-6">
-               <div className="bg-[#16161a] border border-white/5 rounded-[2rem] p-8 shadow-xl relative overflow-hidden group">
+            <div className="col-span-12 lg:col-span-4 space-y-3">
+               <div className="bg-[#16161a] border border-white/5 rounded-2xl p-4 shadow-xl relative overflow-hidden group">
                   <div className="absolute top-0 left-0 w-1 h-full bg-blue-600/50" />
-                  <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-6 flex items-center">
+                  <h3 className="text-[9px] font-black text-gray-500 uppercase tracking-wider mb-3 flex items-center">
                     <Activity className="w-4 h-4 mr-2 text-blue-500" /> AI SCAN DATA
                   </h3>
 
-                  <div className="space-y-4">
-                     <div className="p-5 bg-black/40 rounded-2xl border border-white/5">
+                  <div className="space-y-2">
+                     <div className="p-3 bg-black/40 rounded-xl border border-white/5">
                         <p className="text-[9px] text-gray-500 font-bold uppercase mb-2 tracking-widest">Harmonic Key</p>
                         <span className={`font-black text-white ${key.includes('...') ? 'text-lg animate-pulse' : 'text-4xl'}`}>
                           {key === 'Esperando...' ? '--' : key}
                         </span>
                      </div>
-                     <div className="p-5 bg-black/40 rounded-2xl border border-white/5">
+                     <div className="p-3 bg-black/40 rounded-xl border border-white/5">
                         <p className="text-[9px] text-gray-500 font-bold uppercase mb-2 tracking-widest">BPM Original</p>
                         <div className="flex items-baseline space-x-2">
                            <span className="text-4xl font-black text-white">{detectedBpm > 0 ? Math.round(detectedBpm) : '--'}</span>
@@ -353,12 +433,12 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
                   )}
                </div>
 
-               <div 
+               <div
                  onClick={() => fileInputRef.current?.click()}
-                 className="bg-gradient-to-br from-blue-600/5 to-indigo-600/5 border-2 border-dashed border-white/10 rounded-[2rem] p-8 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500/30 transition-all group"
+                 className="bg-gradient-to-br from-blue-600/5 to-indigo-600/5 border-2 border-dashed border-white/10 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500/30 transition-all group"
                >
-                  <div className="w-14 h-14 bg-blue-500/10 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform ring-1 ring-blue-500/20">
-                    <Upload className="w-6 h-6 text-blue-400" />
+                  <div className="w-10 h-10 bg-blue-500/10 rounded-full flex items-center justify-center mb-2 group-hover:scale-110 transition-transform ring-1 ring-blue-500/20">
+                    <Upload className="w-4 h-4 text-blue-400" />
                   </div>
                   <h4 className="text-white font-bold text-sm mb-1 uppercase tracking-tighter">Choose Audio</h4>
                   <p className="text-gray-600 text-[9px] font-bold uppercase tracking-widest">WAV / MP3 / FLAC / M4A</p>
@@ -367,49 +447,49 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
             </div>
 
             {/* Main Console */}
-            <div className="col-span-12 lg:col-span-8 space-y-10">
+            <div className="col-span-12 lg:col-span-8 space-y-4">
                
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Tempo Module */}
-                  <div className="bg-[#16161a] border border-white/5 rounded-[2.5rem] p-8 shadow-xl relative overflow-hidden">
-                     <div className="flex justify-between items-center mb-8">
+                  <div className="bg-[#16161a] border border-white/5 rounded-2xl p-4 shadow-xl relative overflow-hidden">
+                     <div className="flex justify-between items-center mb-3">
                         <h3 className="text-[10px] font-black text-white/30 uppercase tracking-widest flex items-center">
                            <Waves className="w-4 h-4 mr-2 text-purple-500" /> Elastic Stretch
                         </h3>
                         <button onClick={() => setTempo(100)} className="text-gray-600 hover:text-white transition-colors"><RotateCcw size={14} /></button>
                      </div>
-                     <div className="text-center mb-8">
-                        <span className="text-7xl font-black text-white tracking-tighter">{tempo}%</span>
+                     <div className="text-center mb-3">
+                        <span className="text-5xl font-black text-white tracking-tighter">{tempo}%</span>
                         <p className="text-[10px] font-black text-purple-500 uppercase mt-2 tracking-widest">{detectedBpm > 0 ? Math.round(detectedBpm * tempo / 100) : '--'} BPM SYNC</p>
                      </div>
-                     <div className="space-y-6">
+                     <div className="space-y-3">
                         <input 
                           type="range" min="50" max="200" step="1" value={tempo} 
                           onChange={(e) => setTempo(Number(e.target.value))}
                           className="w-full h-1.5 bg-white/5 rounded-full appearance-none cursor-pointer accent-purple-600"
                         />
                         <div className="flex gap-4">
-                           <button onClick={() => setTempo(Math.max(50, tempo - 5))} className="flex-1 py-4 bg-white/5 rounded-xl text-[10px] font-black uppercase hover:bg-white/10 transition-all border border-white/5 font-bold">- 5%</button>
-                           <button onClick={() => setTempo(Math.min(200, tempo + 5))} className="flex-1 py-4 bg-white/5 rounded-xl text-[10px] font-black uppercase hover:bg-white/10 transition-all border border-white/5 text-white font-bold">+ 5%</button>
+                           <button onClick={() => setTempo(Math.max(50, tempo - 5))} className="flex-1 py-2 bg-white/5 rounded-xl text-[10px] font-black uppercase hover:bg-white/10 transition-all border border-white/5 font-bold">- 5%</button>
+                           <button onClick={() => setTempo(Math.min(200, tempo + 5))} className="flex-1 py-2 bg-white/5 rounded-xl text-[10px] font-black uppercase hover:bg-white/10 transition-all border border-white/5 text-white font-bold">+ 5%</button>
                         </div>
                      </div>
                   </div>
 
                   {/* Pitch Module */}
-                  <div className="bg-[#16161a] border border-white/5 rounded-[2.5rem] p-8 shadow-xl relative overflow-hidden">
-                     <div className="flex justify-between items-center mb-8">
+                  <div className="bg-[#16161a] border border-white/5 rounded-2xl p-4 shadow-xl relative overflow-hidden">
+                     <div className="flex justify-between items-center mb-3">
                         <h3 className="text-[10px] font-black text-white/30 uppercase tracking-widest flex items-center">
                            <Music className="w-4 h-4 mr-2 text-blue-500" /> Pitch Shifter
                         </h3>
                         <button onClick={() => setPitch(0)} className="text-gray-600 hover:text-white transition-colors"><RotateCcw size={14} /></button>
                      </div>
-                     <div className="flex items-center justify-between mb-8">
-                        <button onClick={() => setPitch(Math.max(-12, pitch - 1))} className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center text-2xl font-light hover:bg-blue-600/10 hover:text-blue-500 transition-all border border-white/5">－</button>
+                     <div className="flex items-center justify-between mb-3">
+                        <button onClick={() => setPitch(Math.max(-12, pitch - 1))} className="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center text-xl font-light hover:bg-blue-600/10 hover:text-blue-500 transition-all border border-white/5">－</button>
                         <div className="text-center">
-                           <span className="text-7xl font-black text-white tracking-tighter">{pitch > 0 ? `+${pitch}` : pitch}</span>
+                           <span className="text-5xl font-black text-white tracking-tighter">{pitch > 0 ? `+${pitch}` : pitch}</span>
                            <p className="text-[9px] font-black text-blue-500 uppercase mt-2">Semitones</p>
                         </div>
-                        <button onClick={() => setPitch(Math.min(12, pitch + 1))} className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center text-2xl font-light hover:bg-blue-600/10 hover:text-blue-500 transition-all border border-white/5">＋</button>
+                        <button onClick={() => setPitch(Math.min(12, pitch + 1))} className="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center text-xl font-light hover:bg-blue-600/10 hover:text-blue-500 transition-all border border-white/5">＋</button>
                      </div>
                      <input 
                         type="range" min="-12" max="12" step="1" value={pitch} 
@@ -420,15 +500,15 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
                </div>
 
                {/* Waveform Player */}
-               <div className="bg-black/60 border border-white/5 rounded-[2.5rem] p-8 shadow-2xl relative group">
-                  <div className="flex items-center justify-between mb-8">
+               <div className="bg-black/60 border border-white/5 rounded-2xl p-4 shadow-2xl relative group">
+                  <div className="flex items-center justify-between mb-3">
                      <div className="flex items-center space-x-6">
-                        <button 
+                        <button
                           onClick={togglePlay}
                           disabled={!audioFile}
-                          className="w-20 h-20 bg-white hover:bg-gray-200 text-black rounded-[1.75rem] flex items-center justify-center transition-all disabled:opacity-20 shadow-xl active:scale-95"
+                          className="w-14 h-14 bg-white hover:bg-gray-200 text-black rounded-xl flex items-center justify-center transition-all disabled:opacity-20 shadow-xl active:scale-95"
                         >
-                          {isPlaying ? <Pause size={30} fill="black" /> : <Play size={30} fill="black" className="ml-1" />}
+                          {isPlaying ? <Pause size={22} fill="black" /> : <Play size={22} fill="black" className="ml-1" />}
                         </button>
                         <div>
                            <h5 className="text-white font-black text-lg tracking-tight truncate max-w-[250px] font-mono">{audioFile?.name || 'VIRTUAL DECK EMPTY'}</h5>
@@ -449,7 +529,7 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
                         </button>
                      </div>
                   </div>
-                  <div className="relative h-32 bg-black/80 rounded-3xl px-6 flex flex-col justify-center border border-white/5 overflow-hidden">
+                  <div className="relative h-20 bg-black/80 rounded-2xl px-4 flex flex-col justify-center border border-white/5 overflow-hidden">
                      {!audioFile && <p className="text-center text-[9px] font-black text-gray-700 uppercase tracking-widest italic animate-pulse">Scanning Signal...</p>}
                      <div ref={waveformContainerRef} className="w-full" />
                   </div>
@@ -458,16 +538,16 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
           </div>
 
           {/* Master Section - THIS IS THE ONLY PART WE COMPACTED TO AVOID SCROLL */}
-          <div className="flex items-stretch gap-6 h-32">
-             <div className="flex-[3] bg-gradient-to-br from-[#16161a] to-[#0a0a0c] border border-white/5 rounded-[2.5rem] px-10 flex items-center justify-around shadow-xl overflow-hidden">
+          <div className="flex items-stretch gap-4 h-24">
+             <div className="flex-[3] bg-gradient-to-br from-[#16161a] to-[#0a0a0c] border border-white/5 rounded-2xl px-5 flex items-center justify-around shadow-xl overflow-hidden">
                 <div className="text-center whitespace-nowrap min-w-[150px]">
                    <p className="text-[10px] font-black text-gray-600 uppercase mb-2 tracking-widest">Target Key</p>
-                   <p className={`font-black text-blue-500 truncate ${getShiftedKey().length > 10 ? 'text-3xl' : 'text-5xl'}`}>{getShiftedKey() || '--'}</p>
+                   <p className={`font-black text-blue-500 truncate ${getShiftedKey().length > 10 ? 'text-2xl' : 'text-4xl'}`}>{getShiftedKey() || '--'}</p>
                 </div>
                 <div className="h-12 w-px bg-white/5 flex-shrink-0" />
                 <div className="text-center whitespace-nowrap min-w-[100px]">
                    <p className="text-[10px] font-black text-gray-600 uppercase mb-2 tracking-widest">Elastic BPM</p>
-                   <p className="text-5xl font-black text-purple-500">{detectedBpm > 0 ? Math.round(detectedBpm * tempo / 100) : '--'}</p>
+                   <p className="text-4xl font-black text-purple-500">{detectedBpm > 0 ? Math.round(detectedBpm * tempo / 100) : '--'}</p>
                 </div>
                 <div className="h-12 w-px bg-white/5 flex-shrink-0" />
                 <div className="text-center whitespace-nowrap min-w-[150px]">
@@ -476,7 +556,7 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
                 </div>
              </div>
 
-             <div className="flex-1 bg-white rounded-[2.5rem] p-4 flex flex-col justify-between shadow-xl min-w-[200px]">
+             <div className="flex-1 bg-white rounded-2xl p-3 flex flex-col justify-between shadow-xl min-w-[180px]">
                 <div className="flex bg-black/5 p-1 rounded-2xl">
                    <button 
                      onClick={() => setExportFormat('wav')}
@@ -494,7 +574,7 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
                 <button 
                   onClick={handleExport}
                   disabled={isExporting || !audioFile}
-                  className="w-full h-12 bg-black text-white rounded-2xl flex items-center justify-center space-x-3 transition-all hover:bg-gray-900 active:scale-95 disabled:opacity-30 group"
+                  className="w-full h-10 bg-black text-white rounded-xl flex items-center justify-center space-x-3 transition-all hover:bg-gray-900 active:scale-95 disabled:opacity-30 group"
                 >
                    {isExporting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5 group-hover:translate-y-1 transition-transform" />}
                    <span className="text-[9px] font-black uppercase tracking-widest">{isExporting ? 'Processing' : 'Export Master'}</span>
@@ -505,7 +585,7 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose }) =>
         </div>
 
         {/* Telemetry Footer */}
-        <div className="px-10 py-5 border-t border-white/5 bg-black/60 flex items-center justify-between text-[8px] font-black tracking-[0.3em] text-gray-600 flex-shrink-0">
+        <div className="px-6 py-3 border-t border-white/5 bg-black/60 flex items-center justify-between text-[8px] font-black tracking-[0.25em] text-gray-600 flex-shrink-0">
            <div className="flex items-center space-x-6">
               <p className="flex items-center"><div className="w-1 h-1 bg-blue-500 rounded-full mr-2 animate-ping" /> CORE: NEURAL 24-BIT</p>
               <p>ENCODER: {exportFormat.toUpperCase()} ACTIVE</p>

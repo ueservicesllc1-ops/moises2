@@ -143,6 +143,22 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const buildUserFriendlySeparationError = (rawError: string): string => {
+    const msg = (rawError || '').toLowerCase();
+    if (
+      msg.includes('worker remoto') ||
+      msg.includes('timeout') ||
+      msg.includes('saturado') ||
+      msg.includes('tiempo de espera')
+    ) {
+      return 'El motor de separación está ocupado temporalmente. Intenta de nuevo en 1-2 minutos.';
+    }
+    if (msg.includes('error del servidor (500)')) {
+      return 'El servidor de IA devolvió un error interno. Reintenta en unos minutos.';
+    }
+    return rawError || 'Error desconocido durante la separación.';
+  };
+
   // Verificar estado del servidor Python cada 3 segundos
   useEffect(() => {
     const checkPythonServer = async () => {
@@ -375,7 +391,8 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
       });
       
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      setUploadMessage(`❌ Error: ${errorMessage}`);
+      const friendlyMessage = buildUserFriendlySeparationError(errorMessage);
+      setUploadMessage(`❌ ${friendlyMessage}`);
       setIsUploading(false);
       setUploadProgress(0);
     }
@@ -430,12 +447,18 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
     const maxAttempts = 300; // 15 minutos máximo para Railway
     const estimatedTimeSeconds = 240; // 4 minutos estimados
     const startTime = Date.now();
+    const maxTransientErrors = 8;
+    let transientErrors = 0;
     
     for (let attempts = 0; attempts < maxAttempts; attempts++) {
       try {
         // Usar el proxy de Next.js en vez de ir directo al backend
         const statusResponse = await fetch(`/api/status/${taskId}`);
+        if (!statusResponse.ok) {
+          throw new Error(`status_http_${statusResponse.status}`);
+        }
         const statusResult = await statusResponse.json();
+        transientErrors = 0;
 
         // Calcular progreso estimado basado en tiempo transcurrido
         const elapsedSeconds = (Date.now() - startTime) / 1000;
@@ -595,15 +618,39 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
           return;
 
         } else if (statusResult.status === 'failed') {
-          throw new Error(`Separación falló: ${statusResult.error || 'Error desconocido'}`);
+          const backendError = statusResult.error || 'Error desconocido';
+          throw new Error(buildUserFriendlySeparationError(backendError));
         }
         
-        // Esperar 3 segundos antes del siguiente intento
+        // Esperar antes del siguiente intento (polling normal)
         await new Promise(resolve => setTimeout(resolve, 3000));
         
       } catch (error) {
+        const rawError = error instanceof Error ? error.message : 'Error desconocido';
+        const lower = rawError.toLowerCase();
+        const isTransient =
+          lower.includes('network') ||
+          lower.includes('failed to fetch') ||
+          lower.includes('timeout') ||
+          lower.startsWith('status_http_5') ||
+          lower.startsWith('status_http_429') ||
+          lower.startsWith('status_http_404');
+
+        if (isTransient && transientErrors < maxTransientErrors) {
+          transientErrors += 1;
+          const backoffMs = Math.min(15000, 2000 * Math.pow(2, transientErrors - 1));
+          console.warn(
+            `[POLLING] Transient error ${transientErrors}/${maxTransientErrors}: ${rawError}. Reintentando en ${backoffMs}ms`
+          );
+          setUploadMessage(
+            `Reconectando con el motor de IA... intento ${transientErrors}/${maxTransientErrors}`
+          );
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+          continue;
+        }
+
         console.error('Error polling status:', error);
-        setUploadMessage(`Error: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+        setUploadMessage(`❌ ${buildUserFriendlySeparationError(rawError)}`);
         setIsUploading(false);
         setUploadProgress(0);
         throw error;
@@ -615,107 +662,108 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
   };
 
   return (
-    <div className="max-w-lg mx-auto p-4 bg-gray-900 shadow-lg">
+    <div className="mx-auto w-full max-w-4xl rounded-lg border border-slate-700 bg-slate-950 p-3 shadow-xl sm:p-4">
 
-      <div className="mb-3 rounded-md border border-white/15 bg-black/40 p-3 text-xs text-zinc-200">
-        <p className="font-semibold text-white">
-          Plan actual: {planLimits.displayName}
-        </p>
-        <p className="mt-1 text-zinc-300">
-          {monthlyLimitSeconds === null
-            ? 'Minutos relajados ilimitados.'
-            : usageLoading
-              ? 'Calculando consumo mensual...'
-              : `${usedMinutes.toFixed(1)} / ${planLimits.includedMinutesMonthly} min usados este mes (${remainingMinutes?.toFixed(1)} min disponibles)`}
-        </p>
-        <p className="mt-1 text-zinc-400">
-          Limite por archivo: {(planLimits.maxUploadBytes / (1024 * 1024)).toFixed(0)}MB
-          {!planLimits.requiresCard ? ' · sin tarjeta' : ''}
-        </p>
-        {currentPlanId === 'starter' && (
-          <div className="mt-2 flex flex-wrap gap-2">
-            <a
-              href="/login?plan=lite&billing=yearly"
-              className="rounded bg-amber-300 px-2.5 py-1 font-semibold text-black"
-            >
-              Upgrade a Lite
-            </a>
-            <a
-              href="/login?plan=pro&billing=yearly"
-              className="rounded bg-violet-400 px-2.5 py-1 font-semibold text-black"
-            >
-              Upgrade a Pro
-            </a>
+      <div className="grid gap-3 md:grid-cols-[0.95fr_1.05fr]">
+        <div className="space-y-3">
+          <div className="rounded-md border border-slate-700 bg-slate-900 p-2.5 text-xs text-zinc-200 sm:p-3">
+            <p className="font-semibold text-white">
+              Plan actual: {planLimits.displayName}
+            </p>
+            <p className="mt-1 text-zinc-300">
+              {monthlyLimitSeconds === null
+                ? 'Minutos relajados ilimitados.'
+                : usageLoading
+                  ? 'Calculando consumo mensual...'
+                  : `${usedMinutes.toFixed(1)} / ${planLimits.includedMinutesMonthly} min usados este mes (${remainingMinutes?.toFixed(1)} min disponibles)`}
+            </p>
+            <p className="mt-1 text-zinc-400">
+              Limite por archivo: {(planLimits.maxUploadBytes / (1024 * 1024)).toFixed(0)}MB
+              {!planLimits.requiresCard ? ' · sin tarjeta' : ''}
+            </p>
+            {currentPlanId === 'starter' && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <a
+                  href="/login?plan=lite&billing=yearly"
+                  className="rounded bg-amber-300 px-2.5 py-1 font-semibold text-black"
+                >
+                  Upgrade a Lite
+                </a>
+                <a
+                  href="/login?plan=pro&billing=yearly"
+                  className="rounded bg-violet-400 px-2.5 py-1 font-semibold text-black"
+                >
+                  Upgrade a Pro
+                </a>
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      
-      {/* Status Indicators */}
-      <div className="flex items-center justify-start space-x-2 mb-3">
-        {/* Python Server Status */}
-        <div className="flex items-center space-x-1.5 bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
-          <span className={`text-xs font-bold ${pythonServerOnline ? 'text-blue-400' : 'text-gray-500'}`}>P</span>
-          <div className={`w-2 h-2 rounded-full transition-all ${
-            pythonServerOnline 
-              ? 'bg-blue-500 shadow-lg shadow-blue-500/50 animate-pulse' 
-              : 'bg-gray-600'
-          }`}></div>
-        </div>
-
-        {/* B2 Proxy Status */}
-        <div className="flex items-center space-x-1.5 bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
-          <span className={`text-xs font-bold ${b2ProxyOnline ? 'text-cyan-400' : 'text-gray-500'}`}>B2</span>
-          <div className={`w-2 h-2 rounded-full transition-all ${
-            b2ProxyOnline 
-              ? 'bg-cyan-500 shadow-lg shadow-cyan-500/50 animate-pulse' 
-              : 'bg-gray-600'
-          }`}></div>
-        </div>
-
-        {/* Demucs Working Status */}
-        <div className="flex items-center space-x-1.5 bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
-          <span className={`text-xs font-bold ${demucsWorking ? 'text-green-400' : 'text-gray-500'}`}>D</span>
-          <div className={`w-2 h-2 rounded-full transition-all ${
-            demucsWorking 
-              ? 'bg-green-500 shadow-lg shadow-green-500/50 animate-pulse' 
-              : 'bg-gray-600'
-          }`}></div>
-        </div>
-      </div>
-
-      <div className="space-y-4">
-
-        {/* File Upload */}
-        <div>
-          <label className="block text-xs font-medium text-white mb-2">
-            Seleccionar Archivo de Audio
-          </label>
-          <input
-            type="file"
-            accept="audio/*"
-            onChange={handleFileSelect}
-            className="w-full p-2 text-sm border border-gray-600 bg-gray-800 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            disabled={isUploading}
-          />
-          {uploadedFile && (
-            <div className="mt-2 p-2 bg-green-900 border border-green-700">
-              <p className="text-green-300 text-xs">
-                <strong>Archivo:</strong> {uploadedFile.name}
-              </p>
-              <p className="text-green-400 text-xs">
-                <strong>Tamaño:</strong> {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB
-              </p>
+          {/* Status Indicators */}
+          <div className="flex items-center justify-start gap-1.5">
+            {/* Python Server Status */}
+            <div className="flex items-center space-x-1.5 rounded-md border border-slate-700 bg-slate-900 px-2 py-1">
+              <span className={`text-xs font-bold ${pythonServerOnline ? 'text-blue-400' : 'text-gray-500'}`}>P</span>
+              <div className={`w-2 h-2 rounded-full transition-all ${
+                pythonServerOnline
+                  ? 'bg-blue-500 shadow-lg shadow-blue-500/50 animate-pulse'
+                  : 'bg-gray-600'
+              }`}></div>
             </div>
-          )}
+
+            {/* B2 Proxy Status */}
+            <div className="flex items-center space-x-1.5 rounded-md border border-slate-700 bg-slate-900 px-2 py-1">
+              <span className={`text-xs font-bold ${b2ProxyOnline ? 'text-cyan-400' : 'text-gray-500'}`}>B2</span>
+              <div className={`w-2 h-2 rounded-full transition-all ${
+                b2ProxyOnline
+                  ? 'bg-cyan-500 shadow-lg shadow-cyan-500/50 animate-pulse'
+                  : 'bg-gray-600'
+              }`}></div>
+            </div>
+
+            {/* Demucs Working Status */}
+            <div className="flex items-center space-x-1.5 rounded-md border border-slate-700 bg-slate-900 px-2 py-1">
+              <span className={`text-xs font-bold ${demucsWorking ? 'text-green-400' : 'text-gray-500'}`}>D</span>
+              <div className={`w-2 h-2 rounded-full transition-all ${
+                demucsWorking
+                  ? 'bg-green-500 shadow-lg shadow-green-500/50 animate-pulse'
+                  : 'bg-gray-600'
+              }`}></div>
+            </div>
+          </div>
+
+          {/* File Upload */}
+          <div className="rounded-md border border-slate-700 bg-slate-900 p-2.5 sm:p-3">
+            <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-zinc-300">
+              Seleccionar Archivo de Audio
+            </label>
+            <input
+              type="file"
+              accept="audio/*"
+              onChange={handleFileSelect}
+              className="mobile-touch-target file:mobile-touch-target w-full rounded-md border border-slate-600 bg-slate-950 px-2.5 py-2 text-sm text-white file:mr-2.5 file:rounded file:border file:border-slate-500 file:bg-slate-800 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-zinc-100 hover:file:bg-slate-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+              disabled={isUploading}
+            />
+            {uploadedFile && (
+              <div className="mt-2 rounded-md border border-emerald-700 bg-emerald-950/40 p-2">
+                <p className="text-xs text-emerald-200">
+                  <strong>Archivo:</strong> {uploadedFile.name}
+                </p>
+                <p className="text-xs text-emerald-300">
+                  <strong>Tamaño:</strong> {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB
+                </p>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Separation Options */}
-        <div>
-          <label className="block text-xs font-medium text-white mb-2">
+        <div className="space-y-3">
+          {/* Separation Options */}
+          <div className="rounded-md border border-slate-700 bg-slate-900 p-2.5 sm:p-3">
+          <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-zinc-300">
             Opciones de Separación
           </label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-1.5">
             {/* Botón Rápido Voz + Pista */}
             <button
               onClick={() => {
@@ -743,18 +791,18 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
                 }
               }}
               disabled={isUploading}
-              className={`col-span-2 w-full p-3 text-sm border transition-all duration-300 font-medium relative shadow-lg overflow-hidden bg-black ${
+              className={`col-span-2 mobile-touch-target relative w-full overflow-hidden rounded-md border p-2.5 text-left text-sm font-semibold transition-all duration-200 ${
                 isUploading
-                  ? 'border-white/20 bg-gradient-to-b from-white/10 via-white/5 to-transparent text-gray-500 cursor-not-allowed'
+                  ? 'cursor-not-allowed border-slate-600 bg-slate-800 text-gray-500'
                   : separationOptions.separationType === 'vocals-instrumental'
-                    ? 'border-green-400/50 bg-gradient-to-r from-green-500/30 via-green-400/20 to-transparent text-white hover:from-green-500/35 hover:via-green-400/25'
-                    : 'border-white/20 bg-gradient-to-b from-white/10 via-white/5 to-transparent text-white hover:from-white/15 hover:via-white/8'
+                    ? 'border-emerald-500 bg-emerald-900/40 text-white'
+                    : 'border-slate-600 bg-slate-950 text-white hover:border-slate-500'
               }`}
             >
               🎤 Voz + Pista
               <div className={`w-4 h-2 rounded transition-colors absolute top-2 right-2 ${
                 separationOptions.separationType === 'vocals-instrumental'
-                  ? 'bg-green-500 animate-pulse' 
+                  ? 'bg-emerald-400' 
                   : 'bg-gray-500'
               }`}></div>
             </button>
@@ -771,16 +819,16 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
                key={key}
                onClick={() => handleOptionChange(key as keyof SeparationOptions)}
                  disabled={isUploading || !isPremium}
-               className={`p-2 text-sm border transition-all duration-300 text-left relative shadow-lg overflow-hidden bg-black ${
-                 !isPremium ? 'opacity-60 cursor-not-allowed border-gray-700 bg-gray-900' :
+               className={`mobile-touch-target relative overflow-hidden rounded-md border p-2 text-left text-sm transition-all duration-200 ${
+                 !isPremium ? 'cursor-not-allowed border-slate-700 bg-slate-800 opacity-60' :
                  separationOptions[key as keyof SeparationOptions]
-                   ? 'border-blue-400/50 bg-gradient-to-b from-blue-500/20 via-blue-400/10 to-transparent text-white hover:from-blue-500/25 hover:via-blue-400/15'
-                   : 'border-white/20 bg-gradient-to-b from-white/10 via-white/5 to-transparent text-white hover:from-white/15 hover:via-white/8'
+                  ? 'border-blue-500 bg-blue-900/35 text-white'
+                   : 'border-slate-600 bg-slate-950 text-white hover:border-slate-500'
                }`}
              >
                <div className={`w-4 h-2 rounded transition-colors absolute top-2 right-2 ${
                  separationOptions[key as keyof SeparationOptions] 
-                   ? 'bg-blue-500 animate-pulse' 
+                  ? 'bg-blue-400' 
                    : 'bg-gray-500'
                }`}></div>
                <div>
@@ -793,22 +841,22 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
              </button>
             ))}
           </div>
-        </div>
+          </div>
 
-        {/* Hi-Fi Mode */}
-        <div>
+          {/* Hi-Fi Mode */}
+          <div className="rounded-md border border-slate-700 bg-slate-900 p-2.5 sm:p-3">
            <button
              onClick={() => handleOptionChange('hiFiMode')}
                 disabled={isUploading || !isPremium}
-             className={`w-full p-2 text-sm border transition-all duration-300 text-left relative shadow-lg overflow-hidden bg-black ${
-               !isPremium ? 'opacity-60 cursor-not-allowed border-gray-700 bg-gray-900' :
+             className={`mobile-touch-target relative w-full overflow-hidden rounded-md border p-2.5 text-left text-sm transition-all duration-200 ${
+               !isPremium ? 'cursor-not-allowed border-slate-700 bg-slate-800 opacity-60' :
                separationOptions.hiFiMode
-                 ? 'border-yellow-400/60 bg-gradient-to-b from-yellow-500/20 via-yellow-400/10 to-transparent text-white hover:from-yellow-500/25'
-                 : 'border-white/20 bg-gradient-to-b from-white/10 via-white/5 to-transparent text-white hover:from-white/15 hover:via-white/8'
+                 ? 'border-amber-500 bg-amber-900/30 text-white'
+                 : 'border-slate-600 bg-slate-950 text-white hover:border-slate-500'
              }`}
            >
              <div className={`w-4 h-2 rounded transition-colors absolute top-2 right-2 ${
-               separationOptions.hiFiMode ? 'bg-yellow-400 animate-pulse' : 'bg-gray-500'
+               separationOptions.hiFiMode ? 'bg-amber-400' : 'bg-gray-500'
              }`}></div>
              <div className="flex items-center justify-between">
                <div>
@@ -821,12 +869,11 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
                </div>
              </div>
            </button>
-        </div>
+          </div>
 
-
-        {/* Upload Button / Progress Bar */}
-        {isUploading ? (
-          <div className="space-y-3">
+          {/* Upload Button / Progress Bar */}
+          {isUploading ? (
+            <div className="space-y-3">
             {/* Barra de progreso mejorada */}
             <div className="w-full bg-gray-800 h-6 relative overflow-hidden rounded-lg border border-gray-600">
               <div 
@@ -870,27 +917,27 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
                 🔄 Estamos separando tu audio con IA...
               </p>
             </div>
-          </div>
-        ) : (
-          <button
-            onClick={handleUpload}
-            disabled={isUploading}
-            className={`w-full py-2 px-4 text-sm font-medium text-white transition-all duration-300 shadow-lg overflow-hidden border bg-black ${
-              isUploading
-                ? 'bg-gradient-to-b from-white/10 via-white/5 to-transparent border-white/20 cursor-not-allowed'
-                : 'bg-gradient-to-b from-white/10 via-white/5 to-transparent border-white/20 hover:from-white/15 hover:via-white/8 focus:ring-4 focus:ring-white/20'
-            }`}
-          >
-            Separar Tracks
-          </button>
-        )}
-
+            </div>
+          ) : (
+            <button
+              onClick={handleUpload}
+              disabled={isUploading}
+              className={`mobile-touch-target w-full rounded-md border px-4 py-2.5 text-sm font-semibold text-white transition-all duration-200 ${
+                isUploading
+                  ? 'cursor-not-allowed border-slate-600 bg-slate-800'
+                  : 'border-blue-600 bg-blue-600 hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40'
+              }`}
+            >
+              Separar Tracks
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Popup para cuando no hay archivo */}
       {showNoFilePopup && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-black bg-gradient-to-b from-white/15 via-white/8 to-transparent border border-white/20 p-6 max-w-md mx-4 shadow-lg overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 md:p-4">
+          <div className="bg-black bg-gradient-to-b from-white/15 via-white/8 to-transparent border border-white/20 p-5 md:p-6 max-w-md w-full shadow-lg overflow-hidden">
             <div className="text-center">
               <h3 className="text-white text-lg font-semibold mb-4">
                 Para separar los tracks...
@@ -900,7 +947,7 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
               </p>
               <button
                 onClick={() => setShowNoFilePopup(false)}
-                className="bg-black border border-white/20 bg-gradient-to-b from-white/10 via-white/5 to-transparent hover:from-white/15 hover:via-white/8 text-white px-6 py-2 transition-all duration-300 shadow-lg overflow-hidden"
+                className="mobile-touch-target bg-black border border-white/20 bg-gradient-to-b from-white/10 via-white/5 to-transparent hover:from-white/15 hover:via-white/8 text-white px-6 py-2 transition-all duration-300 shadow-lg overflow-hidden"
               >
                 Entendido
               </button>

@@ -32,7 +32,7 @@ const HeroPopup: React.FC<HeroPopupProps> = ({ isOpen, onClose }) => {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 md:p-4">
       <AdminModalLabel modalName="HeroPopup" />
       {/* Backdrop con efecto de blur y partículas */}
       <div 
@@ -60,7 +60,7 @@ const HeroPopup: React.FC<HeroPopupProps> = ({ isOpen, onClose }) => {
 
       {/* Modal principal */}
       <div 
-        className="relative bg-gradient-to-br from-gray-950 via-gray-900 to-black border-2 border-gray-700 rounded-3xl p-8 max-w-2xl mx-4 shadow-2xl"
+        className="relative h-[100dvh] w-full overflow-y-auto bg-gradient-to-br from-gray-950 via-gray-900 to-black border-2 border-gray-700 rounded-2xl md:rounded-3xl p-4 sm:p-6 md:p-8 max-w-2xl mx-0 md:mx-4 shadow-2xl md:h-auto"
         style={{
           animation: isVisible ? 'slideInScale 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)' : 'slideOutScale 0.3s ease-out',
           boxShadow: '0 0 50px rgba(0, 0, 0, 0.8), inset 0 0 50px rgba(75, 85, 99, 0.1)'
@@ -69,7 +69,7 @@ const HeroPopup: React.FC<HeroPopupProps> = ({ isOpen, onClose }) => {
         {/* Botón de cerrar */}
         <button
           onClick={handleClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors z-10"
+          className="mobile-touch-target absolute right-3 top-3 text-gray-400 hover:text-white transition-colors z-10 md:right-4 md:top-4"
         >
           <X className="w-6 h-6" />
         </button>
@@ -118,10 +118,10 @@ const HeroPopup: React.FC<HeroPopupProps> = ({ isOpen, onClose }) => {
               opacity: animationPhase >= 2 ? 1 : 0
             }}
           >
-            <h2 className="text-3xl font-bold text-gray-200 mb-4">
+            <h2 className="text-2xl md:text-3xl font-bold text-gray-200 mb-4">
               ¡Bienvenido al futuro de la música!
             </h2>
-            <div className="text-xl text-gray-400 leading-relaxed">
+            <div className="text-base md:text-xl text-gray-400 leading-relaxed">
                 <span className="text-gray-300 font-bold">¡GRATIS hasta Julio de 2026!</span>
               <p className="text-gray-500">
                 Después de este período, Judith será de uso limitado para quienes no obtengan una suscripción premium.
@@ -161,7 +161,7 @@ const HeroPopup: React.FC<HeroPopupProps> = ({ isOpen, onClose }) => {
           >
             <button
               onClick={handleClose}
-              className="px-8 py-4 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold rounded-full text-lg transition-all duration-300 transform hover:scale-105 hover:shadow-lg"
+              className="mobile-touch-target w-full sm:w-auto px-6 md:px-8 py-3 md:py-4 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold rounded-full text-base md:text-lg transition-all duration-300 transform hover:scale-105 hover:shadow-lg"
               style={{
                 boxShadow: '0 0 30px rgba(168, 85, 247, 0.5)',
                 animation: 'pulse 2s infinite'

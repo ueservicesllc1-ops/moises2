@@ -23,6 +23,19 @@ body {
   color: var(--foreground);
   background: var(--background);
   font-family: Arial, Helvetica, sans-serif;
+  min-height: 100dvh;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  overflow-x: hidden;
+}
+
+@supports not (height: 100dvh) {
+  body {
+    min-height: 100vh;
+  }
 }
 
 @layer utilities {
@@ -41,5 +54,23 @@ body {
   .mesh-texture {
     background-image: radial-gradient(at 0% 0%, rgba(255,255,255,0.03) 0, transparent 50%), 
                       radial-gradient(at 50% 0%, rgba(255,255,255,0.03) 0, transparent 50%);
+  }
+  .safe-bottom {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+  .mobile-touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

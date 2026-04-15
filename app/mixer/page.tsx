@@ -332,7 +332,7 @@ const MixerPage: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
             <Music className="w-8 h-8 text-gray-400" />
@@ -345,7 +345,7 @@ const MixerPage: React.FC = () => {
 
   if (!selectedSong) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <h1 className="text-2xl font-bold text-white mb-4">Canción no encontrada</h1>
           <button
@@ -360,27 +360,27 @@ const MixerPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900">
+    <div className="min-h-[100dvh] bg-gray-900">
       {/* Header */}
-      <div className="bg-black border-b border-gray-700 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
+      <div className="bg-black border-b border-gray-700 px-3 py-3 sm:px-6 sm:py-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center space-x-3 sm:space-x-4">
             <button
               onClick={() => router.push('/studio')}
-              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+              className="mobile-touch-target p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
             <div>
-              <h1 className="text-xl font-bold text-white">{selectedSong.title}</h1>
-              <p className="text-gray-400">{selectedSong.artist}</p>
+              <h1 className="text-lg sm:text-xl font-bold text-white">{selectedSong.title}</h1>
+              <p className="text-sm text-gray-400">{selectedSong.artist}</p>
             </div>
           </div>
           
-          <div className="flex items-center space-x-4">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4">
             <button
               onClick={() => setShowClickTrack(!showClickTrack)}
-              className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+              className={`mobile-touch-target px-4 py-2 rounded-lg font-semibold transition-colors ${
                 showClickTrack 
                   ? 'bg-yellow-600 hover:bg-yellow-700 text-white' 
                   : 'bg-gray-600 hover:bg-gray-500 text-white'
@@ -390,13 +390,13 @@ const MixerPage: React.FC = () => {
             </button>
             <button
               onClick={togglePlayPause}
-              className="bg-teal-500 hover:bg-teal-600 text-white p-3 rounded-full transition-colors"
+              className="mobile-touch-target bg-teal-500 hover:bg-teal-600 text-white p-3 rounded-full transition-colors"
             >
               {mixerState.isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
             </button>
             <button
               onClick={stopPlayback}
-              className="bg-gray-600 hover:bg-gray-500 text-white p-3 rounded-full transition-colors"
+              className="mobile-touch-target bg-gray-600 hover:bg-gray-500 text-white p-3 rounded-full transition-colors"
             >
               <Square className="w-5 h-5" />
             </button>
@@ -406,7 +406,7 @@ const MixerPage: React.FC = () => {
                   audio.currentTime = 0
                 })
               }}
-              className="bg-gray-600 hover:bg-gray-500 text-white p-3 rounded-full transition-colors"
+              className="mobile-touch-target bg-gray-600 hover:bg-gray-500 text-white p-3 rounded-full transition-colors"
             >
               <RotateCcw className="w-5 h-5" />
             </button>
@@ -417,9 +417,9 @@ const MixerPage: React.FC = () => {
 
       {/* Beat Track Generator */}
       {showClickTrack && (
-        <div className="p-6 border-b border-gray-700">
+        <div className="p-4 sm:p-6 border-b border-gray-700">
           <div className="mb-4">
-            <div className="flex items-center space-x-4">
+            <div className="flex flex-wrap items-center gap-3 sm:gap-4">
               <div className="flex items-center space-x-2">
                 <label className="text-white font-semibold">BPM:</label>
                 <input
@@ -428,7 +428,7 @@ const MixerPage: React.FC = () => {
                   max="200"
                   value={bpm}
                   onChange={(e) => setBpm(parseInt(e.target.value) || 120)}
-                  className="w-20 px-3 py-1 bg-gray-700 text-white rounded border border-gray-600 focus:border-teal-500 focus:outline-none"
+                  className="mobile-touch-target w-24 px-3 py-1 bg-gray-700 text-white rounded border border-gray-600 focus:border-teal-500 focus:outline-none"
                 />
               </div>
               <div className="text-gray-300 text-sm">
@@ -446,7 +446,7 @@ const MixerPage: React.FC = () => {
       )}
 
       {/* Mixer Interface */}
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
           {/* Tracks */}
           {mixerState.tracks.map((track) => (
@@ -459,7 +459,7 @@ const MixerPage: React.FC = () => {
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={() => toggleTrackSolo(track.name)}
-                    className={`p-1 rounded ${
+                    className={`mobile-touch-target p-1 rounded ${
                       track.solo 
                         ? 'bg-yellow-500 text-black' 
                         : 'bg-gray-600 text-white hover:bg-gray-500'
@@ -470,7 +470,7 @@ const MixerPage: React.FC = () => {
                   </button>
                   <button
                     onClick={() => toggleTrackMute(track.name)}
-                    className={`p-1 rounded ${
+                    className={`mobile-touch-target p-1 rounded ${
                       track.muted 
                         ? 'bg-red-500 text-white' 
                         : 'bg-gray-600 text-white hover:bg-gray-500'

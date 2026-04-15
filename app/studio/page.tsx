@@ -17,6 +17,8 @@ import {
   Target,
   Repeat,
   VolumeX,
+  Download,
+  Loader2,
   X,
   MoreVertical,
   Play,
@@ -27,11 +29,11 @@ import {
   Home as HomeIcon,
   Youtube,
   Activity,
-  Mic,
   Clock,
   Settings,
   Filter,
   ArrowUpDown,
+  ArrowLeft,
 } from 'lucide-react'
 import MoisesStyleUpload from '@/components/MoisesStyleUpload'
 import ConnectionStatus from '@/components/ConnectionStatus'
@@ -44,7 +46,6 @@ import MetronomeModal from '@/components/MetronomeModal'
 import VolumeEQModal from '@/components/VolumeEQModal'
 import BpmDetectorModal from '@/components/BpmDetectorModal'
 import ChordAnalysisModal from '@/components/ChordAnalysisModal'
-import YoutubeExtractModal from '@/components/YoutubeExtractModal'
 import HeroPopup from '@/components/HeroPopup'
 import { resolvePlanIdFromUserData, type PlanId } from '@/lib/pricing'
 
@@ -95,12 +96,7 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('added')
   const [showMoisesStyleModal, setShowMoisesStyleModal] = useState(false)
-  const [showPitchTempoModal, setShowPitchTempoModal] = useState(false)
-  const [showMetronomeModal, setShowMetronomeModal] = useState(false)
-  const [showVolumeEQModal, setShowVolumeEQModal] = useState(false)
-  const [showBpmDetectorModal, setShowBpmDetectorModal] = useState(false)
-  const [showChordAnalysisModal, setShowChordAnalysisModal] = useState(false)
-  const [showYoutubeExtractModal, setShowYoutubeExtractModal] = useState(false)
+  const [activeStudioView, setActiveStudioView] = useState<'tracks' | 'youtube' | 'chords' | 'metronome' | 'bpm' | 'tempo' | 'eq'>('tracks')
   const [showEQInMixer, setShowEQInMixer] = useState(false)
   const [showHeroPopup, setShowHeroPopup] = useState(false)
   const [showUpgradeModal, setShowUpgradeModal] = useState(false)
@@ -110,6 +106,11 @@ export default function Home() {
   const [showSongModal, setShowSongModal] = useState(false)
   const [selectedSong, setSelectedSong] = useState<Song | null>(null)
   const [preloadedAudioFile, setPreloadedAudioFile] = useState<File | null>(null)
+  const [youtubeUrl, setYoutubeUrl] = useState('')
+  const [isExtractingYoutube, setIsExtractingYoutube] = useState(false)
+  const [youtubeExtractedAudio, setYoutubeExtractedAudio] = useState<File | null>(null)
+  const [youtubeVideoTitle, setYoutubeVideoTitle] = useState('')
+  const [youtubeExtractError, setYoutubeExtractError] = useState('')
 
   const [songDelay, setSongDelay] = useState<number>(0)
   const [audioElements, setAudioElements] = useState<{ [key: string]: HTMLAudioElement }>({})
@@ -217,16 +218,19 @@ export default function Home() {
   }, [songs, searchQuery, sortBy])
 
   const goToTracksSection = () => {
+    setActiveStudioView('tracks')
     document.getElementById('lista-canciones')?.scrollIntoView({ behavior: 'smooth' })
     setSidebarOpen(false)
   }
   
   const handleChordAnalysis = () => {
-    setShowChordAnalysisModal(true)
+    setActiveStudioView('chords')
+    setSidebarOpen(false)
   }
   
   const handleMetronome = () => {
-    setShowMetronomeModal(true)
+    setActiveStudioView('metronome')
+    setSidebarOpen(false)
   }
   
   const handleAudioSeparation = () => {
@@ -234,52 +238,94 @@ export default function Home() {
   }
   
   const handleTempoChange = () => {
-    setShowPitchTempoModal(true)
-  }
-  
-  const handlePitchChange = () => {
-    setShowPitchTempoModal(true)
+    setActiveStudioView('tempo')
+    setSidebarOpen(false)
   }
   
   const handleVolumeControl = () => {
-    setShowVolumeEQModal(true)
+    setActiveStudioView('eq')
+    setSidebarOpen(false)
   }
   
   const handleBpmDisplay = () => {
-    setShowBpmDetectorModal(true)
+    setActiveStudioView('bpm')
+    setSidebarOpen(false)
   }
-  
+
+  const isValidYoutubeUrl = (url: string) => /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+/.test(url)
+
+  const handleExtractYoutubeAudio = async () => {
+    if (!youtubeUrl.trim()) {
+      setYoutubeExtractError('Por favor ingresa una URL de YouTube')
+      return
+    }
+
+    if (!isValidYoutubeUrl(youtubeUrl)) {
+      setYoutubeExtractError('URL de YouTube inválida')
+      return
+    }
+
+    if (!isPremium) {
+      setYoutubeExtractError('La extracción de audio de YouTube requiere plan de pago.')
+      return
+    }
+
+    setIsExtractingYoutube(true)
+    setYoutubeExtractError('')
+
+    try {
+      const response = await fetch('/api/youtube-extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: youtubeUrl }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Error desconocido' }))
+        throw new Error(errorData.error || `Error ${response.status}: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      if (!data.success || !data.audioData) {
+        throw new Error(data.error || 'Error al extraer audio')
+      }
+
+      const binaryString = atob(data.audioData)
+      const bytes = new Uint8Array(binaryString.length)
+      for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i)
+      const audioBlob = new Blob([bytes], { type: 'audio/mpeg' })
+
+      const fileName = `${data.title}.mp3`.replace(/[<>:"/\\|?*]/g, '_')
+      const audioFile = new File([audioBlob], fileName, { type: 'audio/mpeg' })
+
+      setYoutubeExtractedAudio(audioFile)
+      setYoutubeVideoTitle(data.title)
+    } catch (err: any) {
+      console.error('Error extrayendo YouTube:', err)
+      setYoutubeExtractError(err.message || 'Error al extraer audio')
+    } finally {
+      setIsExtractingYoutube(false)
+    }
+  }
+
+  const handleDownloadYoutubeAudio = () => {
+    if (!youtubeExtractedAudio) return
+    const url = URL.createObjectURL(youtubeExtractedAudio)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = youtubeExtractedAudio.name
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const closeMoisesModal = () => {
     setShowMoisesStyleModal(false)
     setPreloadedAudioFile(null)
   }
   
-  const closePitchTempoModal = () => {
-    setShowPitchTempoModal(false)
-  }
-  
-  const closeMetronomeModal = () => {
-    setShowMetronomeModal(false)
-  }
-  
-  const closeVolumeEQModal = () => {
-    setShowVolumeEQModal(false)
-  }
-
-  const closeBpmDetectorModal = () => {
-    setShowBpmDetectorModal(false)
-  }
-
-  const closeChordAnalysisModal = () => {
-    setShowChordAnalysisModal(false)
-  }
-
   const handleYoutubeExtract = () => {
-    setShowYoutubeExtractModal(true)
-  }
-
-  const closeYoutubeExtractModal = () => {
-    setShowYoutubeExtractModal(false)
+    setActiveStudioView('youtube')
+    setSidebarOpen(false)
   }
 
   // Handler removed - audio separation feature no longer available
@@ -1560,7 +1606,7 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 bg-teal-500 rounded-xl flex items-center justify-center mx-auto mb-4 animate-pulse">
             <span className="text-white font-bold text-2xl">J</span>
@@ -1573,7 +1619,7 @@ export default function Home() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-gray-900 flex items-center justify-center">
         <div className="text-center">
           <p className="text-white text-lg">Por favor, inicia sesión</p>
         </div>
@@ -1582,7 +1628,7 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#0a0a0a] font-sans text-[#fafafa] antialiased">
+    <div className="flex min-h-[100dvh] overflow-hidden bg-[#0a0a0a] font-sans text-[#fafafa] antialiased">
       {sidebarOpen && (
         <button
           type="button"
@@ -1593,7 +1639,7 @@ export default function Home() {
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-[240px] shrink-0 flex-col border-r border-[#1f1f1f] bg-black transition-transform duration-200 ease-out md:static md:h-screen md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-[240px] shrink-0 flex-col border-r border-[#1f1f1f] bg-black transition-transform duration-200 ease-out md:static md:min-h-[100dvh] md:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -1608,9 +1654,13 @@ export default function Home() {
           <button
             type="button"
             onClick={goToTracksSection}
-            className="flex w-full items-center gap-3 rounded-lg bg-[#262626] px-3 py-2.5 text-left text-sm font-medium text-white transition hover:bg-[#333333]"
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition ${
+              activeStudioView === 'tracks'
+                ? 'bg-[#262626] text-white hover:bg-[#333333]'
+                : 'text-[#a3a3a3] hover:bg-[#141414] hover:text-white'
+            }`}
           >
-            <Music className="h-4 w-4 shrink-0 text-[#d4d4d4]" />
+            <Music className={`h-4 w-4 shrink-0 ${activeStudioView === 'tracks' ? 'text-[#d4d4d4]' : 'opacity-80'}`} />
             Mis pistas
           </button>
           <p className="mb-2 mt-5 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#737373]">
@@ -1618,67 +1668,75 @@ export default function Home() {
           </p>
           <button
             type="button"
-            onClick={goToTracksSection}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-[#a3a3a3] transition hover:bg-[#141414] hover:text-white"
+            onClick={handleYoutubeExtract}
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition ${
+              activeStudioView === 'youtube'
+                ? 'bg-[#262626] text-white hover:bg-[#333333]'
+                : 'text-[#a3a3a3] hover:bg-[#141414] hover:text-white'
+            }`}
           >
-            <Youtube className="h-4 w-4 shrink-0 opacity-80" />
+            <Youtube className={`h-4 w-4 shrink-0 ${activeStudioView === 'youtube' ? 'text-[#d4d4d4]' : 'opacity-80'}`} />
             Extraer de YouTube
           </button>
           <button
             type="button"
-            onClick={goToTracksSection}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-[#a3a3a3] transition hover:bg-[#141414] hover:text-white"
+            onClick={handleChordAnalysis}
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition ${
+              activeStudioView === 'chords'
+                ? 'bg-[#262626] text-white hover:bg-[#333333]'
+                : 'text-[#a3a3a3] hover:bg-[#141414] hover:text-white'
+            }`}
           >
-            <Activity className="h-4 w-4 shrink-0 opacity-80" />
+            <Activity className={`h-4 w-4 shrink-0 ${activeStudioView === 'chords' ? 'text-[#d4d4d4]' : 'opacity-80'}`} />
             Análisis de acordes
           </button>
           <button
             type="button"
-            onClick={goToTracksSection}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-[#a3a3a3] transition hover:bg-[#141414] hover:text-white"
+            onClick={handleMetronome}
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition ${
+              activeStudioView === 'metronome'
+                ? 'bg-[#262626] text-white hover:bg-[#333333]'
+                : 'text-[#a3a3a3] hover:bg-[#141414] hover:text-white'
+            }`}
           >
-            <Mic className="h-4 w-4 shrink-0 opacity-80" />
-            Separación de audio
-          </button>
-          <button
-            type="button"
-            onClick={goToTracksSection}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-[#a3a3a3] transition hover:bg-[#141414] hover:text-white"
-          >
-            <Clock className="h-4 w-4 shrink-0 opacity-80" />
+            <Clock className={`h-4 w-4 shrink-0 ${activeStudioView === 'metronome' ? 'text-[#d4d4d4]' : 'opacity-80'}`} />
             Metrónomo
           </button>
           <button
             type="button"
-            onClick={goToTracksSection}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-[#a3a3a3] transition hover:bg-[#141414] hover:text-white"
+            onClick={handleBpmDisplay}
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition ${
+              activeStudioView === 'bpm'
+                ? 'bg-[#262626] text-white hover:bg-[#333333]'
+                : 'text-[#a3a3a3] hover:bg-[#141414] hover:text-white'
+            }`}
           >
-            <Target className="h-4 w-4 shrink-0 opacity-80" />
+            <Target className={`h-4 w-4 shrink-0 ${activeStudioView === 'bpm' ? 'text-[#d4d4d4]' : 'opacity-80'}`} />
             Detector de BPM
           </button>
           <button
             type="button"
-            onClick={goToTracksSection}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-[#a3a3a3] transition hover:bg-[#141414] hover:text-white"
+            onClick={handleTempoChange}
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition ${
+              activeStudioView === 'tempo'
+                ? 'bg-[#262626] text-white hover:bg-[#333333]'
+                : 'text-[#a3a3a3] hover:bg-[#141414] hover:text-white'
+            }`}
           >
-            <Play className="h-4 w-4 shrink-0 opacity-80" />
+            <Play className={`h-4 w-4 shrink-0 ${activeStudioView === 'tempo' ? 'text-[#d4d4d4]' : 'opacity-80'}`} />
             Cambio de tempo
           </button>
           <button
             type="button"
-            onClick={goToTracksSection}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-[#a3a3a3] transition hover:bg-[#141414] hover:text-white"
+            onClick={handleVolumeControl}
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition ${
+              activeStudioView === 'eq'
+                ? 'bg-[#262626] text-white hover:bg-[#333333]'
+                : 'text-[#a3a3a3] hover:bg-[#141414] hover:text-white'
+            }`}
           >
-            <Volume2 className="h-4 w-4 shrink-0 opacity-80" />
-            Cambio de tono
-          </button>
-          <button
-            type="button"
-            onClick={goToTracksSection}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-[#a3a3a3] transition hover:bg-[#141414] hover:text-white"
-          >
-            <Zap className="h-4 w-4 shrink-0 opacity-80" />
-            Control de volumen
+            <Zap className={`h-4 w-4 shrink-0 ${activeStudioView === 'eq' ? 'text-[#d4d4d4]' : 'opacity-80'}`} />
+            EQ Pro / Control de volumen
           </button>
           <p className="mb-2 mt-5 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#737373]">
             Cuenta
@@ -1771,7 +1829,7 @@ export default function Home() {
         </div>
       </aside>
 
-      <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden bg-[#121212]">
+      <div className="flex min-h-[100dvh] min-w-0 flex-1 flex-col overflow-hidden bg-[#121212]">
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-[#1f1f1f] px-4 md:px-6">
           <div className="flex items-center gap-2">
             <button
@@ -1794,11 +1852,38 @@ export default function Home() {
           <div className="shrink-0 border-b border-[#1f1f1f] px-4 py-5 md:px-8">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <h1 className="text-2xl font-semibold tracking-tight text-white">Separación de pistas</h1>
+                <h1 className="text-2xl font-semibold tracking-tight text-white">
+                  {activeStudioView === 'youtube'
+                    ? 'Extraer de YouTube'
+                    : activeStudioView === 'chords'
+                      ? 'Análisis de acordes'
+                      : activeStudioView === 'metronome'
+                      ? 'Metrónomo'
+                      : activeStudioView === 'bpm'
+                        ? 'Detector de BPM'
+                        : activeStudioView === 'tempo'
+                          ? 'Cambio de tempo'
+                          : activeStudioView === 'eq'
+                            ? 'EQ Pro / Control de volumen'
+                            : 'Separación de pistas'}
+                </h1>
                 <p className="mt-1 text-sm text-[#a3a3a3]">
-                  {songs.length} {songs.length === 1 ? 'archivo' : 'archivos'}
+                  {activeStudioView === 'youtube'
+                    ? 'Pega la URL, extrae audio y descárgalo desde aquí.'
+                    : activeStudioView === 'chords'
+                      ? 'Selecciona una pista para ver acordes y tonalidad.'
+                      : activeStudioView === 'metronome'
+                      ? 'Control de BPM, compás y click en tiempo real.'
+                      : activeStudioView === 'bpm'
+                        ? 'Analiza tus audios para detectar tempo automáticamente.'
+                      : activeStudioView === 'tempo'
+                        ? 'Ajusta tempo y procesa el audio con motor profesional.'
+                        : activeStudioView === 'eq'
+                          ? 'Carga audio, ajusta ecualización y exporta en WAV o MP3.'
+                          : `${songs.length} ${songs.length === 1 ? 'archivo' : 'archivos'}`}
                 </p>
               </div>
+              {activeStudioView === 'tracks' ? (
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative min-w-[200px] flex-1 max-w-md">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#737373]" />
@@ -1839,12 +1924,113 @@ export default function Home() {
                   Añadir
                 </button>
               </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={goToTracksSection}
+                  className="inline-flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-4 py-2.5 text-sm font-semibold text-[#d4d4d4] transition hover:text-white"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Ver pistas
+                </button>
+              )}
             </div>
           </div>
 
         {/* Lista de pistas */}
-        <div id="lista-canciones" className="min-h-0 flex-1 overflow-auto px-4 pb-28 pt-4 md:px-8">
-          {songsLoading ? (
+        <div id="lista-canciones" className="safe-bottom min-h-0 flex-1 overflow-auto px-4 pb-32 pt-4 md:px-8 md:pb-28">
+          {activeStudioView === 'youtube' ? (
+            <div className="mx-auto max-w-3xl rounded-xl border border-[#2a2a2a] bg-[#111] p-5 md:p-6">
+              <label className="mb-2 block text-sm font-medium text-zinc-300">URL del video</label>
+              <input
+                type="text"
+                value={youtubeUrl}
+                onChange={(e) => {
+                  setYoutubeUrl(e.target.value)
+                  setYoutubeExtractError('')
+                }}
+                placeholder="https://www.youtube.com/watch?v=..."
+                className="w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-4 py-3 text-white placeholder:text-[#666] focus:border-red-500 focus:outline-none"
+                disabled={isExtractingYoutube}
+              />
+              {youtubeExtractError && <p className="mt-2 text-sm text-red-400">{youtubeExtractError}</p>}
+
+              <button
+                type="button"
+                onClick={handleExtractYoutubeAudio}
+                disabled={isExtractingYoutube}
+                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-3 font-semibold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isExtractingYoutube ? <Loader2 className="h-5 w-5 animate-spin" /> : <Youtube className="h-5 w-5" />}
+                {isExtractingYoutube ? 'Extrayendo...' : 'Extraer Audio'}
+              </button>
+
+              {youtubeExtractedAudio && (
+                <div className="mt-6 rounded-lg border border-[#2a2a2a] bg-[#151515] p-4">
+                  <p className="font-semibold text-white">{youtubeVideoTitle}</p>
+                  <p className="mt-1 text-xs text-zinc-400">{(youtubeExtractedAudio.size / 1024 / 1024).toFixed(2)} MB</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleDownloadYoutubeAudio}
+                      className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+                    >
+                      <Download className="h-4 w-4" />
+                      Descargar MP3
+                    </button>
+                    <button
+                      type="button"
+                      onClick={goToTracksSection}
+                      className="rounded-md border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-zinc-200 hover:text-white"
+                    >
+                      Volver a pistas
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : activeStudioView === 'chords' ? (
+            <div className="mx-auto w-full max-w-6xl space-y-4">
+              <ChordAnalysisModal
+                isOpen
+                embedded
+                onClose={goToTracksSection}
+                isPremium={isPremium}
+              />
+            </div>
+          ) : activeStudioView === 'metronome' ? (
+            <div className="mx-auto w-full max-w-6xl">
+              <MetronomeModal
+                isOpen
+                embedded
+                onClose={goToTracksSection}
+              />
+            </div>
+          ) : activeStudioView === 'bpm' ? (
+            <div className="mx-auto w-full max-w-4xl">
+              <BpmDetectorModal
+                isOpen
+                embedded
+                onClose={goToTracksSection}
+              />
+            </div>
+          ) : activeStudioView === 'tempo' ? (
+            <div className="mx-auto w-full max-w-[1500px]">
+              <PitchTempoModal
+                isOpen
+                embedded
+                onClose={goToTracksSection}
+              />
+            </div>
+          ) : activeStudioView === 'eq' ? (
+            <div className="mx-auto w-full max-w-[1500px]">
+              <VolumeEQModal
+                isOpen
+                embedded
+                onClose={goToTracksSection}
+              />
+            </div>
+          ) : songsLoading ? (
             <div className="rounded-xl border border-[#2a2a2a] bg-[#1a1a1a]/50 p-12 text-center">
               <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-xl bg-[#262626] animate-pulse">
                 <Music className="h-8 w-8 text-[#a3a3a3]" />
@@ -1881,7 +2067,7 @@ export default function Home() {
             </div>
           ) : (
             <div className="overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#1a1a1a]/40">
-              <table className="w-full min-w-[800px]">
+              <table className="w-full md:min-w-[800px]">
                 <thead>
                   <tr className="border-b border-[#2a2a2a]">
                     <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#a3a3a3]">
@@ -2064,7 +2250,7 @@ export default function Home() {
 
       {/* Moises Style Upload Modal */}
       {showMoisesStyleModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 md:p-4">
           <div className="bg-black mx-auto flex flex-col border border-white border-opacity-20 relative max-w-5xl" style={{transform: 'scale(1.2)'}}>
             {/* Botón de cerrar */}
             <div className="absolute top-4 right-4 z-10">
@@ -2106,15 +2292,15 @@ export default function Home() {
       {showSongModal && selectedSong && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
 
-          <div className="bg-gray-800 w-[90vw] h-[90vh] mx-4 flex flex-col border border-white border-opacity-20">
+          <div className="flex h-[100dvh] w-full max-w-[1400px] flex-col border border-white/20 bg-gray-800 md:h-[90vh] md:w-[90vw]">
             {/* Header - 10% de la pantalla */}
-            <div className="bg-black h-[10vh] flex items-center justify-between px-6">
+            <div className="bg-black min-h-[76px] flex flex-wrap items-center justify-between gap-2 px-3 py-2 md:h-[10vh] md:px-6">
               {/* Controles de audio en el lado izquierdo */}
               <div className="flex items-center">
                 {/* Botón Play/Pause */}
                 <button
                   onClick={togglePlayPause}
-                  className="bg-black/40 backdrop-blur-md hover:bg-black/60 w-16 h-16 flex items-center justify-center transition-all duration-300 shadow-lg"
+                  className="mobile-touch-target bg-black/40 backdrop-blur-md hover:bg-black/60 h-12 w-12 md:h-16 md:w-16 flex items-center justify-center transition-all duration-300 shadow-lg"
                 >
                   <img 
                     src={isPlaying ? "/images/pausa.png" : "/images/play.png"} 
@@ -2137,7 +2323,7 @@ export default function Home() {
                     // Metrónomo deshabilitado temporalmente
                     // stopMetronome();
                   }}
-                  className="bg-black/40 backdrop-blur-md hover:bg-black/60 w-16 h-16 flex items-center justify-center transition-all duration-300 shadow-lg -ml-2"
+                  className="mobile-touch-target bg-black/40 backdrop-blur-md hover:bg-black/60 -ml-1 h-12 w-12 md:-ml-2 md:h-16 md:w-16 flex items-center justify-center transition-all duration-300 shadow-lg"
                 >
                   <img 
                     src="/images/stop.png" 
@@ -2164,7 +2350,7 @@ export default function Home() {
                   max={duration || 0}
                   value={currentTime}
                   onChange={handleSeek}
-                  className="w-52 h-1 bg-gray-700 appearance-none cursor-pointer accent-teal-500"
+                  className="h-1 w-28 bg-gray-700 appearance-none cursor-pointer accent-teal-500 md:w-52"
                 />
                 
                 {/* Espacio separador */}
@@ -2184,7 +2370,7 @@ export default function Home() {
                 <div className="flex items-center space-x-3">
                   <button
                     onClick={toggleMute}
-                    className="bg-black/40 backdrop-blur-md hover:bg-black/60 w-16 h-16 flex items-center justify-center transition-all duration-300 shadow-lg"
+                    className="mobile-touch-target bg-black/40 backdrop-blur-md hover:bg-black/60 h-12 w-12 md:h-16 md:w-16 flex items-center justify-center transition-all duration-300 shadow-lg"
                   >
                     <img 
                       src={isMuted ? "/images/unmute.png" : "/images/mute.png"} 
@@ -2257,7 +2443,7 @@ export default function Home() {
             <div className="h-[20px] bg-gray-950 w-full"></div>
             
             {/* Tracks Area - 60% */}
-            <div className="h-[60vh] bg-gray-900 flex overflow-hidden">
+            <div className="h-[calc(100dvh-180px)] bg-gray-900 flex overflow-hidden md:h-[60vh]">
               {/* Área fija de controles a la izquierda */}
               <div className="w-40 bg-gray-700 border-r border-gray-600 flex flex-col flex-shrink-0">
                 {(() => {
@@ -2329,8 +2515,13 @@ export default function Home() {
                           
                           {/* Botón selector de color - LED parpadeante */}
                           <button
-                            onClick={() => setShowColorPicker(trackKey)}
-                            className="w-4 h-2 rounded border border-gray-600 hover:border-white transition-all duration-300 animate-pulse shadow-lg"
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setShowColorPicker(trackKey);
+                            }}
+                            className="h-5 w-6 min-h-0 min-w-0 rounded border border-gray-600 hover:border-white transition-all duration-300 animate-pulse shadow-lg"
                             style={{ 
                               backgroundColor: getColorFromClass(trackBackgroundColor),
                               boxShadow: `0 0 4px ${getColorFromClass(trackBackgroundColor)}, 0 0 8px ${getColorFromClass(trackBackgroundColor)}`
@@ -2369,8 +2560,13 @@ export default function Home() {
                             {/* Botones M y S */}
                             <div className="flex space-x-1 self-end">
                               <button
-                                onClick={() => toggleTrackMute(trackKey)}
-                                className={`w-5 h-5 rounded flex items-center justify-center transition-all text-xs font-bold ${
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  toggleTrackMute(trackKey);
+                                }}
+                                className={`h-6 w-6 rounded flex items-center justify-center transition-all text-[10px] font-bold ${
                                   trackMutedStates[trackKey] 
                                     ? 'bg-yellow-500 text-gray-900' 
                                     : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
@@ -2384,8 +2580,13 @@ export default function Home() {
                               </button>
                               
                               <button
-                                onClick={() => toggleTrackSolo(trackKey)}
-                                className={`w-5 h-5 rounded flex items-center justify-center transition-all text-xs font-bold ${
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  toggleTrackSolo(trackKey);
+                                }}
+                                className={`h-6 w-6 rounded flex items-center justify-center transition-all text-[10px] font-bold ${
                                   trackSoloStates[trackKey] 
                                     ? 'bg-yellow-500 text-gray-900' 
                                     : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
@@ -2450,7 +2651,7 @@ export default function Home() {
                     };
                     
                     return (
-                      <div key={trackKey} className="h-[12%] w-full min-w-[800px]">
+                      <div key={trackKey} className="h-[12%] w-full md:min-w-[800px]">
                         {/* Track independiente */}
                         <div className={`h-full ${trackBackgroundColor} border-b border-gray-700 min-w-0 relative overflow-visible`}>
                           {/* Waveform Container - Sin restricciones */}
@@ -2596,7 +2797,7 @@ export default function Home() {
                   <div className="flex-1 flex items-center justify-center">
                     <div className="text-gray-400 text-center">
                       <p>No stems available</p>
-                      <p className="text-xs mt-2">This song hasn't been processed yet</p>
+                      <p className="text-xs mt-2">This song hasn&apos;t been processed yet</p>
                     </div>
                   </div>
                   )}
@@ -2773,63 +2974,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* Metronome Component - REMOVED */}
-
-      {/* Pitch & Tempo Modal */}
-      {showPitchTempoModal && (
-        <PitchTempoModal
-          isOpen={showPitchTempoModal}
-          onClose={closePitchTempoModal}
-        />
-      )}
-
-      {/* Metronome Modal */}
-      {showMetronomeModal && (
-        <MetronomeModal
-          isOpen={showMetronomeModal}
-          onClose={closeMetronomeModal}
-        />
-      )}
-
-      {/* Volume EQ Modal */}
-      {showVolumeEQModal && (
-        <VolumeEQModal
-          isOpen={showVolumeEQModal}
-          onClose={closeVolumeEQModal}
-        />
-      )}
-
-      {/* BPM Detector Modal */}
-      {showBpmDetectorModal && (
-        <BpmDetectorModal
-          isOpen={showBpmDetectorModal}
-          onClose={closeBpmDetectorModal}
-        />
-      )}
-
-      {/* Chord Analysis Modal */}
-      {showChordAnalysisModal && (
-        <ChordAnalysisModal
-          isOpen={showChordAnalysisModal}
-          onClose={closeChordAnalysisModal}
-          isPremium={isPremium}
-        />
-      )}
-
-      {/* YouTube Extract Modal */}
-      {showYoutubeExtractModal && (
-        <YoutubeExtractModal
-          isOpen={showYoutubeExtractModal}
-          onClose={closeYoutubeExtractModal}
-          isPremium={isPremium}
-          onSeparateTrack={(file) => {
-            setPreloadedAudioFile(file)
-            setShowMoisesStyleModal(true)
-            setShowYoutubeExtractModal(false)
-          }}
-        />
-      )}
-
       {/* Modal de confirmación de eliminación */}
       {deleteConfirmModal.show && deleteConfirmModal.song && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[10000]">
@@ -2849,7 +2993,7 @@ export default function Home() {
             </p>
             
             <p className="text-lg font-semibold text-white text-center mb-5">
-              "{deleteConfirmModal.song.title}"
+              &quot;{deleteConfirmModal.song.title}&quot;
             </p>
             
             <div className="flex space-x-3">

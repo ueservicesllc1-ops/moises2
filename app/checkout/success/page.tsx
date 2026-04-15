@@ -64,9 +64,9 @@ export default function CheckoutSuccessPage() {
   }, [loading, router, searchParams, user?.uid])
 
   return (
-    <main className="min-h-screen bg-[#0a0a10] text-white flex items-center justify-center px-6">
-      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-white/[0.03] p-8 text-center">
-        <h1 className="text-2xl font-bold mb-3">Confirmando suscripcion</h1>
+    <main className="min-h-[100dvh] bg-[#0a0a10] text-white flex items-center justify-center px-4 sm:px-6">
+      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-white/[0.03] p-5 sm:p-8 text-center">
+        <h1 className="mb-3 text-xl sm:text-2xl font-bold">Confirmando suscripcion</h1>
         <p className="text-zinc-300">{status}</p>
       </div>
     </main>

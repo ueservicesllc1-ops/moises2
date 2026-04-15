@@ -74,9 +74,9 @@ const AudioSeparationModal: React.FC<AudioSeparationModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 md:p-4">
 
-      <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+      <div className="bg-gray-800 rounded-lg p-4 md:p-6 w-full max-w-md mx-0 md:mx-4 h-[100dvh] md:h-auto md:max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
             <h2 className="text-xl font-bold text-white">Separate tracks</h2>
@@ -88,7 +88,7 @@ const AudioSeparationModal: React.FC<AudioSeparationModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white text-2xl"
+            className="mobile-touch-target text-gray-400 hover:text-white text-2xl inline-flex items-center justify-center"
           >
             <X className="h-6 w-6" />
           </button>
@@ -322,7 +322,7 @@ const AudioSeparationModal: React.FC<AudioSeparationModalProps> = ({
         <button
           onClick={handleSave}
           disabled={isProcessing}
-          className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2 disabled:opacity-50"
+          className="mobile-touch-target w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2 disabled:opacity-50"
         >
           {isProcessing ? (
             <>

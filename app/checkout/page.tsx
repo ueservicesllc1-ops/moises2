@@ -66,24 +66,6 @@ export default function CheckoutPage() {
     }
   }, [billing, plan, user?.uid])
 
-  if (loading) {
-    return (
-      <main className="min-h-screen bg-[#0b0b10] text-white flex items-center justify-center p-6">
-        <p>Cargando checkout...</p>
-      </main>
-    )
-  }
-
-  if (!loading && !user) return null
-
-  if (!stripePromise) {
-    return (
-      <main className="min-h-screen bg-[#0b0b10] text-white flex items-center justify-center p-6">
-        <p>Falta NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY en entorno.</p>
-      </main>
-    )
-  }
-
   const fetchClientSecret = useCallback(async () => {
     if (!user?.uid) {
       throw new Error('Usuario no autenticado para checkout')
@@ -108,15 +90,33 @@ export default function CheckoutPage() {
     return data.clientSecret as string
   }, [billing, plan, user?.email, user?.uid])
 
+  if (loading) {
+    return (
+      <main className="min-h-[100dvh] bg-[#0b0b10] text-white flex items-center justify-center p-6">
+        <p>Cargando checkout...</p>
+      </main>
+    )
+  }
+
+  if (!loading && !user) return null
+
+  if (!stripePromise) {
+    return (
+      <main className="min-h-[100dvh] bg-[#0b0b10] text-white flex items-center justify-center p-6">
+        <p>Falta NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY en entorno.</p>
+      </main>
+    )
+  }
+
   return (
-    <main className="min-h-screen bg-[#0b0b10] text-white">
-      <div className="mx-auto grid min-h-screen max-w-6xl grid-cols-1 md:grid-cols-2">
-        <section className="border-b border-white/10 bg-black p-8 md:border-b-0 md:border-r md:p-10">
+    <main className="min-h-[100dvh] bg-[#0b0b10] text-white">
+      <div className="mx-auto grid min-h-[100dvh] max-w-6xl grid-cols-1 md:grid-cols-2">
+        <section className="border-b border-white/10 bg-black p-5 md:border-b-0 md:border-r md:p-10">
           <div className="flex items-center gap-2">
             <img src="/images/logo.png" alt="Judith" className="h-8 w-auto object-contain" />
             <span className="text-sm text-zinc-400">Checkout seguro</span>
           </div>
-          <h1 className="mt-8 text-3xl font-bold">
+          <h1 className="mt-6 text-2xl font-bold sm:mt-8 sm:text-3xl">
             {plan === 'pro' ? 'Pro' : 'Lite'} {billing === 'yearly' ? 'Anual' : 'Mensual'}
           </h1>
           <p className="mt-2 text-zinc-300">
@@ -134,13 +134,13 @@ export default function CheckoutPage() {
           <button
             type="button"
             onClick={() => router.push('/studio?checkout=canceled')}
-            className="mt-8 rounded-md border border-white/20 px-4 py-2 text-sm text-zinc-200 hover:bg-white/10"
+            className="mobile-touch-target mt-6 rounded-md border border-white/20 px-4 py-2 text-sm text-zinc-200 hover:bg-white/10 sm:mt-8"
           >
             Volver a Studio
           </button>
         </section>
 
-        <section className="p-4 md:p-8">
+        <section className="p-3 sm:p-4 md:p-8">
           {error ? (
             <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-200">{error}</div>
           ) : (

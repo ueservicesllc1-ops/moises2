@@ -7,6 +7,10 @@ import uuid
 import asyncio
 import hashlib
 import tempfile
+import re
+import subprocess
+import shutil
+import sys
 from pathlib import Path
 from typing import List, Optional, Dict
 import json
@@ -23,6 +27,7 @@ import numpy as np
 
 # In-memory task storage
 tasks_storage = {}
+DEPENDENCY_STATUS: Dict[str, object] = {"checked": False}
 
 app = FastAPI(
     title="Moises Clone API",
@@ -32,6 +37,52 @@ app = FastAPI(
 
 CACHE_MODEL_VERSION = os.getenv("SEPARATION_MODEL_VERSION", "demucs_pro_v3")
 CACHE_TTL_HOURS = int(os.getenv("SEPARATION_CACHE_TTL_HOURS", "168"))
+REMOTE_SEPARATION_TIMEOUT_SECONDS = int(os.getenv("REMOTE_SEPARATION_TIMEOUT_SECONDS", "300"))
+REMOTE_SEPARATION_RETRIES = int(os.getenv("REMOTE_SEPARATION_RETRIES", "1"))
+
+
+def check_runtime_dependencies() -> Dict[str, object]:
+    """
+    Verifica dependencias externas críticas para evitar fallos tardíos en runtime.
+    """
+    status: Dict[str, object] = {
+        "checked": True,
+        "ffmpeg": False,
+        "ytdlp_cli": False,
+        "ytdlp_python_module": False,
+        "python_executable": os.getenv("PYTHON_EXECUTABLE", ""),
+    }
+
+    # ffmpeg
+    ffmpeg_bin = shutil.which("ffmpeg")
+    status["ffmpeg"] = bool(ffmpeg_bin)
+    if ffmpeg_bin:
+        status["ffmpeg_path"] = ffmpeg_bin
+
+    # yt-dlp CLI
+    ytdlp_bin = shutil.which("yt-dlp")
+    status["ytdlp_cli"] = bool(ytdlp_bin)
+    if ytdlp_bin:
+        status["ytdlp_cli_path"] = ytdlp_bin
+
+    # yt_dlp module
+    try:
+        mod_result = subprocess.run(
+            [sys.executable, "-m", "yt_dlp", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        status["ytdlp_python_module"] = mod_result.returncode == 0
+        if mod_result.returncode == 0:
+            status["ytdlp_version"] = (mod_result.stdout or "").strip()
+        else:
+            status["ytdlp_error"] = (mod_result.stderr or "").strip()[:300]
+    except Exception as e:
+        status["ytdlp_python_module"] = False
+        status["ytdlp_error"] = str(e)[:300]
+
+    return status
 
 
 def determine_requested_tracks(separation_type: str, custom_tracks: Optional[Dict]) -> List[str]:
@@ -84,6 +135,9 @@ app.add_middleware(
 async def startup_event():
     init_db()
     await b2_storage.initialize()
+    global DEPENDENCY_STATUS
+    DEPENDENCY_STATUS = check_runtime_dependencies()
+    print(f"[STARTUP] Runtime dependencies: {DEPENDENCY_STATUS}")
 
 # Audio processor instance (already imported)
 
@@ -93,7 +147,89 @@ async def root():
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "OK", "message": "Backend is running"}
+    return {
+        "status": "OK",
+        "message": "Backend is running",
+        "dependencies": DEPENDENCY_STATUS,
+    }
+
+@app.get("/api/health/deep")
+async def health_check_deep():
+    """
+    Health check profundo para validar pipeline real de dependencias críticas.
+    No llama servicios externos; usa audio sintético local para test rápido.
+    """
+    report: Dict[str, object] = {
+        "status": "OK",
+        "message": "Deep health check passed",
+        "checks": {},
+    }
+    temp_dir = Path("temp_health")
+    temp_dir.mkdir(exist_ok=True)
+    uid = str(uuid.uuid4())
+    wav_path = temp_dir / f"health_{uid}.wav"
+    mp3_path = temp_dir / f"health_{uid}.mp3"
+
+    try:
+        # 1) Verificar módulo yt_dlp funcional
+        ytdlp_check = {"ok": False}
+        try:
+            mod = subprocess.run(
+                [sys.executable, "-m", "yt_dlp", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            ytdlp_check["ok"] = mod.returncode == 0
+            ytdlp_check["version"] = (mod.stdout or "").strip()
+            if mod.returncode != 0:
+                ytdlp_check["error"] = (mod.stderr or "").strip()[:300]
+        except Exception as e:
+            ytdlp_check["error"] = str(e)[:300]
+        report["checks"]["yt_dlp_module"] = ytdlp_check
+
+        # 2) Generar WAV sintético corto (440Hz) para probar encode
+        sr = 22050
+        seconds = 0.6
+        t = np.linspace(0, seconds, int(sr * seconds), endpoint=False, dtype=np.float32)
+        y = 0.2 * np.sin(2 * np.pi * 440.0 * t)
+        import soundfile as sf
+        sf.write(str(wav_path), y, sr, subtype="PCM_16")
+
+        # 3) Verificar encode MP3 con ffmpeg (pipeline export)
+        ffmpeg_check = {"ok": False}
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", str(wav_path),
+            "-codec:a", "libmp3lame",
+            "-b:a", "128k",
+            str(mp3_path),
+        ]
+        ff = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        ffmpeg_check["ok"] = ff.returncode == 0 and mp3_path.exists() and mp3_path.stat().st_size > 0
+        if ff.returncode != 0:
+            ffmpeg_check["error"] = (ff.stderr or "").strip()[:500]
+        else:
+            ffmpeg_check["output_size_bytes"] = mp3_path.stat().st_size
+        report["checks"]["ffmpeg_mp3_encode"] = ffmpeg_check
+
+        # Estado final
+        if not ytdlp_check.get("ok") or not ffmpeg_check.get("ok"):
+            report["status"] = "DEGRADED"
+            report["message"] = "Deep health check has failing checks"
+
+        return report
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "message": "Deep health check failed",
+            "error": str(e),
+            "checks": report.get("checks", {}),
+        }
+    finally:
+        wav_path.unlink(missing_ok=True)
+        mp3_path.unlink(missing_ok=True)
 
 # Endpoints de separación (múltiples rutas para compatibilidad)
 @app.post("/api/separate-demucs")
@@ -258,7 +394,6 @@ async def separate_audio_handler(
         
         # Guardar en base de datos para persistencia y Metabase
         try:
-            from database import TaskDB, SessionLocal
             db = SessionLocal()
             db_task = TaskDB(
                 id=task_id,
@@ -334,7 +469,6 @@ async def process_audio(
             
             # Persistir progreso en DB cada vez que cambia significativamente
             try:
-                from database import TaskDB, SessionLocal
                 db = SessionLocal()
                 db.query(TaskDB).filter(TaskDB.id == task.id).update({"progress": progress})
                 db.commit()
@@ -363,14 +497,45 @@ async def process_audio(
         update_progress(50, "Cocinando magia sonora con Tarjetas Gráficas de última generación...")
         
         remote_gpu_func = modal.Function.from_name("moises-demucs-worker", "separate_audio")
-        # Esto suspende el hilo principal 15-20 segs pero ¡SIN USAR tu procesador! Todo se opera en la Nube
-        stems_bytes = await asyncio.to_thread(
-            remote_gpu_func.remote,
-            audio_bytes,
-            requested_tracks,
-            hi_fi,
-            quality_profile
-        )
+        # Timeout + reintento para evitar cuelgues temporales del worker remoto.
+        stems_bytes = None
+        last_remote_error: Optional[Exception] = None
+        total_attempts = max(1, REMOTE_SEPARATION_RETRIES + 1)
+        for attempt_idx in range(total_attempts):
+            try:
+                if attempt_idx > 0:
+                    update_progress(
+                        52,
+                        f"Reintentando separación remota ({attempt_idx + 1}/{total_attempts})..."
+                    )
+                stems_bytes = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        remote_gpu_func.remote,
+                        audio_bytes,
+                        requested_tracks,
+                        hi_fi,
+                        quality_profile
+                    ),
+                    timeout=REMOTE_SEPARATION_TIMEOUT_SECONDS
+                )
+                break
+            except Exception as remote_e:
+                last_remote_error = remote_e
+                print(
+                    f"[MODAL] Remote attempt {attempt_idx + 1}/{total_attempts} failed: {remote_e}"
+                )
+                if attempt_idx >= total_attempts - 1:
+                    break
+
+        if stems_bytes is None:
+            base_msg = "Worker remoto no disponible o saturado"
+            if isinstance(last_remote_error, asyncio.TimeoutError):
+                raise RuntimeError(
+                    f"{base_msg}: timeout de {REMOTE_SEPARATION_TIMEOUT_SECONDS}s agotado"
+                )
+            raise RuntimeError(
+                f"{base_msg}: {last_remote_error or 'error desconocido en worker'}"
+            )
         
         # 3. Extraer Tracks De Vueltos por internet y escupirlos al Disco para subida a B2
         print("[MODAL] Remote extraction finished, writing stems to disk...")
@@ -520,7 +685,6 @@ async def process_audio(
         
         # PERSISTIR RESULTADOS EN BASE DE DATOS PARA METABASE
         try:
-            from database import TaskDB, SessionLocal
             import json
             db = SessionLocal()
             db_update = {
@@ -566,10 +730,33 @@ async def process_audio(
         print(f"   - BPM: {bpm}, Key: {key}, Duration: {duration}s")
         print(f"{'='*60}\n")
         
+    except asyncio.TimeoutError:
+        task.status = TaskStatus.FAILED
+        task.error = f"Tiempo de espera agotado en separación remota ({REMOTE_SEPARATION_TIMEOUT_SECONDS}s)"
+        tasks_storage[task.id] = task
+        try:
+            db = SessionLocal()
+            db.query(TaskDB).filter(TaskDB.id == task.id).update(
+                {"status": TaskStatus.FAILED, "error": task.error}
+            )
+            db.commit()
+            db.close()
+        except Exception:
+            pass
+        print(f"\n[PROCESS] Processing TIMEOUT for task {task.id}: {task.error}")
     except Exception as e:
         task.status = TaskStatus.FAILED
         task.error = str(e)
         tasks_storage[task.id] = task
+        try:
+            db = SessionLocal()
+            db.query(TaskDB).filter(TaskDB.id == task.id).update(
+                {"status": TaskStatus.FAILED, "error": task.error}
+            )
+            db.commit()
+            db.close()
+        except Exception:
+            pass
         print(f"\n[PROCESS] Processing ERROR for task {task.id}: {e}")
         import traceback
         traceback.print_exc()
@@ -785,7 +972,6 @@ async def get_task_status(task_id: str) -> Optional[ProcessingTask]:
         
     # 2. Intentar Base de Datos (para tareas persistentes/Metabase)
     try:
-        from database import TaskDB, SessionLocal
         import json
         db = SessionLocal()
         db_task = db.query(TaskDB).filter(TaskDB.id == task_id).first()
@@ -1077,15 +1263,18 @@ async def analyze_bpm(file: UploadFile = File(...)):
             
             # Detectar tempo y beats
             tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, units='time')
+            tempo_array = np.asarray(tempo).reshape(-1)
+            tempo_value = float(tempo_array[0]) if tempo_array.size > 0 else 0.0
             
             # Calcular offset del primer beat
             first_beat_time = 0.0
-            if len(beat_frames) > 0:
-                first_beat_time = beat_frames[0]
+            beat_times = np.asarray(beat_frames, dtype=float).reshape(-1)
+            if len(beat_times) > 0:
+                first_beat_time = float(beat_times[0])
             
             # Detectar onset del primer ataque fuerte
-            onsets = librosa.onset.onset_detect(y=y, sr=sr, units='time')
-            first_onset = onsets[0] if len(onsets) > 0 else 0.0
+            onsets = np.asarray(librosa.onset.onset_detect(y=y, sr=sr, units='time'), dtype=float).reshape(-1)
+            first_onset = float(onsets[0]) if len(onsets) > 0 else 0.0
             
             # Usar el menor entre primer beat y primer onset
             offset = min(first_beat_time, first_onset) if first_onset > 0 else first_beat_time
@@ -1095,7 +1284,6 @@ async def analyze_bpm(file: UploadFile = File(...)):
             
             # Detectar compás (time signature)
             # Análisis básico de patrones de acentuación
-            beat_times = librosa.frames_to_time(beat_frames, sr=sr)
             if len(beat_times) >= 4:
                 # Analizar patrones de acentuación en los primeros beats
                 energy_per_beat = []
@@ -1120,7 +1308,7 @@ async def analyze_bpm(file: UploadFile = File(...)):
                 accent_pattern = 4
             
             result = {
-                "bpm": float(tempo),
+                "bpm": float(round(tempo_value)),
                 "offset": float(offset),
                 "duration": float(duration),
                 "time_signature": f"{accent_pattern}/4",
@@ -1455,8 +1643,25 @@ async def extract_with_ytdlp(youtube_url: str, video_id: str):
         import subprocess
         import base64
         import re
+        import sys
         
-        print(f"[yt-dlp] Descargando audio de: {youtube_url}")
+        clean_url = f"https://www.youtube.com/watch?v={video_id}"
+        print(f"[yt-dlp] Descargando audio de: {clean_url}")
+
+        def run_ytdlp(args, timeout=300):
+            """
+            Ejecuta yt-dlp de forma robusta:
+            1) intenta binario `yt-dlp`
+            2) fallback a `python -m yt_dlp`
+            """
+            cmd_bin = ["yt-dlp", *args]
+            cmd_module = [sys.executable, "-m", "yt_dlp", *args]
+
+            try:
+                return subprocess.run(cmd_bin, capture_output=True, text=True, timeout=timeout)
+            except FileNotFoundError:
+                print("[yt-dlp] Binario no encontrado. Usando fallback: python -m yt_dlp")
+                return subprocess.run(cmd_module, capture_output=True, text=True, timeout=timeout)
         
         # Crear directorio temporal
         temp_dir = Path("temp_youtube")
@@ -1464,13 +1669,8 @@ async def extract_with_ytdlp(youtube_url: str, video_id: str):
         
         # Primero obtener el título real del video
         print(f"[yt-dlp] Obteniendo título del video...")
-        title_cmd = [
-            "yt-dlp",
-            "--get-title",
-            youtube_url
-        ]
-        
-        title_result = subprocess.run(title_cmd, capture_output=True, text=True, timeout=30)
+        title_args = ["--no-playlist", "--get-title", clean_url]
+        title_result = run_ytdlp(title_args, timeout=30)
         
         if title_result.returncode == 0 and title_result.stdout.strip():
             video_title = title_result.stdout.strip()
@@ -1484,19 +1684,19 @@ async def extract_with_ytdlp(youtube_url: str, video_id: str):
         output_file = temp_dir / f"{video_id}.mp3"
         
         # Comando yt-dlp para descargar solo audio
-        cmd = [
-            "yt-dlp",
+        ytdlp_args = [
+            "--no-playlist",
             "-x",  # Extract audio
             "--audio-format", "mp3",
             "--audio-quality", "0",  # Best quality
             "-o", str(output_file),
-            youtube_url
+            clean_url
         ]
         
-        print(f"[yt-dlp] Ejecutando: {' '.join(cmd)}")
+        print(f"[yt-dlp] Ejecutando descarga de audio...")
         
         # Ejecutar yt-dlp
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        result = run_ytdlp(ytdlp_args, timeout=300)
         
         if result.returncode != 0:
             print(f"[yt-dlp] Error: {result.stderr}")
@@ -1525,7 +1725,7 @@ async def extract_with_ytdlp(youtube_url: str, video_id: str):
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=500, detail="Timeout descargando de YouTube")
     except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="yt-dlp no está instalado. Instálalo con: pip install yt-dlp")
+        raise HTTPException(status_code=500, detail="yt-dlp no está disponible (ni binario ni módulo Python). Instala con: python -m pip install yt-dlp")
     except Exception as e:
         print(f"[yt-dlp] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1533,7 +1733,9 @@ async def extract_with_ytdlp(youtube_url: str, video_id: str):
 @app.post("/youtube-extract")
 async def extract_youtube_audio(request: Request):
     """
-    Extrae audio de un video de YouTube usando RapidAPI o yt-dlp
+    Extrae audio de YouTube.
+    Por defecto usa yt-dlp (gratis/self-hosted) para evitar costo por API.
+    Si YOUTUBE_EXTRACT_PROVIDER=rapidapi, intenta RapidAPI y hace fallback a yt-dlp.
     """
     try:
         import httpx
@@ -1555,14 +1757,25 @@ async def extract_youtube_audio(request: Request):
         video_id = video_id_match.group(1)
         print(f"[YouTube API] Video ID: {video_id}")
         
-        # Obtener API key de variable de entorno
-        rapidapi_key = os.getenv('RAPIDAPI_KEY')
-        if not rapidapi_key:
-            # Fallback: usar yt-dlp directamente
-            print("[YouTube API] No RAPIDAPI_KEY found, usando yt-dlp")
+        # Provider selection (default: local/free via yt-dlp)
+        provider = (os.getenv("YOUTUBE_EXTRACT_PROVIDER", "ytdlp") or "ytdlp").strip().lower()
+
+        # RAPIDAPI_KEY placeholders should be treated as missing
+        rapidapi_key = (os.getenv('RAPIDAPI_KEY') or '').strip()
+        rapidapi_key_missing = (
+            not rapidapi_key or
+            rapidapi_key.lower() in {'your-rapidapi-key-here', 'changeme', 'none', 'null'}
+        )
+
+        if provider != "rapidapi":
+            print("[YouTube API] Provider=ytdlp (gratis/local)")
+            return await extract_with_ytdlp(youtube_url, video_id)
+
+        if rapidapi_key_missing:
+            print("[YouTube API] Provider=rapidapi pero RAPIDAPI_KEY no válida. Fallback a yt-dlp")
             return await extract_with_ytdlp(youtube_url, video_id)
         
-        # Llamar a RapidAPI
+        # Provider=rapidapi
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.get(
                 'https://youtube-mp36.p.rapidapi.com/dl',
@@ -1574,24 +1787,24 @@ async def extract_youtube_audio(request: Request):
             )
             
             if response.status_code != 200:
-                print(f"[YouTube API] Error: {response.status_code} - {response.text}")
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Error al obtener audio: {response.status_code}"
-                )
+                print(f"[YouTube API] RapidAPI error: {response.status_code} - {response.text[:250]}")
+                print("[YouTube API] Fallback a yt-dlp...")
+                return await extract_with_ytdlp(youtube_url, video_id)
             
             result = response.json()
             print(f"[YouTube API] Respuesta: {result}")
             
             if result.get('status') != 'ok':
-                raise HTTPException(status_code=400, detail="No se pudo procesar el video")
+                print(f"[YouTube API] RapidAPI status no-ok ({result}). Fallback a yt-dlp...")
+                return await extract_with_ytdlp(youtube_url, video_id)
             
             # Descargar el MP3
             mp3_url = result.get('link')
             video_title = result.get('title', 'video')
             
             if not mp3_url:
-                raise HTTPException(status_code=500, detail="No se obtuvo el link de descarga")
+                print("[YouTube API] RapidAPI sin link. Fallback a yt-dlp...")
+                return await extract_with_ytdlp(youtube_url, video_id)
             
             print(f"[YouTube API] Descargando MP3: {mp3_url}")
             
@@ -1631,7 +1844,8 @@ async def extract_youtube_audio(request: Request):
                     await asyncio.sleep(2)  # Esperar 2 segundos antes de reintentar
             
             if not audio_data:
-                raise HTTPException(status_code=500, detail="No se pudo descargar el audio después de varios intentos")
+                print("[YouTube API] RapidAPI download failed. Fallback a yt-dlp...")
+                return await extract_with_ytdlp(youtube_url, video_id)
             
             print(f"[YouTube API] Audio descargado: {video_title} ({len(audio_data)} bytes)")
             
@@ -1739,6 +1953,95 @@ async def pitch_shift_audio(request: Request):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/export-audio")
+async def export_audio(
+    file: UploadFile = File(...),
+    tempo_percent: float = Form(100.0),
+    pitch_semitones: float = Form(0.0),
+    export_format: str = Form("wav"),
+    filename: str = Form("export"),
+):
+    """
+    Exporta audio procesado en backend (WAV/MP3) para evitar fallos de encode en frontend.
+    """
+    temp_dir = Path("temp_export")
+    temp_dir.mkdir(exist_ok=True)
+    uid = str(uuid.uuid4())
+    temp_input = temp_dir / f"in_{uid}_{file.filename or 'audio'}"
+    temp_wav = temp_dir / f"out_{uid}.wav"
+    temp_mp3 = temp_dir / f"out_{uid}.mp3"
+
+    try:
+        payload = await file.read()
+        with open(temp_input, "wb") as f:
+            f.write(payload)
+
+        y, sr = librosa.load(str(temp_input), sr=None, mono=False)
+
+        # librosa can return mono as shape (n,), normalize to (channels, n)
+        y2 = np.asarray(y)
+        if y2.ndim == 1:
+            y2 = np.expand_dims(y2, axis=0)
+
+        rate = float(max(0.5, min(2.0, tempo_percent / 100.0)))
+        n_steps = float(pitch_semitones)
+
+        if abs(rate - 1.0) > 1e-6:
+            y2 = np.vstack([librosa.effects.time_stretch(ch, rate=rate) for ch in y2])
+
+        if abs(n_steps) > 1e-6:
+            y2 = np.vstack([librosa.effects.pitch_shift(ch, sr=sr, n_steps=n_steps) for ch in y2])
+
+        y2 = np.clip(y2, -1.0, 1.0)
+
+        import soundfile as sf
+        sf.write(str(temp_wav), y2.T if y2.shape[0] > 1 else y2[0], sr, subtype="PCM_24")
+
+        requested_format = (export_format or "wav").strip().lower()
+        base_name = re.sub(r'[^0-9A-Za-z._-]', '_', filename or "export")
+        if requested_format == "mp3":
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i", str(temp_wav),
+                "-codec:a", "libmp3lame",
+                "-b:a", "320k",
+                str(temp_mp3),
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode != 0:
+                raise HTTPException(status_code=500, detail=f"ffmpeg mp3 error: {result.stderr[:300]}")
+
+            with open(temp_mp3, "rb") as f:
+                out_data = f.read()
+
+            return StreamingResponse(
+                iter([out_data]),
+                media_type="audio/mpeg",
+                headers={"Content-Disposition": f'attachment; filename="{base_name}.mp3"'},
+            )
+
+        with open(temp_wav, "rb") as f:
+            out_data = f.read()
+
+        return StreamingResponse(
+            iter([out_data]),
+            media_type="audio/wav",
+            headers={"Content-Disposition": f'attachment; filename="{base_name}.wav"'},
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[EXPORT AUDIO] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error exportando audio: {str(e)}")
+    finally:
+        temp_input.unlink(missing_ok=True)
+        temp_wav.unlink(missing_ok=True)
+        temp_mp3.unlink(missing_ok=True)
 
 if __name__ == "__main__":
     import uvicorn

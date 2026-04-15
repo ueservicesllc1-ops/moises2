@@ -240,38 +240,38 @@ const WaveSurferMixer: React.FC<WaveSurferMixerProps> = ({ isOpen, onClose, song
   if (!isOpen || !songData) return null;
 
   return (
-    <div className="fixed inset-0 bg-gray-900 flex flex-col">
+    <div className="fixed inset-0 flex min-h-[100dvh] flex-col bg-gray-900">
       {/* Top Header */}
-      <div className="bg-gray-800 h-16 flex items-center justify-between px-6 border-b border-gray-700">
-        <div className="flex items-center space-x-4">
-          <button onClick={onClose} className="text-gray-400 hover:text-white">
+      <div className="bg-gray-800 min-h-[64px] flex flex-col gap-2 px-3 py-2 sm:h-16 sm:flex-row sm:items-center sm:justify-between sm:px-6 border-b border-gray-700">
+        <div className="flex min-w-0 items-center space-x-3 sm:space-x-4">
+          <button onClick={onClose} className="mobile-touch-target inline-flex items-center justify-center text-gray-400 hover:text-white">
             <ArrowLeft className="h-5 w-5" />
           </button>
           <Music className="h-5 w-5 text-blue-400" />
-          <span className="text-white font-medium">{songData.title}</span>
+          <span className="text-white text-sm sm:text-base font-medium truncate">{songData.title}</span>
         </div>
         
-        <div className="flex items-center space-x-4">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
           {/* Controles de reproducción principales */}
-          <div className="flex items-center space-x-2 bg-gray-700 rounded-lg px-3 py-2">
+          <div className="flex items-center space-x-2 bg-gray-700 rounded-lg px-2 sm:px-3 py-2">
             <button 
               onClick={togglePlay}
-              className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full"
+              className="mobile-touch-target bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full"
               title={isPlaying ? "Pause" : "Play"}
             >
               {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
             </button>
             <button 
               onClick={stopAll}
-              className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-full"
+              className="mobile-touch-target bg-red-600 hover:bg-red-700 text-white p-2 rounded-full"
               title="Stop"
             >
               <RotateCcw className="h-4 w-4" />
             </button>
-            <button className="bg-gray-600 hover:bg-gray-500 text-white p-2 rounded-full">
+            <button className="mobile-touch-target bg-gray-600 hover:bg-gray-500 text-white p-2 rounded-full">
               <SkipBack className="h-4 w-4" />
             </button>
-            <button className="bg-gray-600 hover:bg-gray-500 text-white p-2 rounded-full">
+            <button className="mobile-touch-target bg-gray-600 hover:bg-gray-500 text-white p-2 rounded-full">
               <SkipForward className="h-4 w-4" />
             </button>
           </div>
@@ -288,19 +288,19 @@ const WaveSurferMixer: React.FC<WaveSurferMixerProps> = ({ isOpen, onClose, song
             {songData.timeSignature}
           </div>
           
-          <button className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded flex items-center space-x-2">
+          <button className="mobile-touch-target bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded flex items-center space-x-2">
             <Download className="h-4 w-4" />
             <span>Export</span>
           </button>
           
-          <button className="text-gray-400 hover:text-white">
+          <button className="mobile-touch-target inline-flex items-center justify-center text-gray-400 hover:text-white">
             <MoreVertical className="h-5 w-5" />
           </button>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex">
+      <div className="safe-bottom flex-1 flex overflow-hidden">
         {/* Left Sidebar - Track Controls */}
         <div className="w-64 bg-gray-800 border-r border-gray-700 p-4">
           <div className="space-y-4">

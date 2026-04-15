@@ -8,9 +8,10 @@ import AdminModalLabel from './AdminModalLabel'
 interface MetronomeModalProps {
   isOpen: boolean
   onClose: () => void
+  embedded?: boolean
 }
 
-const MetronomeModal: React.FC<MetronomeModalProps> = ({ isOpen, onClose }) => {
+const MetronomeModal: React.FC<MetronomeModalProps> = ({ isOpen, onClose, embedded = false }) => {
   const [isPlaying, setIsPlaying] = useState(false)
   const [bpm, setBpm] = useState(120)
   const [volume, setVolume] = useState(0.5)
@@ -323,12 +324,12 @@ const MetronomeModal: React.FC<MetronomeModalProps> = ({ isOpen, onClose }) => {
     setBpm(Math.max(40, Math.min(240, value)))
   }
 
-  if (!isOpen) return null
+  if (!embedded && !isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[10000]">
-      <AdminModalLabel modalName="MetronomeModal" />
-      <div className="bg-gray-900 border-2 border-gray-700 p-6 max-w-6xl w-full mx-4 shadow-2xl">
+    <div className={embedded ? '' : 'fixed inset-0 z-[10000] flex items-center justify-center bg-black/80 p-2 md:p-4'}>
+      {!embedded && <AdminModalLabel modalName="MetronomeModal" />}
+      <div className={`bg-gray-900 border-2 border-gray-700 p-4 md:p-6 max-w-6xl w-full shadow-2xl ${embedded ? '' : 'h-[100dvh] overflow-y-auto md:h-auto md:mx-4'}`}>
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-white">Metrónomo</h2>

@@ -4,7 +4,6 @@ import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { gsap } from 'gsap'
 // Evita conflicto de casing Draggable.d.ts vs draggable.d.ts en Windows (resolución de tipos de gsap)
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const DraggablePlugin = require('gsap/Draggable.js').default
 if (typeof window !== 'undefined') {
   gsap.registerPlugin(DraggablePlugin)

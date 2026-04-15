@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Estudio — Judith',
+  title: 'Estudio - Judith',
   description: 'Separa y mezcla tus pistas con IA.',
 }
 

@@ -9,9 +9,10 @@ import AdminModalLabel from './AdminModalLabel'
 interface VolumeEQModalProps {
   isOpen: boolean
   onClose: () => void
+  embedded?: boolean
 }
 
-const VolumeEQModal: React.FC<VolumeEQModalProps> = ({ isOpen, onClose }) => {
+const VolumeEQModal: React.FC<VolumeEQModalProps> = ({ isOpen, onClose, embedded = false }) => {
   const [masterVolume, setMasterVolume] = useState(0.8)
   const [isMuted, setIsMuted] = useState(false)
   
@@ -380,8 +381,36 @@ const VolumeEQModal: React.FC<VolumeEQModalProps> = ({ isOpen, onClose }) => {
   }
 
   // Convertir AudioBuffer a MP3 usando lamejs
+  const getBrowserLameEncoder = async () => {
+    const w = window as any
+    if (w.lamejs?.Mp3Encoder) return w.lamejs
+
+    await new Promise<void>((resolve, reject) => {
+      const existing = document.querySelector('script[data-lamejs-cdn="1"]') as HTMLScriptElement | null
+      if (existing) {
+        if ((window as any).lamejs?.Mp3Encoder) return resolve()
+        existing.addEventListener('load', () => resolve(), { once: true })
+        existing.addEventListener('error', () => reject(new Error('Failed to load lamejs CDN script')), { once: true })
+        return
+      }
+
+      const script = document.createElement('script')
+      script.src = 'https://unpkg.com/lamejs@1.2.1/lame.min.js'
+      script.async = true
+      script.dataset.lamejsCdn = '1'
+      script.onload = () => resolve()
+      script.onerror = () => reject(new Error('Failed to load lamejs CDN script'))
+      document.head.appendChild(script)
+    })
+
+    if (!(window as any).lamejs?.Mp3Encoder) {
+      throw new Error('lamejs encoder not available after CDN load')
+    }
+    return (window as any).lamejs
+  }
+
   const audioBufferToMp3 = async (buffer: AudioBuffer): Promise<Blob> => {
-    const lamejs = await import('lamejs')
+    const lamejs: any = await getBrowserLameEncoder()
     
     const channels = buffer.numberOfChannels
     const sampleRate = buffer.sampleRate
@@ -435,7 +464,7 @@ const VolumeEQModal: React.FC<VolumeEQModalProps> = ({ isOpen, onClose }) => {
       mp3Data.push(mp3buf)
     }
     
-    return new Blob(mp3Data as any, { type: 'audio/mp3' })
+    return new Blob(mp3Data as any, { type: 'audio/mpeg' })
   }
 
   // Descargar como MP3
@@ -450,21 +479,46 @@ const VolumeEQModal: React.FC<VolumeEQModalProps> = ({ isOpen, onClose }) => {
       console.log('🎵 Procesando audio para MP3...')
       // Pasar las bandas del EQ Pro si está activado
       const processedBuffer = await processAudioWithEQ(eqProEnabled ? eqProBands : undefined)
-      
-      console.log('🔄 Convirtiendo a MP3...')
-      const mp3Blob = await audioBufferToMp3(processedBuffer)
-      
+
+      console.log('🔄 Exportando MP3 en backend...')
+      const wav = audioBufferToWav(processedBuffer)
+      const wavBlob = new Blob([wav], { type: 'audio/wav' })
+      const tempName = `${audioFile?.name.replace(/\.[^/.]+$/, '') || 'audio'}_eq_temp.wav`
+      const tempFile = new File([wavBlob], tempName, { type: 'audio/wav' })
+
+      const formData = new FormData()
+      formData.append('file', tempFile)
+      formData.append('tempo_percent', '100')
+      formData.append('pitch_semitones', '0')
+      formData.append('export_format', 'mp3')
+      formData.append('filename', audioFile?.name.replace(/\.[^/.]+$/, '') || 'audio_eq')
+
+      const response = await fetch('/api/export-audio', {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null as any)
+        throw new Error(errorData?.details || errorData?.error || `Export failed: ${response.status}`)
+      }
+
+      const mp3Blob = await response.blob()
+      const contentDisposition = response.headers.get('content-disposition') || ''
+      const match = /filename=\"?([^\";]+)\"?/.exec(contentDisposition)
+      const suggested = match?.[1]
+
       const url = URL.createObjectURL(mp3Blob)
       const a = document.createElement('a')
       a.href = url
       const eqMode = eqProEnabled ? 'EQPro' : 'EQBasic'
-      a.download = `${audioFile?.name.replace(/\.[^/.]+$/, '')}_${eqMode}.mp3`
+      a.download = suggested || `${audioFile?.name.replace(/\.[^/.]+$/, '')}_${eqMode}.mp3`
       a.click()
       URL.revokeObjectURL(url)
       console.log('✅ Audio descargado como MP3 (128 kbps) con todos los efectos aplicados')
     } catch (error) {
       console.error('❌ Error:', error)
-      alert('Error al convertir a MP3')
+      alert('Error al convertir a MP3.')
     } finally {
       setIsProcessing(false)
     }
@@ -477,21 +531,23 @@ const VolumeEQModal: React.FC<VolumeEQModalProps> = ({ isOpen, onClose }) => {
     }
   }, [])
 
-  if (!isOpen) return null
+  if (!embedded && !isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[10000]">
-      <AdminModalLabel modalName="VolumeEQModal" />
-      <div className="bg-gray-900 border-2 border-gray-700 p-6 w-auto mx-4 shadow-2xl">
+    <div className={embedded ? "w-full" : "fixed inset-0 z-[10000] flex items-center justify-center bg-black/80"}>
+      {!embedded && <AdminModalLabel modalName="VolumeEQModal" />}
+      <div className={embedded ? "h-[76vh] w-full overflow-y-auto rounded-[2.5rem] border border-white/10 bg-[#0f0f12] p-6 shadow-2xl" : "mx-4 w-auto border-2 border-gray-700 bg-gray-900 p-6 shadow-2xl"}>
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-white">Control de Volumen y Ecualización</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors"
-          >
-            <X className="w-6 h-6" />
-          </button>
+          {!embedded && (
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-white transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          )}
         </div>
 
         {/* Botón de Cargar Audio */}

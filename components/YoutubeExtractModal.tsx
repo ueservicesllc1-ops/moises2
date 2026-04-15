@@ -121,9 +121,9 @@ const YoutubeExtractModal: React.FC<YoutubeExtractModalProps> = ({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[10000]">
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/80 p-2 md:p-4">
       <AdminModalLabel modalName="YoutubeExtractModal" />
-      <div className="bg-gray-900 border-2 border-gray-700 rounded-lg p-8 max-w-2xl w-full mx-4 shadow-2xl">
+      <div className="bg-gray-900 border-2 border-gray-700 rounded-lg p-4 md:p-8 max-w-2xl w-full mx-0 md:mx-4 shadow-2xl h-[100dvh] md:h-auto overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center space-x-3">
@@ -132,7 +132,7 @@ const YoutubeExtractModal: React.FC<YoutubeExtractModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors"
+            className="mobile-touch-target text-gray-400 hover:text-white transition-colors inline-flex items-center justify-center"
           >
             <X className="w-6 h-6" />
           </button>
@@ -149,7 +149,7 @@ const YoutubeExtractModal: React.FC<YoutubeExtractModalProps> = ({
               setError('')
             }}
             placeholder="https://www.youtube.com/watch?v=..."
-            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-red-500 transition-colors"
+            className="mobile-touch-target w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-red-500 transition-colors"
             disabled={isExtracting}
           />
           {error && (
@@ -163,7 +163,7 @@ const YoutubeExtractModal: React.FC<YoutubeExtractModalProps> = ({
             <button
               onClick={handleExtract}
               disabled={isExtracting}
-              className="w-full py-4 font-bold text-base transition-all duration-200 flex items-center justify-center space-x-3 border bg-gradient-to-br from-red-500/40 via-red-600/30 to-red-700/20 hover:from-red-500/50 text-white border-red-400/40 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              className="mobile-touch-target w-full py-4 font-bold text-base transition-all duration-200 flex items-center justify-center space-x-3 border bg-gradient-to-br from-red-500/40 via-red-600/30 to-red-700/20 hover:from-red-500/50 text-white border-red-400/40 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
               style={{
                 backdropFilter: 'blur(10px)',
                 WebkitBackdropFilter: 'blur(10px)',
@@ -216,11 +216,11 @@ const YoutubeExtractModal: React.FC<YoutubeExtractModalProps> = ({
             </div>
 
             {/* Opciones */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Descargar */}
               <button
                 onClick={handleDownload}
-                className="py-6 px-6 font-bold text-base transition-all duration-200 flex flex-col items-center justify-center space-y-3 border bg-gradient-to-br from-green-500/40 via-green-600/30 to-green-700/20 hover:from-green-500/50 text-white border-green-400/40 rounded-lg"
+                className="mobile-touch-target py-6 px-6 font-bold text-base transition-all duration-200 flex flex-col items-center justify-center space-y-3 border bg-gradient-to-br from-green-500/40 via-green-600/30 to-green-700/20 hover:from-green-500/50 text-white border-green-400/40 rounded-lg"
                 style={{
                   backdropFilter: 'blur(10px)',
                   WebkitBackdropFilter: 'blur(10px)',
@@ -240,7 +240,7 @@ const YoutubeExtractModal: React.FC<YoutubeExtractModalProps> = ({
                     onClose()
                   }
                 }}
-                className="py-6 px-6 font-bold text-base transition-all duration-200 flex flex-col items-center justify-center space-y-3 border bg-gradient-to-br from-blue-500/40 via-blue-600/30 to-blue-700/20 hover:from-blue-500/50 text-white border-blue-400/40 rounded-lg"
+                className="mobile-touch-target py-6 px-6 font-bold text-base transition-all duration-200 flex flex-col items-center justify-center space-y-3 border bg-gradient-to-br from-blue-500/40 via-blue-600/30 to-blue-700/20 hover:from-blue-500/50 text-white border-blue-400/40 rounded-lg"
                 style={{
                   backdropFilter: 'blur(10px)',
                   WebkitBackdropFilter: 'blur(10px)',
@@ -260,7 +260,7 @@ const YoutubeExtractModal: React.FC<YoutubeExtractModalProps> = ({
                 setVideoTitle('')
                 setYoutubeUrl('')
               }}
-              className="w-full py-3 font-bold text-sm transition-all duration-200 flex items-center justify-center space-x-2 border bg-gradient-to-br from-gray-700/40 via-gray-800/30 to-gray-900/20 hover:from-gray-700/50 text-white border-gray-600/40 rounded-lg"
+              className="mobile-touch-target w-full py-3 font-bold text-sm transition-all duration-200 flex items-center justify-center space-x-2 border bg-gradient-to-br from-gray-700/40 via-gray-800/30 to-gray-900/20 hover:from-gray-700/50 text-white border-gray-600/40 rounded-lg"
             >
               <Youtube className="w-5 h-5" />
               <span>Extraer Otro Video</span>

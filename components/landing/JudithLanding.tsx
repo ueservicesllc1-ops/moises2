@@ -201,14 +201,14 @@ export default function JudithLanding() {
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('annually')
 
   return (
-    <div className="min-h-screen bg-[#060608] text-white overflow-x-hidden selection:bg-violet-500/30">
+    <div className="min-h-[100dvh] bg-[#060608] text-white overflow-x-hidden selection:bg-violet-500/30">
 
       {/* ══════════════════════ NAVBAR ══════════════════════ */}
       <header
         className="fixed top-0 left-0 right-0 z-50"
         style={{ background: 'rgba(6,6,8,0.6)', backdropFilter: 'blur(24px)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
       >
-        <div className="max-w-7xl mx-auto px-5 md:px-8 h-[68px] flex items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-3 sm:px-5 md:px-8 h-[68px] flex items-center justify-between gap-2 sm:gap-4">
           <Link href="/" className="flex items-center shrink-0">
             <Image
               src="/images/logo.png"
@@ -237,7 +237,7 @@ export default function JudithLanding() {
             </Link>
             <Link
               href="/login"
-              className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-full text-[13px] font-semibold text-white transition-all hover:brightness-110 hover:scale-105"
+              className="mobile-touch-target inline-flex items-center gap-1.5 px-4 sm:px-5 py-2.5 rounded-full text-[13px] font-semibold text-white transition-all hover:brightness-110 hover:scale-105"
               style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', boxShadow: '0 0 20px rgba(124,58,237,0.4)' }}
             >
               Probar gratis <ArrowRight className="w-3.5 h-3.5" />
@@ -248,17 +248,17 @@ export default function JudithLanding() {
 
       <main>
         {/* ══════════════════════ HERO — FULL BANNER ══════════════════════ */}
-        <section className="relative min-h-[80vh] flex flex-col items-center justify-center overflow-hidden">
+        <section className="relative min-h-[88dvh] flex flex-col items-center justify-center overflow-hidden">
 
           {/* ── Banner image background ── */}
           <div className="absolute inset-0 bg-[#060608] overflow-hidden">
             {/* Contenedor de la imagen de la tablet */}
-            <div className="absolute top-1/2 -translate-y-1/2 right-0 w-full lg:w-[75%] xl:w-[70%] h-[120vh]">
+            <div className="absolute top-1/2 -translate-y-1/2 right-0 w-full lg:w-[75%] xl:w-[70%] h-[100vh] md:h-[120vh]">
               <Image
                 src="/putobanner.png"
                 alt="Judith Studio — AI audio separation"
                 fill
-                className="object-contain object-center lg:object-right-center scale-[1.10] origin-center -translate-x-[5%]"
+                className="object-contain object-center lg:object-right-center scale-[1.02] md:scale-[1.10] origin-center -translate-x-[1%] md:-translate-x-[5%]"
                 priority
                 quality={95}
               />
@@ -281,9 +281,9 @@ export default function JudithLanding() {
           </div>
 
           {/* ── Hero content ── */}
-          <div className="relative z-10 w-full max-w-7xl mx-auto px-4 md:px-6 lg:px-8 pt-24 pb-16 flex flex-col items-start text-left min-h-[75vh] justify-center">
+          <div className="relative z-10 w-full max-w-7xl mx-auto px-4 md:px-6 lg:px-8 pt-20 md:pt-24 pb-16 flex flex-col items-start text-left min-h-[75vh] justify-center">
             {/* Texto más a la izquierda sin márgenes extra para empujar a la derecha */}
-            <div className="max-w-[440px] flex flex-col items-start">
+            <div className="max-w-[440px] flex flex-col items-start pr-2 sm:pr-0">
               {/* pill badge */}
               <div
                 className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] sm:text-[11px] font-semibold text-violet-300 border border-violet-500/30 mb-5"
@@ -294,7 +294,7 @@ export default function JudithLanding() {
               </div>
 
               {/* Letras más pequeñas */}
-              <h1 className="text-3xl sm:text-4xl md:text-5xl font-black tracking-tight leading-[1.08] mb-4 drop-shadow-[0_4px_32px_rgba(0,0,0,0.8)]">
+              <h1 className="text-[30px] sm:text-4xl md:text-5xl font-black tracking-tight leading-[1.08] mb-4 drop-shadow-[0_4px_32px_rgba(0,0,0,0.8)]">
                 <span className="text-white">Separa tu música.</span>
                 <br />
                 <span
@@ -309,11 +309,11 @@ export default function JudithLanding() {
                 Extrae voces, batería, bajo y más de cualquier canción con IA. Ajusta tempo y tono sin perder calidad. Listo para el estudio y el escenario.
               </p>
 
-              <div className="flex flex-wrap items-center justify-start gap-3 mb-8">
+              <div className="flex w-full flex-col sm:w-auto sm:flex-row flex-wrap items-stretch sm:items-center justify-start gap-3 mb-8">
                 <Link
                   href="/login"
                   id="hero-cta-primary"
-                  className="inline-flex items-center gap-2 px-8 py-3.5 rounded-full text-[15px] font-bold text-white transition-all hover:scale-105 hover:brightness-110 active:scale-95"
+                  className="mobile-touch-target inline-flex items-center justify-center gap-2 px-6 sm:px-8 py-3.5 rounded-full text-[15px] font-bold text-white transition-all hover:scale-105 hover:brightness-110 active:scale-95"
                   style={{
                     background: 'linear-gradient(135deg,#7c3aed 0%,#4f46e5 50%,#06b6d4 100%)',
                     boxShadow: '0 0 50px rgba(124,58,237,0.5), inset 0 1px 0 rgba(255,255,255,0.15)',
@@ -324,7 +324,7 @@ export default function JudithLanding() {
                 <button
                   type="button"
                   id="hero-cta-demo"
-                  className="inline-flex items-center gap-2 px-8 py-3.5 rounded-full text-[15px] font-semibold text-white transition-all hover:scale-105 active:scale-95"
+                  className="mobile-touch-target inline-flex items-center justify-center gap-2 px-6 sm:px-8 py-3.5 rounded-full text-[15px] font-semibold text-white transition-all hover:scale-105 active:scale-95"
                   style={{
                     background: 'rgba(255,255,255,0.08)',
                     backdropFilter: 'blur(16px)',
@@ -556,7 +556,7 @@ export default function JudithLanding() {
                     ))}
                   </div>
 
-                  <p className="text-[15px] text-zinc-300 leading-relaxed mb-6">"{text}"</p>
+                  <p className="text-[15px] text-zinc-300 leading-relaxed mb-6">&quot;{text}&quot;</p>
 
                   <div className="flex items-center gap-3">
                     <div

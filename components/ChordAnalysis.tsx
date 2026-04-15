@@ -1747,11 +1747,11 @@ return (
                         const next2Chord = activeIndex < chords.length - 2 ? chords[activeIndex + 2] : null;
                         
                         return (
-                          <div className="w-full h-full flex items-center justify-center gap-12 px-4">
+                          <div className="w-full h-full flex items-center justify-center gap-2 px-2 md:gap-4 md:px-4 overflow-hidden">
                             {/* Acorde -2 (más lejano izquierda) */}
-                            <div className="flex flex-col items-center opacity-25">
+                            <div className="flex w-[14%] min-w-0 flex-col items-center opacity-25">
                               <div 
-                                className="text-6xl font-bold text-green-400 font-mono"
+                                className="w-full truncate text-center font-mono font-bold leading-none text-green-400 text-[clamp(0.9rem,2.3vw,2rem)]"
                                 style={{
                                   textShadow: '0 0 6px rgba(34, 197, 94, 0.2)'
                                 }}
@@ -1761,9 +1761,9 @@ return (
                             </div>
                             
                             {/* Acorde -1 (izquierda) */}
-                            <div className="flex flex-col items-center opacity-50">
+                            <div className="flex w-[18%] min-w-0 flex-col items-center opacity-50">
                               <div 
-                                className="text-7xl font-bold text-green-400 font-mono"
+                                className="w-full truncate text-center font-mono font-bold leading-none text-green-400 text-[clamp(1rem,2.9vw,2.6rem)]"
                                 style={{
                                   textShadow: '0 0 10px rgba(34, 197, 94, 0.4)'
                                 }}
@@ -1773,9 +1773,9 @@ return (
                             </div>
                             
                             {/* Acorde actual (centro) */}
-                            <div className="flex flex-col items-center">
+                            <div className="flex w-[36%] min-w-0 flex-col items-center">
                               <div 
-                                className="text-9xl font-bold text-green-400 font-mono"
+                                className="w-full truncate text-center font-mono font-bold leading-none text-green-400 text-[clamp(1.5rem,5.6vw,4.9rem)]"
                                 style={{
                                   textShadow: '0 0 20px rgba(34, 197, 94, 0.8), 0 0 10px rgba(34, 197, 94, 0.5)'
                                 }}
@@ -1794,9 +1794,9 @@ return (
                             </div>
                             
                             {/* Acorde +1 (derecha) */}
-                            <div className="flex flex-col items-center opacity-50">
+                            <div className="flex w-[18%] min-w-0 flex-col items-center opacity-50">
                               <div 
-                                className="text-7xl font-bold text-green-400 font-mono"
+                                className="w-full truncate text-center font-mono font-bold leading-none text-green-400 text-[clamp(1rem,2.9vw,2.6rem)]"
                                 style={{
                                   textShadow: '0 0 10px rgba(34, 197, 94, 0.4)'
                                 }}
@@ -1806,9 +1806,9 @@ return (
                             </div>
                             
                             {/* Acorde +2 (más lejano derecha) */}
-                            <div className="flex flex-col items-center opacity-25">
+                            <div className="flex w-[14%] min-w-0 flex-col items-center opacity-25">
                               <div 
-                                className="text-6xl font-bold text-green-400 font-mono"
+                                className="w-full truncate text-center font-mono font-bold leading-none text-green-400 text-[clamp(0.9rem,2.3vw,2rem)]"
                                 style={{
                                   textShadow: '0 0 6px rgba(34, 197, 94, 0.2)'
                                 }}
@@ -2136,7 +2136,7 @@ return (
             {filteredChords.length === 0 && chords.length === 0 && !isAnalyzing && (
               <div className="text-center text-gray-400 py-8">
                 <Music className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>Haz clic en "Analizar" para detectar los acordes</p>
+                <p>Haz clic en &quot;Analizar&quot; para detectar los acordes</p>
                 <p className="text-sm mt-2">Esta función identifica automáticamente los acordes de la canción</p>
               </div>
             )}

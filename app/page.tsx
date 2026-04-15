@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 
 export default function HomePage() {
   return (
-    <div className={`${inter.className} antialiased text-white bg-[#0a0a0a]`}>
+    <div className={`${inter.className} min-h-[100dvh] antialiased text-white bg-[#0a0a0a]`}>
       <JudithLanding />
     </div>
   )

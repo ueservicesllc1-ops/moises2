@@ -46,6 +46,33 @@ class SeparationCacheDB(Base):
 def init_db():
     """Initialize database tables"""
     Base.metadata.create_all(bind=engine)
+    _ensure_sqlite_task_columns()
+
+
+def _ensure_sqlite_task_columns():
+    """
+    Backward-compatible migration for legacy SQLite databases.
+    Adds missing columns used by current backend code paths.
+    """
+    if not DATABASE_URL.startswith("sqlite"):
+        return
+
+    required_columns = {
+        "bpm": "INTEGER",
+        "key": "VARCHAR",
+        "duration": "FLOAT",
+        "chords": "TEXT",
+    }
+
+    with engine.connect() as conn:
+        existing = {
+            row[1]
+            for row in conn.exec_driver_sql("PRAGMA table_info(tasks)").fetchall()
+        }
+        for col_name, col_type in required_columns.items():
+            if col_name not in existing:
+                conn.exec_driver_sql(f"ALTER TABLE tasks ADD COLUMN {col_name} {col_type}")
+        conn.commit()
 
 def get_db():
     """Get database session"""

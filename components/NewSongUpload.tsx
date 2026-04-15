@@ -466,9 +466,9 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 md:p-4">
       <AdminModalLabel modalName="NewSongUpload" />
-      <div className="bg-dark-800 rounded-lg p-6 w-full max-w-md mx-4">
+      <div className="bg-dark-800 rounded-lg p-4 md:p-6 w-full max-w-md mx-0 md:mx-4 h-[100dvh] md:h-auto overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <div className="flex items-center space-x-2">
             <Music className="h-6 w-6 text-primary-400" />
@@ -477,7 +477,7 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
           <button
             onClick={handleClose}
             disabled={isUploading}
-            className="text-gray-400 hover:text-white text-2xl disabled:opacity-50"
+            className="mobile-touch-target text-gray-400 hover:text-white text-2xl disabled:opacity-50 inline-flex items-center justify-center"
           >
             <X className="h-6 w-6" />
           </button>
@@ -508,7 +508,7 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
               accept=".wav,.mp3,.m4a,.aac,.ogg"
               onChange={handleFileSelect}
               disabled={isUploading}
-              className="w-full bg-gray-700 text-white p-3 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none disabled:opacity-50"
+              className="mobile-touch-target w-full bg-gray-700 text-white p-3 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none disabled:opacity-50"
             />
             {selectedFile && (
               <div className="mt-2 space-y-1">
@@ -543,7 +543,7 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
           <button
             onClick={handleUploadSong}
             disabled={!songTitle || !artistName || !selectedFile}
-            className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2"
+            className="mobile-touch-target w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2"
           >
             <Music className="h-4 w-4" />
             <span>🤖 Procesar con IA</span>
@@ -552,16 +552,16 @@ const NewSongUpload: React.FC<NewSongUploadProps> = ({ isOpen, onClose, onUpload
           <div className="text-xs text-gray-400 text-center space-y-1">
             <div>🤖 El archivo se procesará con IA para separar las pistas automáticamente</div>
             <div className="text-gray-500">
-              💡 <strong>Tip:</strong> Nombra tu archivo como "Artista - Título" para auto-cargar los datos
-              <br />Ejemplos: "Juan Pérez - Mi Canción.mp3" o "Banda - Rock Song (2024).wav"
+              💡 <strong>Tip:</strong> Nombra tu archivo como &quot;Artista - Título&quot; para auto-cargar los datos
+              <br />Ejemplos: &quot;Juan Pérez - Mi Canción.mp3&quot; o &quot;Banda - Rock Song (2024).wav&quot;
             </div>
           </div>
         </div>
 
         {/* Progress Bar for Separation */}
         {isProcessingSeparation && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-60">
-            <div className="bg-dark-800 rounded-lg p-6 w-full max-w-md mx-4">
+          <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 p-2 md:p-4">
+            <div className="bg-dark-800 rounded-lg p-5 md:p-6 w-full max-w-md mx-0 md:mx-4">
               <div className="text-center">
                 <div className="flex items-center justify-center mb-4">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-400"></div>

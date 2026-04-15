@@ -273,25 +273,25 @@ const ProfessionalDAW: React.FC<ProfessionalDAWProps> = ({ isOpen, onClose, song
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex flex-col">
+    <div className="fixed inset-0 z-50 flex min-h-[100dvh] flex-col bg-black/90">
       {/* Header */}
-      <div className="bg-gray-900 text-white p-4 flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <h2 className="text-xl font-bold">Professional DAW</h2>
-          <div className="text-sm text-gray-300">
+      <div className="bg-gray-900 text-white p-3 sm:p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center space-x-3 sm:space-x-4">
+          <h2 className="text-base sm:text-xl font-bold">Professional DAW</h2>
+          <div className="text-xs sm:text-sm text-gray-300 truncate">
             {songData.title} - {songData.artist}
           </div>
         </div>
         <button
           onClick={onClose}
-          className="text-gray-400 hover:text-white text-2xl"
+          className="mobile-touch-target text-gray-400 hover:text-white text-2xl inline-flex items-center justify-center self-end sm:self-auto"
         >
           ×
         </button>
       </div>
 
       {/* Área principal de tracks (60% de la pantalla) */}
-      <div className="flex-1 bg-gray-800 p-4 overflow-y-auto">
+      <div className="safe-bottom flex-1 bg-gray-800 p-3 sm:p-4 overflow-y-auto">
         <div className="space-y-4">
           {tracks.map((track) => (
             <div key={track.id} className="bg-gray-700 rounded-lg p-4">
@@ -355,17 +355,17 @@ const ProfessionalDAW: React.FC<ProfessionalDAWProps> = ({ isOpen, onClose, song
       </div>
 
       {/* Controles de transporte */}
-      <div className="bg-gray-900 p-4 flex items-center justify-center space-x-4">
+      <div className="safe-bottom bg-gray-900 p-3 sm:p-4 flex flex-wrap items-center justify-center gap-3 sm:gap-4">
         <button
           onClick={handleStop}
-          className="p-2 bg-gray-700 hover:bg-gray-600 rounded text-white text-sm"
+          className="mobile-touch-target p-2 bg-gray-700 hover:bg-gray-600 rounded text-white text-sm"
         >
           STOP
         </button>
         <button
           onClick={handlePlayPause}
           disabled={!allTracksLoaded && !isPlaying}
-          className={`p-3 rounded text-white font-bold transition-all duration-200 ${
+          className={`mobile-touch-target p-3 rounded text-white font-bold transition-all duration-200 ${
             !allTracksLoaded && !isPlaying 
               ? 'bg-gray-600 cursor-not-allowed opacity-50' 
               : 'bg-blue-600 hover:bg-blue-700'

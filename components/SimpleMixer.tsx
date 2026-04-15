@@ -433,23 +433,23 @@ const SimpleMixer: React.FC<SimpleMixerProps> = ({ isOpen, onClose, songData }) 
   if (!isOpen || !songData) return null;
 
   return (
-    <div className="fixed inset-0 bg-gray-950 flex flex-col">
+    <div className="fixed inset-0 flex min-h-[100dvh] flex-col bg-gray-950">
       <AdminModalLabel modalName="SimpleMixer" />
       {/* Top Bar - Studio One Style */}
-      <div className="bg-gray-900 border-b border-gray-700 px-4 py-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
+      <div className="bg-gray-900 border-b border-gray-700 px-3 sm:px-4 py-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center space-x-3 sm:space-x-4">
             <button
               onClick={onClose}
-              className="flex items-center space-x-2 text-gray-300 hover:text-white transition-colors"
+              className="mobile-touch-target inline-flex items-center space-x-2 text-gray-300 hover:text-white transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
-              <span className="text-sm">Back</span>
+              <span className="hidden sm:inline text-sm">Back</span>
             </button>
-            <div className="text-white text-lg font-medium">Moises Clone - {songData.title}</div>
+            <div className="text-white text-sm sm:text-lg font-medium truncate">Moises Clone - {songData.title}</div>
           </div>
           <div className="flex items-center space-x-3">
-            <div className="text-gray-400 text-sm">
+            <div className="text-gray-400 text-xs sm:text-sm">
               <span className="text-blue-400">{songData.bpm}</span> BPM | {songData.timeSignature} | Key: {songData.key}
             </div>
           </div>
@@ -457,44 +457,44 @@ const SimpleMixer: React.FC<SimpleMixerProps> = ({ isOpen, onClose, songData }) 
       </div>
 
       {/* Transport Controls - Studio One Style */}
-      <div className="bg-gray-900 border-b border-gray-700 px-4 py-3">
-        <div className="flex items-center space-x-4">
-          <button className="bg-gray-700 hover:bg-gray-600 text-white p-2 rounded">
+      <div className="bg-gray-900 border-b border-gray-700 px-3 sm:px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+          <button className="mobile-touch-target bg-gray-700 hover:bg-gray-600 text-white p-2 rounded">
             <SkipBack className="h-4 w-4" />
           </button>
-          <button className="bg-gray-700 hover:bg-gray-600 text-white p-2 rounded">
+          <button className="mobile-touch-target bg-gray-700 hover:bg-gray-600 text-white p-2 rounded">
             <SkipBack className="h-4 w-4" />
           </button>
           <button 
             onClick={togglePlay}
-            className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded"
+            className="mobile-touch-target bg-blue-600 hover:bg-blue-700 text-white p-2 rounded"
           >
             {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
           </button>
-          <button className="bg-gray-700 hover:bg-gray-600 text-white p-2 rounded">
+          <button className="mobile-touch-target bg-gray-700 hover:bg-gray-600 text-white p-2 rounded">
             <SkipForward className="h-4 w-4" />
           </button>
-          <button className="bg-gray-700 hover:bg-gray-600 text-white p-2 rounded">
+          <button className="mobile-touch-target bg-gray-700 hover:bg-gray-600 text-white p-2 rounded">
             <SkipForward className="h-4 w-4" />
           </button>
           <button 
             onClick={stopAll}
-            className="bg-red-600 hover:bg-red-700 text-white p-2 rounded"
+            className="mobile-touch-target bg-red-600 hover:bg-red-700 text-white p-2 rounded"
           >
             <RotateCcw className="h-4 w-4" />
           </button>
           <div className="w-px h-6 bg-gray-600"></div>
-          <button className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm">
+          <button className="mobile-touch-target bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm">
             Loop
           </button>
-          <button className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm">
+          <button className="mobile-touch-target bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm">
             Metronome
           </button>
         </div>
       </div>
 
       {/* Main Mixer Area - Studio One Style */}
-      <div className="flex-1 flex flex-col bg-gray-950">
+      <div className="safe-bottom flex-1 flex flex-col bg-gray-950 overflow-hidden">
         {/* Channel Labels Row */}
         <div className="bg-gray-900 border-b border-gray-700 px-4 py-2">
           <div className="flex items-center space-x-6">

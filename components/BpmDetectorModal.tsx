@@ -7,9 +7,10 @@ import AdminModalLabel from './AdminModalLabel'
 interface BpmDetectorModalProps {
   isOpen: boolean
   onClose: () => void
+  embedded?: boolean
 }
 
-const BpmDetectorModal: React.FC<BpmDetectorModalProps> = ({ isOpen, onClose }) => {
+const BpmDetectorModal: React.FC<BpmDetectorModalProps> = ({ isOpen, onClose, embedded = false }) => {
   const [audioFile, setAudioFile] = useState<File | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [detectedBpm, setDetectedBpm] = useState<number | null>(null)
@@ -72,7 +73,7 @@ const BpmDetectorModal: React.FC<BpmDetectorModalProps> = ({ isOpen, onClose }) 
     while (finalBpm < 60) finalBpm *= 2
     while (finalBpm > 180) finalBpm /= 2
     
-    return Math.round(finalBpm * 10) / 10 // Redondear a 1 decimal
+    return Math.round(finalBpm) // BPM entero para uso musical práctico
   }
 
   // Cargar y analizar archivo
@@ -115,12 +116,12 @@ const BpmDetectorModal: React.FC<BpmDetectorModalProps> = ({ isOpen, onClose }) 
     }
   }
 
-  if (!isOpen) return null
+  if (!embedded && !isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[10000]">
-      <AdminModalLabel modalName="BpmDetectorModal" />
-      <div className="bg-gray-900 border-2 border-gray-700 rounded-lg p-8 max-w-2xl w-full mx-4 shadow-2xl">
+    <div className={embedded ? '' : 'fixed inset-0 z-[10000] flex items-center justify-center bg-black/80 p-2 md:p-4'}>
+      {!embedded && <AdminModalLabel modalName="BpmDetectorModal" />}
+      <div className={`bg-gray-900 border-2 border-gray-700 rounded-lg p-5 md:p-8 max-w-2xl w-full shadow-2xl ${embedded ? '' : 'h-[100dvh] overflow-y-auto md:h-auto md:mx-4'}`}>
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-white">Detector de BPM</h2>
@@ -209,7 +210,7 @@ const BpmDetectorModal: React.FC<BpmDetectorModalProps> = ({ isOpen, onClose }) 
                         letterSpacing: '0.1em'
                       }}
                     >
-                      {detectedBpm.toFixed(1)}
+                      {detectedBpm}
                     </div>
                   </div>
                 </div>

@@ -44,7 +44,7 @@ const SuccessWavePopup: React.FC<SuccessWavePopupProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fadeIn">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fadeIn p-2 md:p-4">
       {/* Ondas de fondo animadas */}
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute inset-0 opacity-30">
@@ -88,7 +88,7 @@ const SuccessWavePopup: React.FC<SuccessWavePopupProps> = ({
       </div>
 
       {/* Contenedor principal */}
-      <div className="relative bg-gradient-to-br from-gray-900 via-gray-800 to-black border-2 border-cyan-500 rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl shadow-cyan-500/50 animate-scaleIn">
+      <div className="relative h-[100dvh] md:h-auto overflow-y-auto bg-gradient-to-br from-gray-900 via-gray-800 to-black border-2 border-cyan-500 rounded-2xl p-5 md:p-8 max-w-md w-full mx-0 md:mx-4 shadow-2xl shadow-cyan-500/50 animate-scaleIn">
         
         {/* Efecto de brillo en el borde */}
         <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500 opacity-20 blur-xl animate-pulse" />
@@ -115,13 +115,13 @@ const SuccessWavePopup: React.FC<SuccessWavePopupProps> = ({
 
           {/* Texto principal */}
           <div className="space-y-3">
-            <h2 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 animate-shimmer">
+            <h2 className="text-2xl md:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 animate-shimmer">
               ¡Tus Tracks Están Listos!
             </h2>
             
             <div className="flex items-center justify-center space-x-2">
               <Music className="h-5 w-5 text-cyan-400 animate-pulse" />
-              <p className="text-xl text-gray-300 font-semibold">
+              <p className="text-base md:text-xl text-gray-300 font-semibold">
                 Eres un Pro, Bro
               </p>
               <Music className="h-5 w-5 text-cyan-400 animate-pulse" />
@@ -152,7 +152,7 @@ const SuccessWavePopup: React.FC<SuccessWavePopupProps> = ({
           {/* Botón OK */}
           <button
             onClick={onClose}
-            className="w-full bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500 hover:from-cyan-600 hover:via-blue-600 hover:to-purple-600 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 shadow-lg shadow-cyan-500/50"
+            className="mobile-touch-target w-full bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500 hover:from-cyan-600 hover:via-blue-600 hover:to-purple-600 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 shadow-lg shadow-cyan-500/50"
           >
             ¡Genial! 🎵
           </button>

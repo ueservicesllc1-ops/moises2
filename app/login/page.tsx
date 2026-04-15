@@ -71,7 +71,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+    <div className="min-h-[100dvh] bg-gray-900 flex items-center justify-center p-3 sm:p-4">
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
@@ -86,7 +86,7 @@ export default function LoginPage() {
         </div>
 
         {/* Auth Form */}
-        <div className="bg-gray-800 rounded-xl p-8 shadow-2xl">
+        <div className="bg-gray-800 rounded-xl p-5 shadow-2xl sm:p-8">
           <div className="text-center mb-6">
             <h2 className="text-2xl font-bold text-white mb-2">
               {isLogin ? 'Iniciar Sesión' : 'Crear Cuenta'}
@@ -111,7 +111,7 @@ export default function LoginPage() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-gray-700 text-white pl-10 pr-4 py-3 rounded-lg border border-gray-600 focus:border-teal-500 focus:outline-none"
+                  className="mobile-touch-target w-full bg-gray-700 text-white pl-10 pr-4 py-3 rounded-lg border border-gray-600 focus:border-teal-500 focus:outline-none"
                   placeholder="tu@email.com"
                   required
                 />
@@ -129,14 +129,14 @@ export default function LoginPage() {
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-gray-700 text-white pl-10 pr-12 py-3 rounded-lg border border-gray-600 focus:border-teal-500 focus:outline-none"
+                  className="mobile-touch-target w-full bg-gray-700 text-white pl-10 pr-12 py-3 rounded-lg border border-gray-600 focus:border-teal-500 focus:outline-none"
                   placeholder="••••••••"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white"
+                  className="mobile-touch-target absolute right-3 top-1/2 inline-flex -translate-y-1/2 items-center justify-center text-gray-400 hover:text-white"
                 >
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
@@ -167,7 +167,7 @@ export default function LoginPage() {
             <button
               onClick={handleGoogleSignIn}
               disabled={loading}
-              className="w-full mt-4 bg-white hover:bg-gray-50 disabled:bg-gray-300 text-gray-900 font-medium py-3 rounded-lg flex items-center justify-center space-x-2 transition-colors"
+              className="mobile-touch-target mt-4 w-full bg-white hover:bg-gray-50 disabled:bg-gray-300 text-gray-900 font-medium py-3 rounded-lg flex items-center justify-center space-x-2 transition-colors"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>

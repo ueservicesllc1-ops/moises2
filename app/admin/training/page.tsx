@@ -292,25 +292,25 @@ export default function AITrainingFactory() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="min-h-[100dvh] bg-gray-900 text-white">
       {/* Header */}
-      <div className="h-16 bg-gray-800 border-b border-gray-700 flex items-center px-6 sticky top-0 z-10">
+      <div className="min-h-[64px] bg-gray-800 border-b border-gray-700 flex items-center px-3 sm:px-6 sticky top-0 z-10">
         <button
           onClick={() => router.push('/admin')}
-          className="flex items-center space-x-2 text-gray-300 hover:text-white transition-colors"
+          className="mobile-touch-target flex items-center space-x-2 text-gray-300 hover:text-white transition-colors"
         >
           <ArrowLeft className="w-5 h-5" />
-          <span className="font-medium">Volver a Admin</span>
+          <span className="hidden sm:inline font-medium">Volver a Admin</span>
         </button>
-        <div className="mx-auto flex items-center space-x-3">
+        <div className="mx-auto flex items-center space-x-2 sm:space-x-3">
           <Box className="w-6 h-6 text-red-500" />
-          <h1 className="text-xl font-bold text-white">Fábrica de Inteligencia Artificial (Dataset)</h1>
+          <h1 className="text-sm sm:text-xl font-bold text-white">Fábrica de Inteligencia Artificial (Dataset)</h1>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 p-3 sm:p-6">
         {/* Columna Izquierda: Lista de Pistas en Zion */}
-        <div className="lg:col-span-2 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden flex flex-col h-[calc(100vh-120px)]">
+        <div className="lg:col-span-2 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden flex flex-col h-[calc(100dvh-108px)] md:h-[calc(100vh-120px)]">
           <div className="p-4 border-b border-gray-700 bg-gray-800/80 backdrop-blur-sm flex justify-between items-center">
             <div>
               <h2 className="font-bold text-lg flex items-center gap-2">
@@ -319,18 +319,18 @@ export default function AITrainingFactory() {
               </h2>
               <p className="text-xs text-gray-400 mt-1">Selecciona canciones crudas para procesarlas hacia la IA.</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={handleStartTraining}
                 disabled={trainingBusy}
-                className={`text-sm px-3 py-1 rounded text-white flex items-center gap-1 ${
+                className={`mobile-touch-target text-sm px-3 py-1 rounded text-white flex items-center gap-1 ${
                   trainingBusy ? 'bg-indigo-900/70 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500'
                 }`}
               >
                 <Rocket className="w-4 h-4" />
                 {trainingBusy ? 'Entrenando...' : 'Entrenar IA'}
               </button>
-              <button onClick={fetchZionSongs} className="text-sm px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300">
+              <button onClick={fetchZionSongs} className="mobile-touch-target text-sm px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300">
                 Refrescar
               </button>
             </div>
@@ -404,7 +404,7 @@ export default function AITrainingFactory() {
         </div>
 
         {/* Columna Derecha: El Panel de Curación Mágico */}
-        <div className="bg-gray-800 rounded-xl border border-gray-700 flex flex-col h-[calc(100vh-120px)] overflow-hidden">
+        <div className="bg-gray-800 rounded-xl border border-gray-700 flex flex-col h-[calc(100dvh-108px)] md:h-[calc(100vh-120px)] overflow-hidden">
           {selectedSong ? (
             <div className="flex flex-col h-full">
               <div className="p-6 border-b border-gray-700 bg-gradient-to-br from-gray-800 to-gray-900">
@@ -426,7 +426,7 @@ export default function AITrainingFactory() {
                     <AlertTriangle className="w-6 h-6 text-orange-500 flex-shrink-0" />
                     <div className="text-sm text-orange-200">
                       <p className="font-bold text-orange-400 mb-1">¡Cuidado con el Click Track!</p>
-                      Asegúrate de NO incluir la pista del metrónomo o la guía vocal en el grupo "Otros", o la Inteligencia Artificial se arruinará aprendiendo a generar clics.
+                      Asegúrate de NO incluir la pista del metrónomo o la guía vocal en el grupo &quot;Otros&quot;, o la Inteligencia Artificial se arruinará aprendiendo a generar clics.
                     </div>
                   </div>
                 </div>
