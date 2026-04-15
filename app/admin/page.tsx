@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Image as ImageIcon, Users, Crown } from 'lucide-react'
+import { ArrowLeft, Image as ImageIcon, Users, Crown, Eye } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { db } from '@/lib/firebase'
 import { collection, getDocs, doc, updateDoc, query, orderBy } from 'firebase/firestore'
@@ -17,12 +17,21 @@ interface User {
   createdAt: string
 }
 
+interface VisitStats {
+  total_visits: number
+  today_visits: number
+  unique_visitors: number
+  today_unique_visitors: number
+}
+
 export default function AdminPage() {
   const router = useRouter()
   const [showCoverAdmin, setShowCoverAdmin] = useState(false)
   const [showUsersAdmin, setShowUsersAdmin] = useState(false)
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(false)
+  const [visitStats, setVisitStats] = useState<VisitStats | null>(null)
+  const [visitLoading, setVisitLoading] = useState(false)
 
   const coverList = [
     { id: 1, name: 'Extraer de YouTube', file: 'cover1.jpg', active: true },
@@ -44,6 +53,10 @@ export default function AdminPage() {
       loadUsers()
     }
   }, [showUsersAdmin])
+
+  useEffect(() => {
+    loadVisitStats()
+  }, [])
 
   const loadUsers = async () => {
     setLoading(true)
@@ -80,6 +93,22 @@ export default function AdminPage() {
       }
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadVisitStats() {
+    setVisitLoading(true)
+    try {
+      const res = await fetch('/api/visits/stats', { cache: 'no-store' })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data?.error || 'No se pudieron cargar visitas')
+      }
+      setVisitStats(data as VisitStats)
+    } catch (error) {
+      console.error('Error cargando visitas:', error)
+    } finally {
+      setVisitLoading(false)
     }
   }
 
@@ -130,6 +159,22 @@ export default function AdminPage() {
           /* Dashboard Principal */
           <div className="max-w-4xl mx-auto">
             <h2 className="text-2xl font-bold text-white mb-8">Opciones de Administración</h2>
+
+            <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Visitas totales</p>
+                <p className="text-2xl font-bold text-white inline-flex items-center gap-2">
+                  <Eye className="w-5 h-5 text-cyan-400" />
+                  {visitLoading ? '...' : (visitStats?.total_visits ?? 0).toLocaleString()}
+                </p>
+              </div>
+              <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Visitas hoy</p>
+                <p className="text-2xl font-bold text-cyan-400">
+                  {visitLoading ? '...' : (visitStats?.today_visits ?? 0).toLocaleString()}
+                </p>
+              </div>
+            </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Botón Administrar Cover */}
@@ -351,7 +396,7 @@ export default function AdminPage() {
             </div>
 
             {/* Estadísticas */}
-            <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-5 gap-6">
               <div className="bg-gray-800 border border-gray-700 rounded-lg p-6">
                 <h3 className="text-gray-400 text-sm mb-2">Total Usuarios</h3>
                 <p className="text-3xl font-bold text-white">{users.length}</p>
@@ -363,6 +408,14 @@ export default function AdminPage() {
               <div className="bg-gray-800 border border-gray-700 rounded-lg p-6">
                 <h3 className="text-gray-400 text-sm mb-2">Usuarios Free</h3>
                 <p className="text-3xl font-bold text-gray-400">{users.filter(u => !u.isPremium).length}</p>
+              </div>
+              <div className="bg-gray-800 border border-gray-700 rounded-lg p-6">
+                <h3 className="text-gray-400 text-sm mb-2">Visitas Totales</h3>
+                <p className="text-3xl font-bold text-cyan-400">{visitLoading ? '...' : (visitStats?.total_visits ?? 0).toLocaleString()}</p>
+              </div>
+              <div className="bg-gray-800 border border-gray-700 rounded-lg p-6">
+                <h3 className="text-gray-400 text-sm mb-2">Visitas Hoy</h3>
+                <p className="text-3xl font-bold text-cyan-300">{visitLoading ? '...' : (visitStats?.today_visits ?? 0).toLocaleString()}</p>
               </div>
             </div>
           </div>

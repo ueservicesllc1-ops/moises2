@@ -17,7 +17,7 @@ import json
 from audio_processor_real import audio_processor
 from chord_analyzer import ChordAnalyzer
 from models import ProcessingTask, TaskStatus
-from database import get_db, init_db, TaskDB, SessionLocal, SeparationCacheDB
+from database import get_db, init_db, TaskDB, SessionLocal, SeparationCacheDB, VisitDB
 from datetime import datetime
 from datetime import timedelta
 
@@ -152,6 +152,85 @@ async def health_check():
         "message": "Backend is running",
         "dependencies": DEPENDENCY_STATUS,
     }
+
+
+def _extract_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+@app.post("/api/visits/track")
+async def track_visit(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    path = str(payload.get("path") or "/")
+    visitor_id = str(payload.get("visitorId") or "").strip()
+    user_agent = request.headers.get("user-agent", "")[:300]
+    ip = _extract_client_ip(request)
+
+    if not visitor_id:
+        visitor_id = hashlib.sha256(f"{ip}:{user_agent}".encode("utf-8")).hexdigest()[:32]
+
+    # Evita inflar contador por refresh rápidos del mismo usuario en la misma ruta.
+    dedupe_since = datetime.utcnow() - timedelta(minutes=30)
+    db = SessionLocal()
+    try:
+        already_tracked = (
+            db.query(VisitDB)
+            .filter(
+                VisitDB.path == path,
+                VisitDB.visitor_id == visitor_id,
+                VisitDB.created_at >= dedupe_since,
+            )
+            .first()
+        )
+        if not already_tracked:
+            db.add(
+                VisitDB(
+                    path=path,
+                    visitor_id=visitor_id,
+                    user_agent=user_agent,
+                    ip=ip,
+                )
+            )
+            db.commit()
+    finally:
+        db.close()
+
+    return {"ok": True}
+
+
+@app.get("/api/visits/stats")
+async def get_visit_stats():
+    now = datetime.utcnow()
+    day_start = datetime(now.year, now.month, now.day)
+
+    db = SessionLocal()
+    try:
+        all_visits = db.query(VisitDB).all()
+        today_visits = [v for v in all_visits if v.created_at and v.created_at >= day_start]
+
+        total_visits = len(all_visits)
+        today_count = len(today_visits)
+        unique_visitors = len({v.visitor_id for v in all_visits if v.visitor_id})
+        today_unique_visitors = len({v.visitor_id for v in today_visits if v.visitor_id})
+
+        return {
+            "total_visits": total_visits,
+            "today_visits": today_count,
+            "unique_visitors": unique_visitors,
+            "today_unique_visitors": today_unique_visitors,
+            "timestamp": now.isoformat(),
+        }
+    finally:
+        db.close()
 
 @app.get("/api/health/deep")
 async def health_check_deep():

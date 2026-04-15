@@ -43,6 +43,17 @@ class SeparationCacheDB(Base):
     model_version = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
+class VisitDB(Base):
+    __tablename__ = "visits"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    path = Column(String, index=True, default="/")
+    visitor_id = Column(String, index=True)
+    user_agent = Column(String)
+    ip = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 def init_db():
     """Initialize database tables"""
     Base.metadata.create_all(bind=engine)
