@@ -14,18 +14,32 @@ export function isPlaceholderBackendUrl(url: string | undefined | null): boolean
   return PLACEHOLDER_RE.test(String(url).trim())
 }
 
-/** Solo servidor Node: nunca exponer esto al bundle cliente como URL absoluta por defecto. */
+const seen = new Set<string>()
+
+function pushBase(list: string[], raw?: string | null) {
+  const s = typeof raw === 'string' ? raw.trim().replace(/\/$/, '') : ''
+  if (!s || isPlaceholderBackendUrl(s) || seen.has(s)) return
+  seen.add(s)
+  list.push(s)
+}
+
+/**
+ * Bases a probar en orden (proxy servidor → Python).
+ * - Servicios separados en Railway: pon BACKEND_URL o BACKEND_PUBLIC_URL con la URL https del API.
+ * - Monolith (Docker start:full): suele funcionar http://127.0.0.1:8000 al final de la lista.
+ */
+export function getServerBackendBaseUrls(): string[] {
+  seen.clear()
+  const list: string[] = []
+  pushBase(list, process.env.INTERNAL_BACKEND_URL)
+  pushBase(list, process.env.BACKEND_URL)
+  pushBase(list, process.env.BACKEND_PUBLIC_URL)
+  pushBase(list, process.env.NEXT_PUBLIC_API_URL)
+  pushBase(list, 'http://127.0.0.1:8000')
+  return list.length ? list : ['http://127.0.0.1:8000']
+}
+
+/** Primera base (compat con rutas /api que solo hacen un fetch). */
 export function getServerBackendUrl(): string {
-  const candidates = [
-    process.env.INTERNAL_BACKEND_URL,
-    process.env.BACKEND_URL,
-    process.env.NEXT_PUBLIC_API_URL,
-  ]
-  for (const c of candidates) {
-    const s = typeof c === 'string' ? c.trim() : ''
-    if (s && !isPlaceholderBackendUrl(s)) {
-      return s.replace(/\/$/, '')
-    }
-  }
-  return 'http://127.0.0.1:8000'
+  return getServerBackendBaseUrls()[0]
 }
