@@ -62,9 +62,13 @@ def separate_audio(
     # =========================================================================
 
     def normalize_audio(stem_audio: np.ndarray, peak_target: float = 0.98) -> np.ndarray:
-        """Normaliza el audio al nivel de pico objetivo."""
+        """
+        Normalización conservadora:
+        - NO empuja todo stem al mismo pico (eso altera balance tímbrico).
+        - Solo atenúa si hay riesgo de clipping.
+        """
         max_val = float(np.max(np.abs(stem_audio))) if stem_audio.size else 0.0
-        if max_val > 1e-8:
+        if max_val > peak_target and max_val > 1e-8:
             stem_audio = stem_audio / max_val * peak_target
         return stem_audio
 
@@ -171,13 +175,14 @@ def separate_audio(
             elif profile_name == "hifi":
                 primary_model_name = "mdx_extra"     # Pura de Estudio para el que Paga
             else:  # pro_balanced
-                primary_model_name = "mdx_extra_q"   # Gratis/Normal Quantizado
+                # Pro balanced prioriza calidad tímbrica sobre ahorro agresivo.
+                primary_model_name = "mdx_extra"
 
             # En MDX, overlap de 0 y shift de 0/1 es el estándar para q. Para HiFi inyectamos precision.
             profile_settings = {
                 "fast":        {"shifts": 0, "overlap": 0.0},
-                "pro_balanced": {"shifts": 1, "overlap": 0.1},
-                "hifi":        {"shifts": 2, "overlap": 0.25}, # Justificación del Premium MDX
+                "pro_balanced": {"shifts": 2, "overlap": 0.20},
+                "hifi":        {"shifts": 3, "overlap": 0.30},
             }
 
         cfg = profile_settings.get(profile_name, profile_settings["pro_balanced"])
@@ -229,11 +234,11 @@ def separate_audio(
         # Normal/Fast: 16-bit PCM (compatible, tamaño razonable)
         if profile_name == "hifi":
             output_subtype = "PCM_24"   # 24-bit WAV
-            noise_gate_ratio = 0.003    # Puerta de ruido MUY suave para no comerse las colas de reverb
+            noise_gate_ratio = 0.0      # Desactivado: estaba matando detalles (metales/reverb) al entrar voz
             peak_target = 0.95          
         else:
             output_subtype = "PCM_16"   # 16-bit WAV estándar
-            noise_gate_ratio = 0.008    # Gate normal
+            noise_gate_ratio = 0.0      # Desactivado por preservación instrumental
             peak_target = 0.98
 
         stems_bytes = {}
@@ -250,14 +255,15 @@ def separate_audio(
             stem_audio = stem_real.cpu().numpy().T  # [samples, channels]
 
             # Post-procesamiento
-            stem_audio = reduce_low_level_noise(stem_audio, threshold_ratio=noise_gate_ratio)
+            if noise_gate_ratio > 0:
+                stem_audio = reduce_low_level_noise(stem_audio, threshold_ratio=noise_gate_ratio)
             stem_audio = normalize_audio(stem_audio, peak_target=peak_target)
 
             buf = io.BytesIO()
             sf.write(buf, stem_audio, model.samplerate, format='WAV', subtype=output_subtype)
             stems_bytes[stem_name] = buf.getvalue()
 
-            print(f"[MODAL GPU]   ✓ {stem_name} → {len(stems_bytes[stem_name]) // 1024}KB ({output_subtype})")
+            print(f"[MODAL GPU]   OK {stem_name} -> {len(stems_bytes[stem_name]) // 1024}KB ({output_subtype})")
 
         # =====================================================================
         # CONSTRUIR INSTRUMENTAL (suma de stems no-vocales)
@@ -279,13 +285,14 @@ def separate_audio(
             instrumental_real = instrumental_std * (ref_std + 1e-8) + ref_mean
             instrumental_audio = instrumental_real.cpu().numpy().T
 
-            instrumental_audio = reduce_low_level_noise(instrumental_audio, threshold_ratio=noise_gate_ratio)
+            if noise_gate_ratio > 0:
+                instrumental_audio = reduce_low_level_noise(instrumental_audio, threshold_ratio=noise_gate_ratio)
             instrumental_audio = normalize_audio(instrumental_audio, peak_target=peak_target)
 
             buf = io.BytesIO()
             sf.write(buf, instrumental_audio, model.samplerate, format='WAV', subtype=output_subtype)
             stems_bytes["instrumental"] = buf.getvalue()
-            print(f"[MODAL GPU]   ✓ instrumental → {len(stems_bytes['instrumental']) // 1024}KB ({output_subtype})")
+            print(f"[MODAL GPU]   OK instrumental -> {len(stems_bytes['instrumental']) // 1024}KB ({output_subtype})")
 
         print(f"[MODAL GPU] ✅ Finalizado con éxito. {len(stems_bytes)} stems exportados.")
         return stems_bytes
