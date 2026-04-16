@@ -1,34 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerBackendUrl } from '@/lib/backendUrl'
-const MAX_RETRIES = 5
-const RETRY_DELAY_MS = 2000
-
-async function fetchWithRetry(url: string, options: RequestInit, retries = MAX_RETRIES): Promise<Response> {
-  try {
-    const res = await fetch(url, { ...options, signal: AbortSignal.timeout(30000) })
-    return res
-  } catch (err: any) {
-    const isConnectionError = err?.cause?.code === 'ECONNREFUSED' || err?.message?.includes('fetch failed')
-    if (isConnectionError && retries > 0) {
-      console.log(`⏳ Python backend not ready, retrying in ${RETRY_DELAY_MS}ms... (${retries} left)`)
-      await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
-      return fetchWithRetry(url, options, retries - 1)
-    }
-    throw err
-  }
-}
+import { postFormDataToBackend } from '@/lib/backendUrl'
 
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
-    const BACKEND_URL = getServerBackendUrl()
 
-    console.log('🔗 Forwarding to Python backend:', `${BACKEND_URL}/separate`)
+    console.log('🔗 Forwarding /separate to Python (multi-base, ver getServerBackendBaseUrls)')
 
-    const response = await fetchWithRetry(`${BACKEND_URL}/separate`, {
-      method: 'POST',
-      body: formData,
-    })
+    const response = await postFormDataToBackend('/separate', formData, { timeoutMs: 300_000 })
 
     if (!response.ok) {
       const errorText = await response.text()

@@ -69,6 +69,19 @@ function isLikelyThumbnailUrl(s: string | undefined): boolean {
   )
 }
 
+/** crossOrigin debe ir antes de src; en blob:/data: no usar (evita errores con Web Audio / MediaElementSource). */
+function createConfiguredStemAudio(trackUrl: string): HTMLAudioElement {
+  const audio = new Audio()
+  if (trackUrl.startsWith('blob:') || trackUrl.startsWith('data:')) {
+    audio.removeAttribute('crossOrigin')
+  } else {
+    audio.crossOrigin = 'anonymous'
+  }
+  audio.src = trackUrl
+  audio.preload = 'auto'
+  return audio
+}
+
 function TrackWavePlaceholder() {
   const bars = [10, 18, 12, 22, 14, 20, 9, 16]
   return (
@@ -430,44 +443,61 @@ export default function Home() {
     }
   }, [user, loading, router])
 
-  // Inicializar Web Audio API con filtros EQ
+  // Inicializar Web Audio API con filtros EQ; reconectar stems al cambiar de canción
   useEffect(() => {
-    if (Object.keys(audioElements).length > 0 && !audioContextRef.current) {
-      // Crear AudioContext
+    const list = Object.values(audioElements)
+    if (list.length === 0) return
+
+    if (!audioContextRef.current) {
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
-      
-      // Crear filtros de EQ
+
       bassFilterRef.current = audioContextRef.current.createBiquadFilter()
       bassFilterRef.current.type = 'lowshelf'
-      bassFilterRef.current.frequency.value = 200 // Hz
-      
+      bassFilterRef.current.frequency.value = 200
+
       midFilterRef.current = audioContextRef.current.createBiquadFilter()
       midFilterRef.current.type = 'peaking'
-      midFilterRef.current.frequency.value = 1000 // Hz
+      midFilterRef.current.frequency.value = 1000
       midFilterRef.current.Q.value = 1
-      
+
       trebleFilterRef.current = audioContextRef.current.createBiquadFilter()
       trebleFilterRef.current.type = 'highshelf'
-      trebleFilterRef.current.frequency.value = 3000 // Hz
-      
+      trebleFilterRef.current.frequency.value = 3000
+
       eqGainNodeRef.current = audioContextRef.current.createGain()
-      
-      // Conectar filtros EQ en cadena al destino
+
       bassFilterRef.current.connect(midFilterRef.current)
       midFilterRef.current.connect(trebleFilterRef.current)
       trebleFilterRef.current.connect(eqGainNodeRef.current)
       eqGainNodeRef.current.connect(audioContextRef.current.destination)
-      
-      // Conectar todos los audioElements al primer filtro
-      Object.values(audioElements).forEach(audio => {
-        if (!audioSourcesRef.current.has(audio)) {
-          const source = audioContextRef.current!.createMediaElementSource(audio)
-          audioSourcesRef.current.set(audio, source)
-          source.connect(bassFilterRef.current!)
-        }
-      })
-      
+
       console.log('Web Audio API inicializado con filtros EQ')
+    }
+
+    const ctx = audioContextRef.current
+    const bass = bassFilterRef.current!
+
+    audioSourcesRef.current.forEach((node, el) => {
+      if (!list.includes(el)) {
+        try {
+          node.disconnect()
+        } catch {
+          /* ignore */
+        }
+        audioSourcesRef.current.delete(el)
+      }
+    })
+
+    for (const audio of list) {
+      if (!audioSourcesRef.current.has(audio)) {
+        try {
+          const source = ctx.createMediaElementSource(audio)
+          audioSourcesRef.current.set(audio, source)
+          source.connect(bass)
+        } catch (e) {
+          console.warn('[WebAudio] createMediaElementSource:', e)
+        }
+      }
     }
   }, [audioElements])
 
@@ -716,8 +746,7 @@ export default function Home() {
       
       if (!audio) {
         // Crear un nuevo elemento de audio
-        audio = new Audio(audioUrl);
-        audio.crossOrigin = 'anonymous';
+        audio = createConfiguredStemAudio(audioUrl);
         
         // Event listener para cuando termine la canción original
         audio.addEventListener('ended', () => {
@@ -1333,9 +1362,7 @@ export default function Home() {
             newWaveforms[trackKey] = waveformCache[cacheKeyUrl]
             
             // Crear elemento audio desde cache
-            const audio = new Audio(trackUrl)
-            audio.crossOrigin = 'anonymous'
-            audio.preload = 'auto'
+            const audio = createConfiguredStemAudio(trackUrl)
             
             
             // Event listener para cuando termine la canción
@@ -1382,10 +1409,7 @@ export default function Home() {
           newLoadingStates[trackKey] = 'loading'
           setTrackLoadingStates(prev => ({ ...prev, [trackKey]: 'loading' }))
           
-          const audio = new Audio(trackUrl)
-          audio.crossOrigin = 'anonymous'
-          audio.preload = 'auto'
-          
+          const audio = createConfiguredStemAudio(trackUrl)
           
           // Agregar logging para diagnóstico
           audio.addEventListener('loadedmetadata', () => {

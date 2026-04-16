@@ -43,3 +43,41 @@ export function getServerBackendBaseUrls(): string[] {
 export function getServerBackendUrl(): string {
   return getServerBackendBaseUrls()[0]
 }
+
+export function cloneFormData(fd: FormData): FormData {
+  const out = new FormData()
+  fd.forEach((value, key) => {
+    out.append(key, value)
+  })
+  return out
+}
+
+/**
+ * POST multipart al FastAPI probando varias bases (mismo orden que getServerBackendBaseUrls).
+ */
+export async function postFormDataToBackend(
+  path: string,
+  formData: FormData,
+  options?: { timeoutMs?: number }
+): Promise<Response> {
+  const bases = getServerBackendBaseUrls()
+  const timeoutMs = options?.timeoutMs ?? 300_000
+  const p = path.startsWith('/') ? path : `/${path}`
+  let lastErr: unknown
+  for (const base of bases) {
+    const body = cloneFormData(formData)
+    const url = `${base}${p}`
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        body,
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+      return res
+    } catch (e) {
+      lastErr = e
+      console.warn('[backend] POST failed, next base:', url, e)
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+}

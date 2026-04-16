@@ -163,18 +163,17 @@ export async function getCurrentMonthProcessedSeconds(userId: string): Promise<n
   try {
     const now = new Date()
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-    const monthStartIso = monthStart.toISOString()
 
-    const q = query(
-      collection(db, 'songs'),
-      where('userId', '==', userId),
-      where('uploadedAt', '>=', monthStartIso)
-    )
+    // Solo equality en userId evita índice compuesto (userId + rango uploadedAt).
+    const q = query(collection(db, 'songs'), where('userId', '==', userId))
     const querySnapshot = await getDocs(q)
 
     let totalSeconds = 0
     querySnapshot.forEach((songDoc) => {
-      const data = songDoc.data() as { durationSeconds?: number }
+      const data = songDoc.data() as { durationSeconds?: number; uploadedAt?: string }
+      if (!data.uploadedAt) return
+      const t = new Date(data.uploadedAt).getTime()
+      if (!Number.isFinite(t) || t < monthStart.getTime()) return
       const seconds = typeof data.durationSeconds === 'number' ? data.durationSeconds : 0
       totalSeconds += Math.max(0, seconds)
     })
