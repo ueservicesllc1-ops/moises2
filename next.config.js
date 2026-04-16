@@ -1,4 +1,9 @@
 /** @type {import('next').NextConfig} */
+const backendBase = (process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000').replace(
+  /\/$/,
+  ''
+)
+
 const nextConfig = {
   webpack: (config, { dev, isServer }) => {
     // Evita eval-source-map en cliente: bundles enormes (p. ej. Firebase) en una sola línea
@@ -15,12 +20,9 @@ const nextConfig = {
     return [
       {
         source: '/api/upload/:path*',
-        destination: `http://127.0.0.1:8000/api/upload/:path*`,
+        destination: `${backendBase}/api/upload/:path*`,
       },
-      {
-        source: '/backend-audio/:path*',
-        destination: `http://127.0.0.1:8000/audio/:path*`,
-      }
+      // /backend-audio → app/backend-audio/[...path]/route.ts (usa BACKEND_URL en runtime)
     ]
   },
 }
