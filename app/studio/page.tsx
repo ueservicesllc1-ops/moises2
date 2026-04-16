@@ -46,7 +46,6 @@ import MetronomeModal from '@/components/MetronomeModal'
 import VolumeEQModal from '@/components/VolumeEQModal'
 import BpmDetectorModal from '@/components/BpmDetectorModal'
 import ChordAnalysisModal from '@/components/ChordAnalysisModal'
-import HeroPopup from '@/components/HeroPopup'
 import { resolvePlanIdFromUserData, type PlanId } from '@/lib/pricing'
 import {
   stemPathFromB2PublicUrl,
@@ -116,7 +115,6 @@ export default function Home() {
   const [showMoisesStyleModal, setShowMoisesStyleModal] = useState(false)
   const [activeStudioView, setActiveStudioView] = useState<'tracks' | 'youtube' | 'chords' | 'metronome' | 'bpm' | 'tempo' | 'eq'>('tracks')
   const [showEQInMixer, setShowEQInMixer] = useState(false)
-  const [showHeroPopup, setShowHeroPopup] = useState(false)
   const [showUpgradeModal, setShowUpgradeModal] = useState(false)
   const [upgradeBilling, setUpgradeBilling] = useState<'monthly' | 'yearly'>('yearly')
   const [songs, setSongs] = useState<Song[]>([])
@@ -389,18 +387,6 @@ export default function Home() {
     }
   }, [])
 
-  // Mostrar popup hero cada vez que el usuario entra al dashboard
-  useEffect(() => {
-    if (user && !loading) {
-      // Mostrar popup después de un pequeño delay para que la página cargue completamente
-      const timer = setTimeout(() => {
-        setShowHeroPopup(true)
-      }, 1500)
-      
-      return () => clearTimeout(timer)
-    }
-  }, [user, loading])
-  
 
 
   // Cerrar dropdown al hacer clic fuera
@@ -2574,7 +2560,7 @@ export default function Home() {
                             </div>
 
                             {/* Botones M y S */}
-                            <div className="flex space-x-1 self-end">
+                            <div className="flex space-x-0.5 self-end">
                               <button
                                 type="button"
                                 onClick={(e) => {
@@ -2582,7 +2568,7 @@ export default function Home() {
                                   e.stopPropagation();
                                   toggleTrackMute(trackKey);
                                 }}
-                                className={`h-6 w-6 rounded flex items-center justify-center transition-all text-[10px] font-bold ${
+                                className={`h-5 w-5 rounded flex items-center justify-center transition-all text-[9px] font-bold ${
                                   trackMutedStates[trackKey] 
                                     ? 'bg-yellow-500 text-gray-900' 
                                     : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
@@ -2602,7 +2588,7 @@ export default function Home() {
                                   e.stopPropagation();
                                   toggleTrackSolo(trackKey);
                                 }}
-                                className={`h-6 w-6 rounded flex items-center justify-center transition-all text-[10px] font-bold ${
+                                className={`h-5 w-5 rounded flex items-center justify-center transition-all text-[9px] font-bold ${
                                   trackSoloStates[trackKey] 
                                     ? 'bg-yellow-500 text-gray-900' 
                                     : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
@@ -3135,12 +3121,6 @@ export default function Home() {
           </div>
         </div>
       )}
-
-      {/* Hero Popup */}
-      <HeroPopup 
-        isOpen={showHeroPopup}
-        onClose={() => setShowHeroPopup(false)}
-      />
 
     </div>
   )
