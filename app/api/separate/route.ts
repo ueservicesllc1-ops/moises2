@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const BACKEND_URL = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
+import { getServerBackendUrl } from '@/lib/backendUrl'
 const MAX_RETRIES = 5
 const RETRY_DELAY_MS = 2000
 
@@ -22,6 +21,7 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = MAX_R
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
+    const BACKEND_URL = getServerBackendUrl()
 
     console.log('🔗 Forwarding to Python backend:', `${BACKEND_URL}/separate`)
 

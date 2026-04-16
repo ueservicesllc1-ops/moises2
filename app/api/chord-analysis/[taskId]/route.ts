@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const BACKEND_URL = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
+import { getServerBackendUrl } from '@/lib/backendUrl'
 
 export async function GET(
   request: NextRequest,
@@ -8,9 +7,10 @@ export async function GET(
 ) {
   try {
     const { taskId } = params
-    
+    const BACKEND_URL = getServerBackendUrl()
+
     console.log('🔍 Checking chord analysis status proxy for task:', taskId)
-    
+
     const response = await fetch(`${BACKEND_URL}/api/chord-analysis/${taskId}`, {
       cache: 'no-store',
       headers: {

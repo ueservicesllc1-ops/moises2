@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
+import { getServerBackendUrl } from '@/lib/backendUrl'
 
 export const dynamic = 'force-dynamic'
 
 /** Siempre HTTP 200: el propio Next responde; el backend Python es opcional en local. */
 export async function GET() {
-  const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
+  const backendUrl = getServerBackendUrl()
   const base = {
     status: 'ok' as const,
     service: 'moises-clone-frontend',

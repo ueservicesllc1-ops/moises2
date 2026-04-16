@@ -1,11 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-function backendBase(): string {
-  return (process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000').replace(
-    /\/$/,
-    ''
-  )
-}
+import { getServerBackendUrl } from '@/lib/backendUrl'
 
 /**
  * Proxy a FastAPI GET /audio/{path}. Los rewrites en next.config a 127.0.0.1 fallan en producción (500).
@@ -16,7 +10,7 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
     return NextResponse.json({ error: 'Missing path' }, { status: 400 })
   }
 
-  const url = `${backendBase()}/audio/${path}`
+  const url = `${getServerBackendUrl()}/audio/${path}`
   const range = request.headers.get('range')
   const upstreamHeaders: HeadersInit = {}
   if (range) (upstreamHeaders as Record<string, string>)['Range'] = range

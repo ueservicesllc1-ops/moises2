@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const BACKEND_URL = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
+import { getServerBackendUrl } from '@/lib/backendUrl'
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}))
+    const BACKEND_URL = getServerBackendUrl()
     const response = await fetch(`${BACKEND_URL}/api/visits/track`, {
       method: 'POST',
       headers: {

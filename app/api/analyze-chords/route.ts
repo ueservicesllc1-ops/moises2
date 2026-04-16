@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const BACKEND_URL = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
+import { getServerBackendUrl } from '@/lib/backendUrl'
 
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
-    
+    const BACKEND_URL = getServerBackendUrl()
+
     console.log('🔗 Proxying Chord Analysis upload to:', `${BACKEND_URL}/api/analyze-chords`)
-    
+
     const response = await fetch(`${BACKEND_URL}/api/analyze-chords`, {
       method: 'POST',
       body: formData,

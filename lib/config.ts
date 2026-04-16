@@ -2,10 +2,12 @@
  * Configuración de URLs del backend
  */
 
+import { isPlaceholderBackendUrl } from './backendUrl'
+
 export const getBackendUrl = (): string => {
-  // Si está definida la variable de entorno, usarla
-  if (process.env.NEXT_PUBLIC_API_URL) {
-    return process.env.NEXT_PUBLIC_API_URL
+  const pub = process.env.NEXT_PUBLIC_API_URL?.trim()
+  if (pub && !isPlaceholderBackendUrl(pub)) {
+    return pub.replace(/\/$/, '')
   }
   
   // Detección automática basada en el dominio actual (solo en cliente)

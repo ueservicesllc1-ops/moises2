@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
+import { getServerBackendUrl } from '@/lib/backendUrl'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-const BACKEND_URL = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
-
 export async function GET() {
   try {
+    const BACKEND_URL = getServerBackendUrl()
     const response = await fetch(`${BACKEND_URL}/api/visits/stats`, {
       cache: 'no-store',
       headers: {
