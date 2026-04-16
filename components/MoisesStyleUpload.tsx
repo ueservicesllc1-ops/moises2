@@ -14,7 +14,7 @@ import { getBackendUrl } from '../lib/config';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { PLAN_LIMITS, resolvePlanIdFromUserData } from '@/lib/pricing';
-;
+import { stemPathFromB2PublicUrl, toBackendAudioProxyUrl } from '@/lib/audioProxy';
 import SuccessWavePopup from './SuccessWavePopup';
 
 interface MoisesStyleUploadProps {
@@ -555,20 +555,21 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
             const prefetchPromises = stemUrls.map(async (url: any) => {
               if (typeof url !== 'string') return;
               
-              // Siempre usar el proxy del backend → el backend tiene fallback local en disco
-              // (uploads/{task_id}/demucs_output/) antes de intentar B2
+              // Proxy Next → FastAPI o B2; si el proxy falla (p. ej. Python caído en Railway), B2 directo
               let proxyUrl = url;
-              const b2Regex = /^https?:\/\/(?:s3\.us-east-005|f005)\.backblazeb2\.com\/(?:file\/)?(?:moises2|Multitrack)\/audio\/(.+)$/i;
-              const match = url.match(b2Regex);
-              if (match && match[1]) {
-                proxyUrl = `/backend-audio/${match[1]}`;
+              const stem = stemPathFromB2PublicUrl(url);
+              if (stem) {
+                proxyUrl = toBackendAudioProxyUrl(stem);
               }
               
               // Revisar si ya está en caché
               const cachedResponse = await cache.match(proxyUrl);
               if (!cachedResponse) {
                  console.log(`[PREFETCH] 👻 Descargando stem al disco: ${proxyUrl.split('/').pop()}`);
-                 const response = await fetch(proxyUrl);
+                 let response = await fetch(proxyUrl);
+                 if (!response.ok && stem) {
+                   response = await fetch(url);
+                 }
                  if (response.ok) {
                     await cache.put(proxyUrl, response.clone());
                  }

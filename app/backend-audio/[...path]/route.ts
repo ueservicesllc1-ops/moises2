@@ -2,6 +2,43 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerBackendBaseUrls } from '@/lib/backendUrl'
 
 /**
+ * Misma convención que backend/main.py serve_audio → B2 público (sin credenciales).
+ */
+function buildB2PublicFileUrl(path: string): string {
+  const bucket = process.env.B2_BUCKET_NAME?.trim() || 'Multitrack'
+  const b2Key = path.startsWith('audio/') ? path : `audio/${path}`
+  const keyParts = b2Key.split('/').map(encodeURIComponent).join('/')
+  return `https://f005.backblazeb2.com/file/${encodeURIComponent(bucket)}/${keyParts}`
+}
+
+async function fetchB2Direct(
+  path: string,
+  range: string | null
+): Promise<Response | null> {
+  const url = buildB2PublicFileUrl(path)
+  const headers: HeadersInit = {}
+  if (range) (headers as Record<string, string>)['Range'] = range
+  try {
+    return await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(120_000),
+      cache: 'no-store',
+    })
+  } catch (e) {
+    console.warn('[backend-audio] B2 directo falló:', url, e)
+    return null
+  }
+}
+
+function nextResponseFromUpstream(res: Response, passHeaders: string[]): NextResponse {
+  const outHeaders = new Headers()
+  res.headers.forEach((v, k) => {
+    if (passHeaders.includes(k.toLowerCase())) outHeaders.set(k, v)
+  })
+  return new NextResponse(res.body, { status: res.status, headers: outHeaders })
+}
+
+/**
  * Proxy a FastAPI GET /audio/{path}.
  * Prueba varias bases (env + 127.0.0.1) y reintenta si Python aún no escucha (race al arrancar).
  */
@@ -65,24 +102,35 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
       })
 
       if (!res.ok) {
+        const b2 = await fetchB2Direct(path, range)
+        if (b2?.ok) {
+          console.warn('[backend-audio] upstream HTTP', res.status, '→ B2 público OK')
+          return nextResponseFromUpstream(b2, passHeaders)
+        }
         const text = await res.text().catch(() => '')
         console.error('[backend-audio]', res.status, url, text.slice(0, 200))
         return new NextResponse(text || res.statusText, { status: res.status, headers: outHeaders })
       }
 
-      return new NextResponse(res.body, { status: res.status, headers: outHeaders })
+      return nextResponseFromUpstream(res, passHeaders)
     } catch (e) {
       lastError = e
       console.warn('[backend-audio] base failed, next:', base, e)
     }
   }
 
-  console.error('[backend-audio] all bases failed:', lastError)
+  const b2 = await fetchB2Direct(path, range)
+  if (b2?.ok) {
+    console.warn('[backend-audio] ningún backend alcanzable → sirviendo desde B2 público')
+    return nextResponseFromUpstream(b2, passHeaders)
+  }
+
+  console.error('[backend-audio] all bases failed:', lastError, 'B2:', b2?.status)
   return NextResponse.json(
     {
-      error: 'No se pudo obtener el audio del backend',
+      error: 'No se pudo obtener el audio del backend ni desde B2',
       hint:
-        'Si Python está en otro servicio Railway, define BACKEND_URL o BACKEND_PUBLIC_URL con la URL https del API. Monolith: revisa logs (¿Python en :8000?).',
+        'Monolith: revisa que Python escuche en :8000. Servicios separados: BACKEND_URL o BACKEND_PUBLIC_URL. Comprueba B2_BUCKET_NAME y que el archivo exista en el bucket.',
     },
     { status: 502 }
   )

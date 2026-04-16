@@ -48,6 +48,11 @@ import BpmDetectorModal from '@/components/BpmDetectorModal'
 import ChordAnalysisModal from '@/components/ChordAnalysisModal'
 import HeroPopup from '@/components/HeroPopup'
 import { resolvePlanIdFromUserData, type PlanId } from '@/lib/pricing'
+import {
+  stemPathFromB2PublicUrl,
+  toBackendAudioProxyUrl,
+  getCachedAudioBlobUrl,
+} from '@/lib/audioProxy'
 
 // import ChordAnalyzer from '@/components/ChordAnalyzer'
 import { getUserSongs, subscribeToUserSongs, deleteSong, Song } from '@/lib/firestore'
@@ -1253,13 +1258,10 @@ export default function Home() {
       return url.replace(`http://${oldIp}:8000/audio`, '/backend-audio');
     }
     
-    // Convertir URLs de B2 al proxy de Next.js → backend
-    // El backend ahora sirve primero desde disco local (uploads/{task_id}/demucs_output/)
-    // y solo hace proxy a B2 si no existe en disco. Esto funciona tanto en dev como en prod.
-    const b2Regex = /^https?:\/\/(?:s3\.us-east-005|f005)\.backblazeb2\.com\/(?:file\/)?(?:moises2|Multitrack)\/audio\/(.+)$/i;
-    const match = url.match(b2Regex);
-    if (match && match[1]) {
-      const proxyUrl = `/backend-audio/${match[1]}`;
+    // B2 → /backend-audio (Next puede reenviar a FastAPI o a B2 público si Python no está)
+    const stem = stemPathFromB2PublicUrl(url);
+    if (stem) {
+      const proxyUrl = toBackendAudioProxyUrl(stem);
       console.log(`[PROXY] B2 URL → backend proxy: ${proxyUrl}`);
       return proxyUrl;
     }
@@ -1268,28 +1270,8 @@ export default function Home() {
   };
 
   // ==========================================
-  // SUPER CACHE: Almacena Audio Files en Disco (IndexedDB / Cache API)
+  // SUPER CACHE: ver lib/audioProxy.ts (fallback B2 si el proxy devuelve error)
   // ==========================================
-  const getCachedAudioBlobUrl = async (url: string): Promise<string> => {
-    try {
-      const cache = await caches.open('moises-audio-cache');
-      let response = await cache.match(url);
-      if (!response) {
-        console.log(`[AUDIO CACHE MISS] Network Load para ${url}...`);
-        response = await fetch(url);
-        if (response.ok) {
-           await cache.put(url, response.clone());
-        }
-      } else {
-        console.log(`[AUDIO CACHE HIT] Sirviendo ${url} al 100% desde DISCO duro local 🚀!`);
-      }
-      const blob = await response.blob();
-      return URL.createObjectURL(blob);
-    } catch (e) {
-      console.warn('Error usando Cache de Disco Local, cayendo a red', e);
-      return url;
-    }
-  };
 
   const loadAudioFiles = async (song: Song) => {
     if (!song.stems) return
@@ -1335,11 +1317,14 @@ export default function Home() {
       console.log(' Loading song tracks:', song.stems)
       for (let [trackKey, originalTrackUrl] of Object.entries(song.stems)) {
         const cacheKeyUrl = getProxyUrl(originalTrackUrl);
+        const stemSrc =
+          typeof originalTrackUrl === 'string' ? originalTrackUrl : ''
+        const b2Fallback = stemSrc && stemPathFromB2PublicUrl(stemSrc) ? stemSrc : undefined
         if (cacheKeyUrl) {
           console.log(` Loading audio for ${trackKey}: ${cacheKeyUrl}`)
           
           // Magia de Disco: Descargar o recuperar del disco local y convertir en Blob Instantáneo
-          const trackUrl = await getCachedAudioBlobUrl(cacheKeyUrl);
+          const trackUrl = await getCachedAudioBlobUrl(cacheKeyUrl, b2Fallback);
           
           // 1. PRIMERO: Buscar en cache localStorage
           if (waveformCache[cacheKeyUrl]) {
