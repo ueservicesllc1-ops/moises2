@@ -5,9 +5,18 @@ import os
 from datetime import datetime
 
 # Database configuration
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./moises_clone.db")
+# Railway puede inyectar DATABASE_URL="" (string vacío), lo cual rompe create_engine.
+# Si no hay URL válida, usamos SQLite local por defecto.
+raw_database_url = os.getenv("DATABASE_URL")
+DATABASE_URL = raw_database_url.strip() if isinstance(raw_database_url, str) else ""
+if not DATABASE_URL:
+    DATABASE_URL = "sqlite:///./moises_clone.db"
 
-engine = create_engine(DATABASE_URL)
+engine_kwargs = {}
+if DATABASE_URL.startswith("sqlite"):
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

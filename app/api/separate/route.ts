@@ -5,7 +5,7 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
 
-    console.log('🔗 Forwarding /separate to Python (multi-base, ver getServerBackendBaseUrls)')
+    console.log('🔗 POST /separate →', process.env.BACKEND_FETCH_MODE === 'remote' ? 'FastAPI remoto' : 'FastAPI local (getServerBackendUrl)')
 
     const response = await postFormDataToBackend('/separate', formData, { timeoutMs: 300_000 })
 

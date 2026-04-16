@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerBackendBaseUrls } from '@/lib/backendUrl'
+import { getServerBackendUrl } from '@/lib/backendUrl'
 
 /**
  * Misma convención que backend/main.py serve_audio → B2 público (sin credenciales).
@@ -88,44 +88,42 @@ export async function GET(request: NextRequest, { params }: { params: { path: st
     'etag',
   ]
 
-  const bases = getServerBackendBaseUrls()
+  const base = getServerBackendUrl()
+  const url = `${base}/audio/${path}`
   let lastError: unknown
 
-  for (const base of bases) {
-    const url = `${base}/audio/${path}`
-    try {
-      const res = await fetchUpstream(url, upstreamHeaders, 4)
+  try {
+    const res = await fetchUpstream(url, upstreamHeaders, 4)
 
-      const outHeaders = new Headers()
-      res.headers.forEach((v, k) => {
-        if (passHeaders.includes(k.toLowerCase())) outHeaders.set(k, v)
-      })
+    const outHeaders = new Headers()
+    res.headers.forEach((v, k) => {
+      if (passHeaders.includes(k.toLowerCase())) outHeaders.set(k, v)
+    })
 
-      if (!res.ok) {
-        const b2 = await fetchB2Direct(path, range)
-        if (b2?.ok) {
-          console.warn('[backend-audio] upstream HTTP', res.status, '→ B2 público OK')
-          return nextResponseFromUpstream(b2, passHeaders)
-        }
-        const text = await res.text().catch(() => '')
-        console.error('[backend-audio]', res.status, url, text.slice(0, 200))
-        return new NextResponse(text || res.statusText, { status: res.status, headers: outHeaders })
+    if (!res.ok) {
+      const b2 = await fetchB2Direct(path, range)
+      if (b2?.ok) {
+        console.warn('[backend-audio] upstream HTTP', res.status, '→ B2 público OK')
+        return nextResponseFromUpstream(b2, passHeaders)
       }
-
-      return nextResponseFromUpstream(res, passHeaders)
-    } catch (e) {
-      lastError = e
-      console.warn('[backend-audio] base failed, next:', base, e)
+      const text = await res.text().catch(() => '')
+      console.error('[backend-audio]', res.status, url, text.slice(0, 200))
+      return new NextResponse(text || res.statusText, { status: res.status, headers: outHeaders })
     }
+
+    return nextResponseFromUpstream(res, passHeaders)
+  } catch (e) {
+    lastError = e
+    console.warn('[backend-audio] upstream falló:', url, e)
   }
 
   const b2 = await fetchB2Direct(path, range)
   if (b2?.ok) {
-    console.warn('[backend-audio] ningún backend alcanzable → sirviendo desde B2 público')
+    console.warn('[backend-audio] FastAPI no alcanzable → sirviendo desde B2 público')
     return nextResponseFromUpstream(b2, passHeaders)
   }
 
-  console.error('[backend-audio] all bases failed:', lastError, 'B2:', b2?.status)
+  console.error('[backend-audio] fallo upstream y B2:', lastError, 'B2:', b2?.status)
   return NextResponse.json(
     {
       error: 'No se pudo obtener el audio del backend ni desde B2',

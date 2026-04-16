@@ -1,5 +1,7 @@
 /**
- * Configuración de URLs del backend
+ * URL “pública” del API para el navegador (fetch desde el cliente).
+ * Monolito: deja NEXT_PUBLIC_API_URL vacío o usa https://tu-dominio (mismo sitio que Next).
+ * No uses placeholders tipo TU-BACKEND-FASTAPI (se ignoran y se usa el origen actual).
  */
 
 import { isPlaceholderBackendUrl } from './backendUrl'

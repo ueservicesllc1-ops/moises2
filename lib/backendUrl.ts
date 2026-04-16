@@ -1,47 +1,61 @@
 /**
- * URLs del FastAPI para el servidor Next (Route Handlers, /api/*).
+ * URL única del FastAPI para el proceso Node (Route Handlers, proxy /api → Python).
  *
- * En Railway con un solo servicio (Docker start:full), Python escucha en 127.0.0.1:8000.
- * Si en env quedó un placeholder (p. ej. TU-BACKEND-FASTAPI), se ignora y se usa localhost.
+ * No hay “probar URL A, luego B”: una sola resolución determinista.
  *
- * Si Next y Python están en servicios separados, define BACKEND_URL o INTERNAL_BACKEND_URL con la URL real del API.
+ * Monolito (Docker / Railway una imagen: Next + Python en el mismo contenedor):
+ *   - Por defecto: http://127.0.0.1:8000
+ *   - Opcional: BACKEND_INTERNAL_URL si quieres fijarla explícitamente.
+ *   - Ignora BACKEND_URL / NEXT_PUBLIC_API_URL salvo modo remoto (abajo). Si en Railway
+ *     dejaste placeholders tipo TU-BACKEND-FASTAPI, no se usan para el servidor.
+ *
+ * Stack separado (Next en un servicio, FastAPI en otro):
+ *   - BACKEND_FETCH_MODE=remote
+ *   - Y una sola URL alcanzable desde Node: INTERNAL_BACKEND_URL o BACKEND_URL (sin placeholder).
+ *
+ * Cliente (navegador): ver getBackendUrl() en lib/config.ts (NEXT_PUBLIC_* y mismo origen).
  */
 
-const PLACEHOLDER_RE = /tu-backend|your-backend|placeholder|example\.com/i
+const PLACEHOLDER_RE =
+  /tu-backend|your-backend|placeholder|example\.com|changeme|replace-me|xxx\.xxx/i
+
+const LOOPBACK = 'http://127.0.0.1:8000'
 
 export function isPlaceholderBackendUrl(url: string | undefined | null): boolean {
   if (url == null || !String(url).trim()) return true
   return PLACEHOLDER_RE.test(String(url).trim())
 }
 
-const seen = new Set<string>()
-
-function pushBase(list: string[], raw?: string | null) {
+function normalizeBase(raw: string | undefined | null): string | null {
   const s = typeof raw === 'string' ? raw.trim().replace(/\/$/, '') : ''
-  if (!s || isPlaceholderBackendUrl(s) || seen.has(s)) return
-  seen.add(s)
-  list.push(s)
+  if (!s || isPlaceholderBackendUrl(s)) return null
+  return s
+}
+
+function isRemoteFetchMode(): boolean {
+  const v = process.env.BACKEND_FETCH_MODE
+  return v === 'remote' || v === '1' || v === 'true'
 }
 
 /**
- * Bases a probar en orden (proxy servidor → Python).
- * - Servicios separados en Railway: pon BACKEND_URL o BACKEND_PUBLIC_URL con la URL https del API.
- * - Monolith (Docker start:full): suele funcionar http://127.0.0.1:8000 al final de la lista.
+ * Una sola base URL para todos los fetch server-side hacia FastAPI.
  */
-export function getServerBackendBaseUrls(): string[] {
-  seen.clear()
-  const list: string[] = []
-  pushBase(list, process.env.INTERNAL_BACKEND_URL)
-  pushBase(list, process.env.BACKEND_URL)
-  pushBase(list, process.env.BACKEND_PUBLIC_URL)
-  pushBase(list, process.env.NEXT_PUBLIC_API_URL)
-  pushBase(list, 'http://127.0.0.1:8000')
-  return list.length ? list : ['http://127.0.0.1:8000']
-}
-
-/** Primera base (compat con rutas /api que solo hacen un fetch). */
 export function getServerBackendUrl(): string {
-  return getServerBackendBaseUrls()[0]
+  const internal = normalizeBase(process.env.BACKEND_INTERNAL_URL)
+  if (internal) return internal
+
+  if (isRemoteFetchMode()) {
+    const remote =
+      normalizeBase(process.env.INTERNAL_BACKEND_URL) ||
+      normalizeBase(process.env.BACKEND_URL) ||
+      normalizeBase(process.env.BACKEND_PUBLIC_URL)
+    if (remote) return remote
+    console.error(
+      '[backend] BACKEND_FETCH_MODE=remote pero no hay INTERNAL_BACKEND_URL / BACKEND_URL válidas; usando loopback (revisa variables en Railway).'
+    )
+  }
+
+  return LOOPBACK
 }
 
 export function cloneFormData(fd: FormData): FormData {
@@ -53,31 +67,20 @@ export function cloneFormData(fd: FormData): FormData {
 }
 
 /**
- * POST multipart al FastAPI probando varias bases (mismo orden que getServerBackendBaseUrls).
+ * POST multipart al FastAPI en la única URL resuelta.
  */
 export async function postFormDataToBackend(
   path: string,
   formData: FormData,
   options?: { timeoutMs?: number }
 ): Promise<Response> {
-  const bases = getServerBackendBaseUrls()
+  const base = getServerBackendUrl()
   const timeoutMs = options?.timeoutMs ?? 300_000
   const p = path.startsWith('/') ? path : `/${path}`
-  let lastErr: unknown
-  for (const base of bases) {
-    const body = cloneFormData(formData)
-    const url = `${base}${p}`
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        body,
-        signal: AbortSignal.timeout(timeoutMs),
-      })
-      return res
-    } catch (e) {
-      lastErr = e
-      console.warn('[backend] POST failed, next base:', url, e)
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+  const url = `${base}${p}`
+  return fetch(url, {
+    method: 'POST',
+    body: cloneFormData(formData),
+    signal: AbortSignal.timeout(timeoutMs),
+  })
 }

@@ -489,7 +489,10 @@ export default function Home() {
     })
 
     for (const audio of list) {
-      if (!audioSourcesRef.current.has(audio)) {
+      if (audioSourcesRef.current.has(audio)) continue
+
+      const connect = () => {
+        if (audioSourcesRef.current.has(audio)) return
         try {
           const source = ctx.createMediaElementSource(audio)
           audioSourcesRef.current.set(audio, source)
@@ -497,6 +500,13 @@ export default function Home() {
         } catch (e) {
           console.warn('[WebAudio] createMediaElementSource:', e)
         }
+      }
+
+      // Un elemento solo puede tener un MediaElementSource; hay que crearlo cuando ya hay datos.
+      if (audio.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        connect()
+      } else {
+        audio.addEventListener('loadeddata', connect, { once: true })
       }
     }
   }, [audioElements])
@@ -1441,11 +1451,7 @@ export default function Home() {
             setCurrentTime(0);
           })
           
-          audio.addEventListener('error', (e) => {
-            console.error(` ${trackKey} audio error:`, e)
-          })
-          
-          // Esperar a que el audio esté listo
+          // Esperar a que el audio esté listo (sin audio.load(): ya se dispara al asignar src; load() duplicado provoca errores espurios)
           await new Promise((resolve, reject) => {
             const onCanPlay = () => {
               audio.removeEventListener('canplaythrough', onCanPlay)
@@ -1453,15 +1459,16 @@ export default function Home() {
               console.log(` ${trackKey} audio ready to play`)
               resolve(true)
             }
-            const onError = (e: any) => {
+            const onError = () => {
               audio.removeEventListener('canplaythrough', onCanPlay)
               audio.removeEventListener('error', onError)
-              console.error(` ${trackKey} audio failed to load:`, e)
-              reject(e)
+              const code = audio.error?.code
+              const msg = audio.error?.message
+              console.error(` ${trackKey} audio failed to load`, { code, msg, src: audio.src?.slice(0, 80) })
+              reject(new Error(`${trackKey}: audio error ${code ?? '?'}`))
             }
             audio.addEventListener('canplaythrough', onCanPlay)
             audio.addEventListener('error', onError)
-            audio.load()
           })
           
           newAudioElements[trackKey] = audio
