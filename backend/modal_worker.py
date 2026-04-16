@@ -157,16 +157,16 @@ def separate_audio(
             primary_model_name = "htdemucs_6s"
             profile_settings = {
                 "fast":        {"shifts": 1, "overlap": 0.20},
-                "pro_balanced": {"shifts": 2, "overlap": 0.25},
-                "hifi":        {"shifts": 4, "overlap": 0.35},
+                "pro_balanced": {"shifts": 3, "overlap": 0.30},
+                "hifi":        {"shifts": 5, "overlap": 0.40},
             }
         elif use_finetuned:
             # Fine-tune HTDemucs entrenado en Modal (mismo volumen que modal_trainer)
             primary_model_name = "finetuned_htdemucs"
             profile_settings = {
                 "fast":        {"shifts": 1, "overlap": 0.15},
-                "pro_balanced": {"shifts": 2, "overlap": 0.25},
-                "hifi":        {"shifts": 3, "overlap": 0.30},
+                "pro_balanced": {"shifts": 3, "overlap": 0.30},
+                "hifi":        {"shifts": 4, "overlap": 0.35},
             }
         else:
             # Para Karaoke, Voz o 4 pistas maestras, usamos la magia de MDX Spectrograms
@@ -181,8 +181,8 @@ def separate_audio(
             # En MDX, overlap de 0 y shift de 0/1 es el estándar para q. Para HiFi inyectamos precision.
             profile_settings = {
                 "fast":        {"shifts": 0, "overlap": 0.0},
-                "pro_balanced": {"shifts": 2, "overlap": 0.20},
-                "hifi":        {"shifts": 3, "overlap": 0.30},
+                "pro_balanced": {"shifts": 3, "overlap": 0.25},
+                "hifi":        {"shifts": 4, "overlap": 0.35},
             }
 
         cfg = profile_settings.get(profile_name, profile_settings["pro_balanced"])
