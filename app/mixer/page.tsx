@@ -459,7 +459,7 @@ const MixerPage: React.FC = () => {
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={() => toggleTrackSolo(track.name)}
-                    className={`mobile-touch-target p-1 rounded ${
+                    className={`h-7 w-7 rounded flex items-center justify-center text-[10px] font-semibold leading-none ${
                       track.solo 
                         ? 'bg-yellow-500 text-black' 
                         : 'bg-gray-600 text-white hover:bg-gray-500'
@@ -470,7 +470,7 @@ const MixerPage: React.FC = () => {
                   </button>
                   <button
                     onClick={() => toggleTrackMute(track.name)}
-                    className={`mobile-touch-target p-1 rounded ${
+                    className={`h-7 w-7 rounded flex items-center justify-center text-[10px] font-semibold leading-none ${
                       track.muted 
                         ? 'bg-red-500 text-white' 
                         : 'bg-gray-600 text-white hover:bg-gray-500'
