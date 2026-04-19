@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(300000), // Aumentado a 5 minutos para sincronización
     })
 
     const data = await response.json().catch(() => ({}))
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       return NextResponse.json(
         {
-          error: data?.error || `Backend error: ${response.status} ${response.statusText}`,
+          error: data?.error || data?.detail || `Error del Servidor AI: ${response.status} ${response.statusText}`,
           details: data?.details || null,
         },
         { status: response.status },
@@ -26,11 +26,12 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(data)
-  } catch (error) {
+  } catch (error: any) {
+    console.error('[training/start] Error:', error)
     return NextResponse.json(
       {
-        error: 'Internal server error',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        error: error.name === 'AbortError' ? 'Tiempo de espera agotado (Timeout)' : 'Error interno de comunicación con el motor de IA',
+        details: error instanceof Error ? error.message : 'Error desconocido',
       },
       { status: 500 },
     )

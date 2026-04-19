@@ -2253,21 +2253,21 @@ export default function Home() {
       {/* Moises Style Upload Modal */}
       {showMoisesStyleModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 md:p-4">
-          <div className="bg-black mx-auto flex flex-col border border-white border-opacity-20 relative max-w-5xl" style={{transform: 'scale(1.2)'}}>
+          <div className="bg-black mx-auto flex flex-col border border-white border-opacity-20 relative max-w-5xl w-full max-h-[95vh] md:max-h-[90vh] overflow-hidden shadow-2xl">
             {/* Botón de cerrar */}
-            <div className="absolute top-4 right-4 z-10">
+            <div className="absolute top-4 right-4 z-50">
               <button
                 onClick={closeMoisesModal}
-                className="text-white hover:text-gray-400 transition-colors bg-gray-800 hover:bg-gray-700 p-2"
+                className="text-white hover:text-gray-400 transition-colors bg-gray-800 hover:bg-gray-700 p-2 rounded-full shadow-lg"
               >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
 
             {/* Contenido del Modal */}
-            <div className="overflow-y-auto p-5">
+            <div className="overflow-y-auto p-3 sm:p-5 custom-scrollbar">
               <div className="mx-auto space-y-5">
                 <MoisesStyleUpload 
                   preloadedFile={preloadedAudioFile}

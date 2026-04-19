@@ -374,7 +374,7 @@ const PitchTempoModal: React.FC<PitchTempoModalProps> = ({ isOpen, onClose, embe
 
   return (
     <div className={embedded ? '' : 'fixed inset-0 z-[1100] flex items-center justify-center bg-black/95 p-2 md:p-4 backdrop-blur-xl'}>
-      <div className={`bg-[#0f0f12] border border-white/10 rounded-[2rem] md:rounded-[2.5rem] w-full max-w-[1500px] flex flex-col overflow-hidden shadow-2xl relative ${embedded ? 'h-[76vh]' : 'h-[100dvh] md:max-h-[90vh]'}`}>
+      <div className={`bg-[#0f0f12] border border-white/10 rounded-[2rem] md:rounded-[2.5rem] w-full max-w-[1500px] flex flex-col overflow-hidden shadow-2xl relative ${embedded ? 'h-[76vh]' : 'max-h-[100dvh] md:max-h-[90vh]'}`}>
         
         {/* Glows */}
         <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-blue-600/5 blur-[120px] pointer-events-none rounded-full" />

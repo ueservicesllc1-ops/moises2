@@ -11,7 +11,10 @@
     "start": "next start",
     "start:client": "next start -p ${PORT:-3000}",
     "start:backend": "cd backend && /opt/venv/bin/python main.py > ../public/python_log.txt 2>&1 || echo 'Python crashed'",
-    "start:full": "concurrently \"npm run start:client\" \"npm run start:backend\""
+    "start:full": "concurrently \"npm run start:client\" \"npm run start:backend\"",
+    "desktop:install": "npm --prefix desktop install",
+    "desktop:dev": "concurrently \"npm run dev\" \"npm --prefix desktop run dev\"",
+    "desktop:dist": "npm run build && npm --prefix desktop run dist"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.899.0",

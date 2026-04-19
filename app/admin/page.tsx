@@ -13,6 +13,7 @@ interface User {
   email: string
   displayName: string
   isPremium: boolean
+  planId?: string
   songsCount: number
   lastSongAt: string
   createdAt: string
@@ -175,6 +176,7 @@ export default function AdminPage() {
           email: userData.email || 'Sin email',
           displayName: userData.displayName || userData.name || 'Sin nombre',
           isPremium: userData.isPremium || false,
+          planId: userData.planId || (userData.isPremium ? 'pro' : 'starter'),
           songsCount,
           lastSongAt,
           createdAt: userData.createdAt?.toDate?.()?.toLocaleDateString() || 'N/A'
@@ -235,28 +237,29 @@ export default function AdminPage() {
     }
   }
 
-  const togglePremium = async (userId: string) => {
+  const updateUserPlan = async (userId: string, newPlanId: string) => {
     try {
       const user = users.find(u => u.id === userId)
       if (!user) return
       
-      const newPremiumStatus = !user.isPremium
+      const isPremium = newPlanId !== 'starter'
       
       // Actualizar en Firestore
       const userRef = doc(db, 'users', userId)
       await updateDoc(userRef, {
-        isPremium: newPremiumStatus
+        planId: newPlanId,
+        isPremium: isPremium
       })
       
       // Actualizar estado local
       setUsers(users.map(u => 
-        u.id === userId ? { ...u, isPremium: newPremiumStatus } : u
+        u.id === userId ? { ...u, planId: newPlanId, isPremium: isPremium } : u
       ))
       
-      console.log(`Usuario ${user.email} ahora es ${newPremiumStatus ? 'PREMIUM' : 'FREE'}`)
+      toast.success(`Plan de ${user.email} actualizado a ${newPlanId.toUpperCase()}`)
     } catch (error) {
-      console.error('Error actualizando usuario:', error)
-      alert('Error al actualizar el estado premium del usuario')
+      console.error('Error actualizando plan:', error)
+      toast.error('Error al actualizar el plan del usuario')
     }
   }
 
@@ -675,28 +678,61 @@ export default function AdminPage() {
                         {user.createdAt}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        {user.isPremium ? (
-                          <span className="flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-yellow-600 to-orange-600 text-white font-bold rounded-full text-xs">
-                            <Crown className="w-3 h-3" />
-                            PREMIUM
-                          </span>
-                        ) : (
-                          <span className="px-3 py-1 bg-gray-700 text-gray-300 rounded-full text-xs">
-                            FREE
-                          </span>
-                        )}
+                        <div className="flex flex-col gap-1.5">
+                          {user.planId === 'pro' ? (
+                            <span className="flex items-center justify-center gap-1 px-3 py-1 bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold rounded-full text-[10px] shadow-lg shadow-violet-500/20">
+                              <Crown className="w-3 h-3" />
+                              PRO
+                            </span>
+                          ) : user.planId === 'lite' ? (
+                            <span className="flex items-center justify-center gap-1 px-3 py-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold rounded-full text-[10px] shadow-lg shadow-amber-500/20">
+                              <Crown className="w-3 h-3" />
+                              LITE
+                            </span>
+                          ) : (
+                            <span className="px-3 py-1 bg-gray-700 text-gray-300 rounded-full text-[10px] text-center font-semibold">
+                              STARTER
+                            </span>
+                          )}
+                          <div className="text-[10px] text-gray-500 text-center uppercase tracking-tighter">Plan Actual</div>
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <button
-                          onClick={() => togglePremium(user.id)}
-                          className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                            user.isPremium
-                              ? 'bg-red-600 hover:bg-red-700 text-white'
-                              : 'bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white'
-                          }`}
-                        >
-                          {user.isPremium ? 'Quitar Premium' : 'Hacer Premium'}
-                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => updateUserPlan(user.id, 'starter')}
+                            disabled={user.planId === 'starter'}
+                            className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all ${
+                              user.planId === 'starter'
+                                ? 'bg-gray-800 text-gray-600 cursor-not-allowed border border-white/5'
+                                : 'bg-gray-700 hover:bg-gray-600 text-gray-300 border border-white/10'
+                            }`}
+                          >
+                            FREE
+                          </button>
+                          <button
+                            onClick={() => updateUserPlan(user.id, 'lite')}
+                            disabled={user.planId === 'lite'}
+                            className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all ${
+                              user.planId === 'lite'
+                                ? 'bg-amber-600/20 text-amber-500 cursor-not-allowed border border-amber-500/30'
+                                : 'bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-500/20'
+                            }`}
+                          >
+                            LITE
+                          </button>
+                          <button
+                            onClick={() => updateUserPlan(user.id, 'pro')}
+                            disabled={user.planId === 'pro'}
+                            className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all ${
+                              user.planId === 'pro'
+                                ? 'bg-violet-600/20 text-violet-500 cursor-not-allowed border border-violet-500/30'
+                                : 'bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-500/20'
+                            }`}
+                          >
+                            PRO
+                          </button>
+                        </div>
                       </td>
                     </tr>
                     ))}

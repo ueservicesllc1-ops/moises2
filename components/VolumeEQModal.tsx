@@ -536,7 +536,7 @@ const VolumeEQModal: React.FC<VolumeEQModalProps> = ({ isOpen, onClose, embedded
   return (
     <div className={embedded ? "w-full" : "fixed inset-0 z-[10000] flex items-center justify-center bg-black/80"}>
       {!embedded && <AdminModalLabel modalName="VolumeEQModal" />}
-      <div className={embedded ? "h-[76vh] w-full overflow-y-auto rounded-[2.5rem] border border-white/10 bg-[#0f0f12] p-6 shadow-2xl" : "mx-4 w-auto border-2 border-gray-700 bg-gray-900 p-6 shadow-2xl"}>
+      <div className={embedded ? "h-[76vh] w-full overflow-y-auto rounded-[2.5rem] border border-white/10 bg-[#0f0f12] p-6 shadow-2xl" : "mx-4 w-full max-w-4xl max-h-[95vh] overflow-y-auto border-2 border-gray-700 bg-gray-900 p-6 shadow-2xl custom-scrollbar"}>
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-white">Control de Volumen y Ecualización</h2>

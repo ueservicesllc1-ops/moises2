@@ -76,7 +76,7 @@ const AudioSeparationModal: React.FC<AudioSeparationModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 md:p-4">
 
-      <div className="bg-gray-800 rounded-lg p-4 md:p-6 w-full max-w-md mx-0 md:mx-4 h-[100dvh] md:h-auto md:max-h-[90vh] overflow-y-auto">
+      <div className="bg-gray-800 rounded-lg p-4 md:p-6 w-full max-w-md mx-0 md:mx-4 max-h-[100dvh] md:max-h-[90vh] overflow-y-auto custom-scrollbar">
         <div className="flex justify-between items-center mb-6">
           <div>
             <h2 className="text-xl font-bold text-white">Separate tracks</h2>

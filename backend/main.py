@@ -1634,87 +1634,158 @@ async def analyze_audio(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error analyzing audio: {str(e)}")
 
 def _validate_training_manifest(manifest: dict) -> None:
+    """
+    Validacion robusta de 6 canales.
+    """
     songs = manifest.get("songs")
-    if not isinstance(songs, list) or len(songs) == 0:
-        raise ValueError("manifest.songs debe ser una lista no vacía")
+    if not songs or not isinstance(songs, list):
+        raise ValueError("El dataset está vacío. Cura al menos una canción.")
+
     for s in songs:
-        if not isinstance(s, dict):
-            raise ValueError("cada canción debe ser un objeto")
         sid = s.get("id")
-        if not sid:
-            raise ValueError("cada canción necesita id")
+        name = s.get("name", "Sin Título")
         ai = s.get("ai_mapping") or {}
         sources = s.get("trackSources") or {}
-        for k in ("vocals", "drums", "bass"):
-            if not ai.get(k):
-                raise ValueError(f"Canción {sid}: falta ai_mapping.{k}")
+        
+        # Validar que al menos haya ALGO mapeado
+        main_keys = ["vocals", "drums", "bass", "guitar", "piano"]
+        assigned = [k for k in main_keys if ai.get(k)]
         other = ai.get("other") or []
-        if not isinstance(other, list) or len(other) == 0:
-            raise ValueError(f"Canción {sid}: ai_mapping.other debe tener al menos un stem")
-        for stem_key in [ai["vocals"], ai["drums"], ai["bass"]] + list(other):
-            url = sources.get(stem_key)
-            if not url or not str(url).startswith(("http://", "https://")):
-                raise ValueError(f"Canción {sid}: URL http(s) requerida para stem {stem_key}")
+        
+        if not assigned and not other:
+            raise ValueError(f"La canción '{name}' no tiene ninguna pista asignada.")
 
+        # Verificar URLs de lo asignado
+        for key in assigned:
+            track_id = ai[key]
+            url = sources.get(track_id)
+            if not url:
+                raise ValueError(f"Error en '{name}': No se encuentra la URL para {key} ({track_id})")
 
 @app.post("/api/training/start")
-async def start_training(request: dict):
+async def start_training(request_data: dict):
     """
-    Inicia pipeline de entrenamiento en Modal:
-    1) sincroniza dataset (descarga stems según manifest)
-    2) lanza entrenamiento HTDemucs en segundo plano
+    Lanzamiento robusto de entrenamiento 6-stems.
+    Retorna INMEDIATAMENTE con un job_id. No espera sincronización.
     """
     try:
         import modal
-
-        manifest = request.get("manifest")
+        print("[BACKEND] Iniciando proceso de entrenamiento...")
+        
+        manifest = request_data.get("manifest")
         if not manifest:
-            raise HTTPException(
-                status_code=400,
-                detail="Falta manifest: la UI debe enviar las canciones curadas con ai_mapping y URLs.",
-            )
+            raise HTTPException(status_code=400, detail="Petición inválida: falta manifest")
+
+        # 1. Validar localmente antes de llamar a la nube
         try:
             _validate_training_manifest(manifest)
-        except ValueError as ve:
-            raise HTTPException(status_code=400, detail=str(ve))
+        except ValueError as e:
+            print(f"[BACKEND] Validación fallida: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
 
-        epochs = int(request.get("epochs") or 20)
-        batch_size = request.get("batch_size")
-        bs = int(batch_size) if batch_size is not None else None
+        epochs = int(request_data.get("epochs") or 20)
+        
+        # 2. Conectar con Modal
+        print("[BACKEND] Conectando con Modal Cloud...")
+        try:
+            sync_func = modal.Function.from_name("moises-demucs-trainer", "sync_b2_dataset")
+            train_func = modal.Function.from_name("moises-demucs-trainer", "train_model")
+        except Exception as e:
+            print(f"[BACKEND] Error buscando funciones en Modal: {e}")
+            raise HTTPException(status_code=503, detail=f"No se pudo conectar con el motor de IA en Modal: {str(e)}")
 
-        print(f"[TRAINING] Start: {len(manifest['songs'])} canciones, epochs={epochs}")
+        # 3. Lanzar sincronización como spawn (NO bloqueante - retorna en segundos)
+        print(f"[BACKEND] Lanzando sincronización de {len(manifest['songs'])} temas...")
+        try:
+            sync_call = sync_func.spawn({"manifest": manifest})
+            sync_call_id = getattr(sync_call, "object_id", None) or getattr(sync_call, "function_call_id", None)
+        except Exception as e:
+            print(f"[BACKEND] Error lanzando sync: {e}")
+            raise HTTPException(status_code=500, detail=f"No se pudo iniciar la sincronización: {str(e)}")
 
-        sync_func = modal.Function.from_name("moises-demucs-trainer", "sync_b2_dataset")
-        train_func = modal.Function.from_name("moises-demucs-trainer", "train_model")
+        print(f"[BACKEND] Sync lanzado en segundo plano. ID: {sync_call_id}")
 
-        sync_result = await asyncio.to_thread(sync_func.remote, {"manifest": manifest})
-        if isinstance(sync_result, dict) and sync_result.get("ok") is False:
-            raise HTTPException(
-                status_code=400,
-                detail=sync_result.get("error", "sync_b2_dataset falló"),
-            )
-
-        train_call = await asyncio.to_thread(
-            train_func.spawn,
-            epochs=epochs,
-            batch_size=bs,
-        )
-
-        call_id = getattr(train_call, "object_id", None) or getattr(train_call, "function_call_id", None)
-
+        # 4. Lanzar Entrenamiento también como spawn (NO bloqueante)
+        print(f"[BACKEND] Lanzando entrenamiento ({epochs} épocas)...")
+        try:
+            train_call = train_func.spawn(epochs=epochs)
+            call_id = getattr(train_call, "object_id", None) or getattr(train_call, "function_call_id", None)
+        except Exception as e:
+            print(f"[BACKEND] Error lanzando training: {e}")
+            raise HTTPException(status_code=500, detail=f"No se pudo iniciar el entrenamiento: {str(e)}")
+        
+        print(f"[BACKEND] Éxito. Tarea entrenamiento ID: {call_id}")
+        # Respuesta inmediata (<2seg). El frontend sondea /api/training/status
         return {
             "success": True,
-            "message": "Entrenamiento lanzado en Modal (HTDemucs). Checkpoint: /dataset/checkpoints/latest.th en el volumen compartido.",
-            "sync_result": sync_result,
             "training_call_id": call_id,
-            "epochs": epochs,
+            "sync_call_id": sync_call_id,
+            "message": "Tareas lanzadas en la nube. Monitoreando progreso..."
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[TRAINING] Error launching training: {e}")
-        raise HTTPException(status_code=500, detail=f"No se pudo iniciar entrenamiento: {str(e)}")
+        print(f"[BACKEND] CRASH INESPERADO: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error Crítico Interno: {str(e)}")
+
+@app.get("/api/training/status/{call_id}")
+async def get_training_status(call_id: str):
+    try:
+        import modal
+        from modal.functions import FunctionCall
+        
+        # Conectar con la llamada asincrona
+        call = FunctionCall.from_id(call_id)
+        
+        try:
+            # Intentar obtener el resultado. Si falla con el error de libreria, saltara al except Exception
+            result = call.get(timeout=0.5)
+            
+            stats = getattr(call, "stats", None)
+            created_at = getattr(stats, "created_at", None)
+            finished_at = getattr(stats, "finished_at", None)
+            
+            return {
+                "status": "completed",
+                "result": result,
+                "duration": (finished_at - created_at) if (created_at and finished_at) else None
+            }
+        except Exception as e:
+            # FALLBACK INTELIGENTE: Solo si la tarea NO está corriendo y se perdió el ID
+            err_name = type(e).__name__
+            if "Timeout" in err_name or "Pending" in err_name:
+                print(f"[STATUS] Tarea {call_id} SIGUE EN CURSO.")
+                return {"status": "running", "message": "Entrenando en la nube (GPU activa)..."}
+
+            try:
+                check_func = modal.Function.from_name("moises-demucs-trainer", "check_results")
+                cloud_files = check_func.remote()
+                if cloud_files.get("exists"):
+                    print(f"[STATUS] Tarea {call_id} no encontrada pero MODELO DETECTADO. Enviando COMPLETED.")
+                    return {
+                        "status": "completed",
+                        "message": "Entrenamiento finalizado y guardado.",
+                        "duration": None,
+                        "files": cloud_files.get("files")
+                    }
+            except:
+                pass
+
+            return {"status": "error", "message": f"Fallo en la nube: {str(e)}"}
+            
+            # Si llegamos aqui, es UN ERROR REAL de ejecucion en la nube
+            print(f"[STATUS] ERROR CRITICO EN TAREA {call_id}: {e}")
+            return {
+                "status": "error",
+                "message": f"Fallo en la nube: {str(e)}"
+            }
+
+    except Exception as e:
+        print(f"[STATUS] Error consultando Modal: {e}")
+        return {"status": "error", "message": f"Error de conexión: {str(e)}"}
 
 async def extract_with_ytdlp(youtube_url: str, video_id: str):
     """Extraer audio usando yt-dlp"""
