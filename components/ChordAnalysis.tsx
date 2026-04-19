@@ -3,7 +3,8 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Zap, Target, Loader2, Music } from 'lucide-react';
+import { Play, Pause, Zap, Target, Loader2, Music, FileArchive } from 'lucide-react';
+import JSZip from 'jszip';
 import ChordDiagram from './ChordDiagram';
 import CoverFlow from './CoverFlow';
 import { createMusicCovers } from './MusicCovers';
@@ -102,7 +103,7 @@ const ChordAnalysis: React.FC<ChordAnalysisProps> = ({
   
   // Estados para descarga
   const [showDownloadModal, setShowDownloadModal] = useState(false);
-  const [downloadFormat, setDownloadFormat] = useState<'mp3' | 'wav'>('mp3');
+  const [downloadFormat, setDownloadFormat] = useState<'mp3' | 'wav' | 'zip'>('mp3');
   const [selectedTracksForDownload, setSelectedTracksForDownload] = useState<Set<string>>(new Set());
   const [isDownloading, setIsDownloading] = useState(false);
   
@@ -521,7 +522,7 @@ return (
 
     {/* Professional Digital Mixer Interface */}
     {showCoverFlow ? (
-        <div className="h-96 bg-black rounded-lg border border-gray-800 -m-4 relative overflow-hidden">
+        <div className="h-full bg-black rounded-lg border border-gray-800 mt-0 md:-mt-4 md:-mx-4 relative overflow-hidden flex flex-col">
         {/* Subtle grid pattern */}
         <div className="absolute inset-0 opacity-5">
           <div className="w-full h-full" style={{
@@ -533,14 +534,14 @@ return (
           }} />
         </div>
         
-        <div className="relative z-10 flex items-center justify-between h-full">
+        <div className="relative z-10 flex flex-col md:flex-row items-center justify-between px-1 py-1 md:px-0 md:py-0 flex-1 md:h-full gap-2 md:gap-6 min-h-0">
           {/* Left Side - LED Buttons */}
-          <div className="flex flex-col space-y-2 w-36" style={{marginLeft: '10px'}}>
+          <div className="flex flex-row md:flex-col flex-wrap justify-center md:justify-start gap-2 w-full md:w-36 md:ml-[10px]">
             {/* Row 1 */}
-            <div className="flex flex-col space-y-2">
+            <div className="flex flex-row md:flex-col flex-wrap justify-center gap-1.5 mt-2 md:mt-0">
               <button 
                 onClick={handleChordAnalysis}
-                className={`w-32 h-8 border rounded hover:bg-opacity-80 transition-all duration-300 flex items-center justify-center ${
+                className={`w-24 md:w-32 h-7 md:h-8 border rounded hover:bg-opacity-80 transition-all duration-300 flex items-center justify-center ${
                   showChordsInLED
                     ? 'bg-cyan-700 border-cyan-500'
                     : 'bg-gray-800 border-gray-600 hover:bg-gray-700'
@@ -555,7 +556,7 @@ return (
               </button>
               <button 
                 onClick={handleTimeRuler}
-                className={`w-32 h-8 border rounded hover:bg-opacity-80 transition-all duration-300 flex items-center justify-center ${
+                className={`w-24 md:w-32 h-7 md:h-8 border rounded hover:bg-opacity-80 transition-all duration-300 flex items-center justify-center ${
                   showBasicEQ
                     ? 'bg-green-700 border-green-500'
                     : 'bg-gray-800 border-gray-600 hover:bg-gray-700'
@@ -570,7 +571,7 @@ return (
               </button>
               <button 
                 onClick={handleMetronome}
-                className={`w-32 h-8 border rounded hover:bg-opacity-80 transition-all duration-300 flex items-center justify-center ${
+                className={`w-24 md:w-32 h-7 md:h-8 border rounded hover:bg-opacity-80 transition-all duration-300 flex items-center justify-center ${
                   showEQPro
                     ? 'bg-purple-700 border-purple-500'
                     : 'bg-gray-800 border-gray-600 hover:bg-gray-700'
@@ -586,10 +587,10 @@ return (
             </div>
             
             {/* Row 2 */}
-            <div className="flex flex-col space-y-2">
+            <div className="flex flex-row md:flex-col flex-wrap justify-center gap-2">
               <button 
                 onClick={handleAudioSeparation}
-                className={`w-32 h-8 border rounded hover:bg-opacity-80 transition-all duration-300 flex items-center justify-center ${
+                className={`w-24 md:w-32 h-7 md:h-8 border rounded hover:bg-opacity-80 transition-all duration-300 flex items-center justify-center ${
                   showBPMControl
                     ? 'bg-yellow-700 border-yellow-500'
                     : 'bg-gray-800 border-gray-600 hover:bg-gray-700'
@@ -606,11 +607,11 @@ return (
           </div>
 
           {/* LED Screen - Center */}
-          <div className="flex justify-center flex-1">
-            <div className="w-[85%] h-56 bg-black border-2 border-gray-600 rounded-lg relative overflow-hidden" 
+          <div className="flex justify-center w-full md:flex-1">
+            <div className="w-full md:w-[85%] flex-1 min-h-0 md:h-full bg-black border-2 border-gray-600 rounded-lg relative overflow-hidden" 
                  style={{
-                   background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 50%, #0a0a0a 100%)',
-                   boxShadow: 'inset 0 0 30px rgba(0, 255, 0, 0.1), 0 0 20px rgba(0, 255, 0, 0.2)'
+                   background: 'linear-gradient(135deg, #050505 0%, #111111 50%, #050505 100%)',
+                   boxShadow: 'inset 0 0 20px rgba(0, 255, 0, 0.05), 0 0 10px rgba(0, 0, 0, 0.5)'
                  }}>
               {/* LED Grid Pattern */}
               <div className="absolute inset-0 opacity-20">
@@ -1978,9 +1979,9 @@ return (
           </div>
 
           {/* Right Side - LED Buttons */}
-          <div className="flex flex-col space-y-2 w-36" style={{marginRight: '10px'}}>
+          <div className="flex flex-row md:flex-col flex-wrap justify-center md:items-end gap-2 w-full md:w-36 md:mr-[10px]">
             {/* Row 1 */}
-            <div className="flex flex-col space-y-2">
+            <div className="flex flex-row md:flex-col flex-wrap justify-center gap-2">
               <button 
                 onClick={() => {
                   setDownloadFormat('mp3');
@@ -2006,6 +2007,18 @@ return (
                 <div className="text-xs font-bold text-gray-400">WAV</div>
               </button>
               <button 
+                onClick={() => {
+                  setDownloadFormat('zip');
+                  setShowDownloadModal(true);
+                }}
+                className="w-32 h-8 bg-gray-800 border border-gray-600 rounded hover:bg-gray-700 transition-all duration-300 flex items-center justify-center"
+                style={{
+                  boxShadow: '0 0 10px rgba(156, 163, 175, 0.3), inset 0 0 10px rgba(156, 163, 175, 0.1)'
+                }}
+              >
+                <div className="text-xs font-bold text-gray-400">Zip (All)</div>
+              </button>
+              <button 
                 onClick={handlePitchShifterToggle}
                 className={`w-32 h-8 border rounded hover:bg-opacity-80 transition-all duration-300 flex items-center justify-center ${
                   showPitchShifter
@@ -2023,7 +2036,7 @@ return (
             </div>
             
             {/* Row 2 */}
-            <div className="flex flex-col space-y-2">
+            <div className="flex flex-row md:flex-col flex-wrap justify-center gap-2">
               <button 
                 onClick={handleAudioSeparation}
                 className="w-32 h-8 bg-gray-800 border border-gray-600 rounded hover:bg-gray-700 transition-all duration-300 flex items-center justify-center"
@@ -2168,7 +2181,7 @@ return (
       <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
         <div className="bg-gray-800 border-2 border-gray-600 rounded-lg p-6 w-96">
           <h3 className="text-xl font-bold text-white mb-4">
-            Descargar {downloadFormat.toUpperCase()}
+            Descargar {downloadFormat === 'zip' ? 'TODO en un archivo ZIP' : downloadFormat.toUpperCase()}
           </h3>
           
           <p className="text-gray-300 text-sm mb-4">
@@ -2215,49 +2228,74 @@ return (
             <button
               onClick={async () => {
                 setIsDownloading(true);
-                console.log('Descargando pistas:', Array.from(selectedTracksForDownload), 'en formato:', downloadFormat);
+                const tracksToProcess = Array.from(selectedTracksForDownload);
+                console.log('Descargando pistas:', tracksToProcess, 'en formato:', downloadFormat);
                 
-                // Descargar cada pista seleccionada
-                for (const trackKey of Array.from(selectedTracksForDownload)) {
-                  const trackUrl = stems[trackKey];
-                  if (trackUrl) {
-                    try {
-                      console.log(`🔄 Procesando: ${trackKey}...`);
-                      
-                      // Llamar al endpoint de conversión
-                      const response = await fetch('/api/download-track', {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                          trackUrl: trackUrl,
-                          format: downloadFormat,
-                          trackName: `${songId || 'track'}_${trackKey}`
-                        }),
-                      });
-                      
-                      if (!response.ok) {
-                        const errorData = await response.json();
-                        console.error('Error del servidor:', errorData);
-                        throw new Error(errorData.details || 'Error en la conversión');
+                try {
+                  if (downloadFormat === 'zip') {
+                    console.log('📦 Generando archivo ZIP...');
+                    const zip = new JSZip();
+                    
+                    for (const trackKey of tracksToProcess) {
+                      const trackUrl = stems[trackKey];
+                      if (trackUrl) {
+                        console.log(`  ➕ Añadiendo a ZIP: ${trackKey}...`);
+                        const response = await fetch(`/api/proxy-audio?url=${encodeURIComponent(trackUrl)}`);
+                        if (!response.ok) throw new Error(`Error descargando ${trackKey}`);
+                        const blob = await response.blob();
+                        zip.file(`${trackKey}.wav`, blob);
                       }
-                      
-                      const blob = await response.blob();
-                      const url = window.URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `${songId || 'track'}_${trackKey}.${downloadFormat}`;
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                      window.URL.revokeObjectURL(url);
-                      console.log(`✅ Descargado y convertido a ${downloadFormat.toUpperCase()}: ${trackKey}`);
-                    } catch (error: any) {
-                      console.error(`❌ Error descargando ${trackKey}:`, error);
-                      alert(`Error descargando ${trackKey}: ${error.message}`);
+                    }
+                    
+                    const content = await zip.generateAsync({ type: 'blob' });
+                    const url = window.URL.createObjectURL(content);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${songId || 'tracks'}_stems.zip`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                    console.log('✅ ZIP generado y descargado exitosamente');
+                  } else {
+                    // Descargar cada pista seleccionada uno por uno
+                    for (const trackKey of tracksToProcess) {
+                      const trackUrl = stems[trackKey];
+                      if (trackUrl) {
+                        console.log(`🔄 Procesando: ${trackKey}...`);
+                        
+                        const response = await fetch('/api/download-track', {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                          },
+                          body: JSON.stringify({
+                            trackUrl: trackUrl,
+                            format: downloadFormat,
+                            trackName: `${songId || 'track'}_${trackKey}`
+                          }),
+                        });
+                        
+                        if (!response.ok) {
+                          const errorData = await response.json();
+                          throw new Error(errorData.details || `Error en la conversión de ${trackKey}`);
+                        }
+                        
+                        const blob = await response.blob();
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `${songId || 'track'}_${trackKey}.${downloadFormat}`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        window.URL.revokeObjectURL(url);
+                      }
                     }
                   }
+                } catch (error: any) {
+                  console.error(`❌ Error en la descarga:`, error);
+                  alert(`Error en la descarga: ${error.message}`);
                 }
                 
                 setIsDownloading(false);
@@ -2267,7 +2305,7 @@ return (
               disabled={selectedTracksForDownload.size === 0 || isDownloading}
               className="flex-1 px-4 py-2 bg-green-700 hover:bg-green-600 text-white rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isDownloading ? 'Descargando...' : `Descargar (${selectedTracksForDownload.size})`}
+              {isDownloading ? 'Procesando...' : downloadFormat === 'zip' ? 'Generar ZIP' : `Descargar (${selectedTracksForDownload.size})`}
             </button>
           </div>
         </div>

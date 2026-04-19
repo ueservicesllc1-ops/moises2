@@ -205,6 +205,18 @@ export default function Home() {
     loadUserPlan()
   }, [user?.uid])
 
+  // Evitar scroll en el body cuando el modal del mixer está abierto
+  useEffect(() => {
+    if (showSongModal) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = 'unset'
+    }
+    return () => {
+      document.body.style.overflow = 'unset'
+    }
+  }, [showSongModal])
+
   const displayedSongs = useMemo(() => {
     let list = [...songs]
     const q = searchQuery.trim().toLowerCase()
@@ -2322,9 +2334,41 @@ export default function Home() {
 
       {/* Song Modal */}
       {showSongModal && selectedSong && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-95 flex items-center justify-center z-50 overflow-hidden py-0 px-0 md:p-0">
+          
+          {/* Mobile Orientation Overlay - Only shows in portrait on mobile */}
+          <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#050505] p-6 text-center md:hidden portrait:flex landscape:hidden">
+            <div className="mb-6 animate-bounce">
+              <div className="relative h-20 w-12 rounded-lg border-4 border-white/20">
+                <div className="absolute inset-x-2 top-2 h-1 rounded-full bg-white/10" />
+                <div className="absolute inset-x-2 bottom-2 h-1 rounded-full bg-white/10" />
+                <div className="absolute -right-8 top-1/2 h-8 w-1 -translate-y-1/2 rounded-full bg-white/20" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <svg className="h-6 w-6 animate-pulse text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+            <h3 className="mb-2 text-xl font-bold text-white">Gira tu pantalla</h3>
+            <p className="max-w-[200px] text-sm text-[#a3a3a3]">
+              Para usar el mezclador profesional, por favor coloca tu teléfono en posición horizontal.
+            </p>
+            <button 
+              onClick={() => {
+                Object.values(audioElements).forEach(audio => {
+                  audio.pause()
+                  audio.src = ''
+                })
+                closeSongModal()
+              }}
+              className="mt-8 rounded-full border border-white/10 px-6 py-2 text-xs text-[#737373] hover:text-white"
+            >
+              Cerrar y volver
+            </button>
+          </div>
 
-          <div className="flex h-[100dvh] w-full max-w-[1400px] flex-col border border-white/20 bg-gray-800 md:h-[90vh] md:w-[90vw] relative">
+          <div className="hidden landscape:flex md:flex h-auto min-h-screen md:h-screen w-full max-w-none flex-col border-none bg-[#0c0c0c] relative shadow-2xl overflow-hidden md:rounded-none">
             {/* Botón de cerrar Absoluto para móvil */}
             <button
               onClick={() => {
@@ -2480,20 +2524,21 @@ export default function Home() {
               </button>
             </div>
             
-            {/* Línea separadora */}
-            <div className="h-[20px] bg-gray-950 w-full"></div>
             
-            {/* Tracks Area - 60% */}
-            <div className="h-[calc(100dvh-204px)] bg-gray-900 flex overflow-y-auto overflow-x-hidden md:h-[60vh]">
+            <div className="flex-none flex flex-col md:flex-row h-[121px] min-h-[121px] overflow-y-auto md:overflow-y-auto overflow-x-hidden relative border-b border-gray-800">
               {/* Área fija de controles a la izquierda */}
-              <div className="w-24 md:w-40 bg-gray-700 border-r border-gray-600 flex flex-col flex-shrink-0">
+              <div className="w-24 md:w-40 border-r border-gray-600 flex flex-col h-auto flex-shrink-0">
                 {(() => {
-                  const tracks = selectedSong?.stems ? Object.entries(selectedSong.stems) : [];
+                  const tracks = selectedSong?.stems 
+                    ? Object.entries(selectedSong.stems).filter(([k, v]) => v !== undefined && k !== 'metronome') 
+                    : [];
                   
                   return tracks.length > 0;
                 })() ? (
                   (() => {
-                    const tracks = selectedSong?.stems ? Object.entries(selectedSong.stems) : [];
+                    const tracks = selectedSong?.stems 
+                      ? Object.entries(selectedSong.stems).filter(([k, v]) => v !== undefined && k !== 'metronome') 
+                      : [];
                     
                     
                     return tracks;
@@ -2528,14 +2573,14 @@ export default function Home() {
                     // Si es el track del metronome, renderizar componente especial - REMOVED
                     
                     return (
-                      <div key={trackKey} className="h-24 min-h-[96px] border-b border-gray-600 flex flex-col items-start justify-between p-2 shrink-0">
+                      <div key={trackKey} className="h-[60px] min-h-[60px] bg-gray-700/50 border-b border-gray-600/50 flex flex-col items-start justify-between p-1.5 shrink-0 transition-colors">
                         {/* Parte superior con nombre y color */}
                         <div className="flex items-start justify-between w-full">
                           <div className="flex flex-col min-w-0">
-                            <div className="flex items-center gap-1 md:gap-2">
-                              <span className="text-white text-[10px] md:text-xs font-bold truncate">{config.name}</span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-white text-[9px] md:text-xs font-bold truncate">{config.name}</span>
                               {trackUrl === undefined ? (
-                                <span className="text-gray-400 text-[8px] md:text-[10px] font-mono bg-gray-800/50 px-1 rounded animate-pulse">
+                                <span className="text-gray-400 text-[7px] md:text-[9px] font-mono bg-gray-800/50 px-0.5 rounded animate-pulse">
                                   ...
                                 </span>
                               ) : (
@@ -2543,7 +2588,7 @@ export default function Home() {
                                   {(() => {
                                     const onsetValue = trackOnsets[trackKey];
                                     return onsetValue !== undefined && (
-                                      <span className="hidden sm:inline text-gray-300 text-[10px] font-mono bg-gray-800/50 px-1 rounded">
+                                      <span className="text-gray-400 text-[8px] font-mono bg-gray-900/80 px-1 rounded border border-gray-700">
                                         {onsetValue}ms
                                       </span>
                                     );
@@ -2561,7 +2606,7 @@ export default function Home() {
                               e.stopPropagation();
                               setShowColorPicker(trackKey);
                             }}
-                            className="h-4 w-5 md:h-5 md:w-6 min-h-0 min-w-0 rounded border border-gray-600 hover:border-white transition-all duration-300 animate-pulse shadow-lg shrink-0"
+                            className="h-3 w-4 md:h-5 md:w-6 min-h-0 min-w-0 rounded border border-gray-600 hover:border-white transition-all duration-300 animate-pulse shadow-lg shrink-0"
                             style={{ 
                               backgroundColor: getColorFromClass(trackBackgroundColor),
                               boxShadow: `0 0 4px ${getColorFromClass(trackBackgroundColor)}, 0 0 8px ${getColorFromClass(trackBackgroundColor)}`
@@ -2574,31 +2619,28 @@ export default function Home() {
                         
                         {/* Slider de Volumen + Botones M y S - Solo mostrar si no se está generando */}
                         {trackUrl !== null && (
-                          <div className="flex flex-col space-y-1 w-full">
-                            {/* Slider de Volumen Horizontal - Sin punto, solo barra */}
-                            <div className="w-full relative">
-                              {/* Barra de fondo */}
-                              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden border border-gray-700">
-                                <div 
-                                  className="h-full bg-gradient-to-r from-green-500 to-green-400 transition-all duration-150"
-                                  style={{ width: `${(trackVolumeStates[trackKey] ?? 1) * 100}%` }}
+                            <div className="flex items-center justify-between w-full">
+                              {/* Slider de Volumen Horizontal - Más delgado */}
+                              <div className="flex-1 relative mr-2">
+                                <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
+                                  <div 
+                                    className="h-full bg-gradient-to-r from-teal-500 to-teal-400 transition-all duration-150"
+                                    style={{ width: `${(trackVolumeStates[trackKey] ?? 1) * 100}%` }}
+                                  />
+                                </div>
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="1"
+                                  step="0.01"
+                                  value={trackVolumeStates[trackKey] ?? 1}
+                                  onChange={(e) => setTrackVolume(trackKey, parseFloat(e.target.value))}
+                                  className="absolute inset-0 w-full opacity-0 cursor-pointer"
                                 />
                               </div>
-                              {/* Input invisible sobre la barra */}
-                              <input
-                                type="range"
-                                min="0"
-                                max="1"
-                                step="0.01"
-                                value={trackVolumeStates[trackKey] ?? 1}
-                                onChange={(e) => setTrackVolume(trackKey, parseFloat(e.target.value))}
-                                className="absolute inset-0 w-full opacity-0 cursor-pointer"
-                                title={`Volumen: ${Math.round((trackVolumeStates[trackKey] ?? 1) * 100)}%`}
-                              />
-                            </div>
 
-                            {/* Botones M y S */}
-                            <div className="flex space-x-0.5 self-end">
+                              {/* Botones M y S - Más pequeños */}
+                              <div className="flex space-x-0.5">
                               <button
                                 type="button"
                                 onClick={(e) => {
@@ -2645,20 +2687,23 @@ export default function Home() {
                     );
                   })
                 ) : null}
-                
               </div>
               
-              {/* Área de tracks (sin controles) */}
-              <div className="flex-1 overflow-x-auto overflow-y-hidden no-scrollbar">
-                <div className="h-full flex flex-col min-w-full">
+              {/* Área de tracks (sin controles) - Asegurar scroll horizontal en móvil */}
+              <div className="flex-1 overflow-x-auto overflow-y-hidden no-scrollbar bg-gray-900 border-l border-gray-800 md:border-none">
+                <div className="h-auto flex flex-col min-w-full">
                   {(() => {
-                    const tracks = selectedSong?.stems ? Object.entries(selectedSong.stems) : [];
+                    const tracks = selectedSong?.stems 
+                      ? Object.entries(selectedSong.stems).filter(([k, v]) => v !== undefined && k !== 'metronome') 
+                      : [];
                     
                     
                     return tracks.length > 0;
                   })() ? (
                   (() => {
-                    const tracks = selectedSong?.stems ? Object.entries(selectedSong.stems) : [];
+                    const tracks = selectedSong?.stems 
+                      ? Object.entries(selectedSong.stems).filter(([k, v]) => v !== undefined && k !== 'metronome') 
+                      : [];
                     
                     
                     return tracks;
@@ -2691,7 +2736,7 @@ export default function Home() {
                     };
                     
                     return (
-                      <div key={trackKey} className="h-24 min-h-[96px] w-full md:min-w-[800px] shrink-0">
+                      <div key={trackKey} className="h-[60px] min-h-[60px] w-full md:min-w-[800px] shrink-0">
                         {/* Track independiente */}
                         <div className={`h-full ${trackBackgroundColor} border-b border-gray-700 min-w-0 relative overflow-visible`}>
                           {/* Waveform Container - Sin restricciones */}
@@ -2845,9 +2890,8 @@ export default function Home() {
               </div>
             </div>
             
-            {/* Mixer Area - 30% */}
-            <div className="h-[30vh] bg-black pl-2 pr-2 md:pl-6 md:pr-[20px] pt-4 md:pt-6 pb-4 md:pb-6 overflow-y-auto">
-              <div className="h-full">
+            <div className="flex-1 bg-black px-1 md:px-6 md:pr-[20px] pt-1 md:pt-2 pb-2 md:pb-4 overflow-hidden">
+              <div className="h-full flex flex-col">
                 {showEQInMixer ? (
                   <VolumeEQModal
                     isOpen={true}
