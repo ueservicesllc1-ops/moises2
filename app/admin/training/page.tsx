@@ -32,6 +32,8 @@ interface ZionSong {
   createdAt: string
   trackSources: Record<string, string>
   aiMapping?: TrackMapping | null
+  rawData?: any
+  trainingIgnored?: boolean
 }
 
 // Interface para el mapeo que hace el Admin
@@ -50,7 +52,7 @@ export default function AITrainingFactory() {
   const [loading, setLoading] = useState(true)
   const [selectedSong, setSelectedSong] = useState<ZionSong | null>(null)
   const [filter, setFilter] = useState<'all' | 'pending' | 'curated'>('all')
-  const [mapping, setMapping] = useState<TrackMapping>({ vocals: '', drums: '', bass: '', other: [] })
+  const [mapping, setMapping] = useState<TrackMapping>({ vocals: '', drums: '', bass: '', guitar: '', piano: '', other: [] })
   const [trainingBusy, setTrainingBusy] = useState(false)
   const [trainingCallId, setTrainingCallId] = useState<string | null>(null)
   const [trainingStatus, setTrainingStatus] = useState<'idle' | 'syncing' | 'training' | 'completed' | 'error'>('idle')
@@ -403,7 +405,7 @@ export default function AITrainingFactory() {
         setTrainingStatus('completed')
         toast.success(`¡Modelo detectado! Archivos: ${data.files?.join(', ') || 'epoch_020.pt'}`, { id: checkToast })
       } else {
-        toast.info('No se detectó ningún modelo completado aún en la nube.', { id: checkToast })
+        toast('No se detectó ningún modelo completado aún en la nube.', { id: checkToast, icon: 'ℹ️' })
       }
     } catch (e) {
       toast.error('Error al verificar modelos en la nube.', { id: checkToast })
