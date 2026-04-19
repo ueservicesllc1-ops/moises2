@@ -58,7 +58,7 @@ export default function AITrainingFactory() {
   const [trainingStatus, setTrainingStatus] = useState<'idle' | 'syncing' | 'training' | 'completed' | 'error'>('idle')
   const [trainingTimer, setTrainingTimer] = useState(0)
   const [totalDuration, setTotalDuration] = useState<number | null>(null)
-  
+
   const COLLECTION_NAME = 'songs' // Cambia esto si Zion guarda en otra colección
 
   // Timer principal
@@ -102,12 +102,12 @@ export default function AITrainingFactory() {
   // Monitorear estado del entrenamiento si hay un callId activo
   useEffect(() => {
     if (!trainingCallId) return
-    
+
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/training/status/${trainingCallId}`)
         const data = await res.json()
-        
+
         if (data.status === 'completed') {
           setTrainingStatus('completed')
           if (data.duration) setTotalDuration(data.duration)
@@ -164,7 +164,7 @@ export default function AITrainingFactory() {
       data.tracks.forEach((track: any) => {
         if (!track) return
         const name = track.name || track.originalName || 'Pista Desconocida'
-        
+
         // FILTRO CRÍTICO: Ignorar la mezcla total de previsualización
         if (name === '__PreviewMix') return
 
@@ -204,19 +204,19 @@ export default function AITrainingFactory() {
 
     return normalized
   }
-  
+
   const fetchZionSongs = async () => {
     setLoading(true)
     try {
       const songsRef = collection(zionDb, COLLECTION_NAME)
       const qMT = query(songsRef, where('tracks', '!=', null), limit(500))
       const snapshot = await getDocs(qMT)
-      
+
       // Consultar curaciones e ignorados en Judith
       const judithDb = getFirestore()
       const curationsRef = collection(judithDb, 'zion_curations')
       const ignoredRef = collection(judithDb, 'zion_ignored')
-      
+
       const [curationsSnap, ignoredSnap] = await Promise.all([
         getDocs(curationsRef),
         getDocs(ignoredRef)
@@ -224,7 +224,7 @@ export default function AITrainingFactory() {
 
       const localMappings = new Map()
       curationsSnap.forEach(d => localMappings.set(d.id, d.data()))
-      
+
       const ignoredIds = new Set()
       ignoredSnap.forEach(d => ignoredIds.add(d.id))
 
@@ -233,12 +233,12 @@ export default function AITrainingFactory() {
 
       snapshot.forEach(docSnap => {
         const data = docSnap.data()
-        
+
         // Si está marcado como ignorado localmente, saltar
         if (ignoredIds.has(docSnap.id)) {
           skipped++; return
         }
-        
+
         if (data.useType === 'chord') { skipped++; return }
 
         const trackSources = normalizeTrackSources(data)
@@ -285,39 +285,39 @@ export default function AITrainingFactory() {
         setMapping(saved)
         return
       }
-      
+
       // Auto-mapeo inteligente según nombres de Zion
       const tracks = Object.keys(selectedSong.trackSources)
       const newMapping: TrackMapping = { vocals: '', drums: '', bass: '', guitar: '', piano: '', other: [] }
-      
+
       tracks.forEach(tk => {
         const low = tk.toLowerCase()
-        
+
         // REGLA 1: VOCALES (Incluye BGVS, CHOIR y COROS)
         if (low.includes('voc') || low.includes('voice') || low.includes('bgvs') || low.includes('choir') || low.includes('coros')) {
           if (!newMapping.vocals) newMapping.vocals = tk
-        } 
-        
+        }
+
         // REGLA 2: BATERIA
         else if (low.includes('drum') || low.includes('bat') || low.includes('kick') || low.includes('perc')) {
           if (!newMapping.drums) newMapping.drums = tk
         }
-        
+
         // REGLA 3: BAJO
         else if (low.includes('bass') || low.includes('bajo')) {
           if (!newMapping.bass) newMapping.bass = tk
         }
-        
+
         // REGLA 4: GUITARRA (EG1, GE1, GA, AG, Acustic, etc.)
         else if (low.match(/guitar|gtr|violao|guita|eg1|ge1|ga1|ga|ag|acustic|ebow/i)) {
           newMapping.guitar = tk
         }
-        
+
         // REGLA 5: PIANO (Solo Piano puro)
         else if (low.includes('piano')) {
           newMapping.piano = tk
         }
-        
+
         // OTROS
         else if (!low.match(/click|guia|metronomo|guide|cue|referencia|__previewmix/i)) {
           // Solo añadir a otros si NO fue asignado a una categoría principal arriba
@@ -336,8 +336,8 @@ export default function AITrainingFactory() {
     setMapping(prev => {
       // Quitar el nuevo track de la lista de 'otros' si estaba ahí
       const newOther = prev.other.filter(tk => tk !== trackId);
-      return { 
-        ...prev, 
+      return {
+        ...prev,
         [category]: trackId,
         other: newOther
       };
@@ -362,7 +362,7 @@ export default function AITrainingFactory() {
       const response = await fetch('/api/training/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           manifest: {
             songs: curated.map(s => ({
               id: s.id,
@@ -370,10 +370,10 @@ export default function AITrainingFactory() {
               trackSources: s.trackSources
             }))
           },
-          epochs: 20 
+          epochs: 20
         }),
       })
-      
+
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Fallo al iniciar entrenamiento')
 
@@ -400,7 +400,7 @@ export default function AITrainingFactory() {
     try {
       const res = await fetch('/api/training/status/check_fallback')
       const data = await res.json()
-      
+
       if (data.status === 'completed') {
         setTrainingStatus('completed')
         toast.success(`¡Modelo detectado! Archivos: ${data.files?.join(', ') || 'epoch_020.pt'}`, { id: checkToast })
@@ -421,7 +421,7 @@ export default function AITrainingFactory() {
         ignored: true,
         ignoredAt: new Date()
       })
-      
+
       setSongs(prev => prev.map(s => s.id === songId ? { ...s, trainingIgnored: true } : s))
       toast.success('Canción ocultada localmente')
     } catch (e) {
@@ -432,7 +432,7 @@ export default function AITrainingFactory() {
 
   const handleCurate = async () => {
     if (!selectedSong) return
-    
+
     // Validar mínimo
     const totalAssigned = !!mapping.vocals || !!mapping.drums || !!mapping.bass || !!mapping.guitar || !!mapping.piano || mapping.other.length > 0;
     if (!totalAssigned) {
@@ -444,7 +444,7 @@ export default function AITrainingFactory() {
     try {
       const judithDb = getFirestore()
       const curationRef = doc(judithDb, 'zion_curations', selectedSong.id)
-      
+
       // Guardar en la base de datos de Judith (esta sí tenemos permisos de escritura)
       await setDoc(curationRef, {
         songId: selectedSong.id,
@@ -453,10 +453,10 @@ export default function AITrainingFactory() {
         curatedAt: new Date().toISOString()
       }, { merge: true })
 
-      setSongs(songs.map(s => 
+      setSongs(songs.map(s =>
         s.id === selectedSong.id ? { ...s, isCurated: true, aiMapping: mapping } : s
       ))
-      
+
       toast.dismiss(loadingToast)
       toast.success(`✓ ${selectedSong.name} guardada permanentemente`)
       setSelectedSong(null)
@@ -478,27 +478,27 @@ export default function AITrainingFactory() {
             <RefreshCw className="w-4 h-4" /> Refrescar
           </button>
           <button
-                onClick={handleStartTraining}
-                disabled={trainingBusy}
-                className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-4 px-6 rounded-xl shadow-lg shadow-blue-500/20 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3 group"
-              >
-                {trainingBusy ? (
-                  <RefreshCw className="w-6 h-6 animate-spin" />
-                ) : (
-                  <BrainCircuit className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                )}
-                {trainingBusy ? 'Procesando...' : 'Entrenar ahora'}
-              </button>
+            onClick={handleStartTraining}
+            disabled={trainingBusy}
+            className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-4 px-6 rounded-xl shadow-lg shadow-blue-500/20 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3 group"
+          >
+            {trainingBusy ? (
+              <RefreshCw className="w-6 h-6 animate-spin" />
+            ) : (
+              <BrainCircuit className="w-6 h-6 group-hover:scale-110 transition-transform" />
+            )}
+            {trainingBusy ? 'Procesando...' : 'Entrenar ahora'}
+          </button>
 
-              <button
-                onClick={handleCheckExistingModel}
-                disabled={trainingBusy}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-4 px-6 rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2"
-                title="Verificar si ya existe un modelo entrenado en la nube"
-              >
-                <Search className="w-5 h-5" />
-                Verificar Nube
-              </button>
+          <button
+            onClick={handleCheckExistingModel}
+            disabled={trainingBusy}
+            className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-4 px-6 rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2"
+            title="Verificar si ya existe un modelo entrenado en la nube"
+          >
+            <Search className="w-5 h-5" />
+            Verificar Nube
+          </button>
         </div>
       </div>
 
@@ -524,27 +524,25 @@ export default function AITrainingFactory() {
 
             {/* MONITOR DE ESTADO - Posición Final */}
             {trainingStatus !== 'idle' && (
-              <div className={`p-4 rounded-xl border mb-4 transition-all ${
-                trainingStatus === 'training' ? 'bg-blue-600/10 border-blue-500 animate-pulse' : 
-                trainingStatus === 'syncing' ? 'bg-yellow-600/10 border-yellow-500 animate-pulse' :
-                trainingStatus === 'completed' ? 'bg-green-600/10 border-green-500' : 'bg-red-600/20 border-red-500'
-              }`}>
+              <div className={`p-4 rounded-xl border mb-4 transition-all ${trainingStatus === 'training' ? 'bg-blue-600/10 border-blue-500 animate-pulse' :
+                  trainingStatus === 'syncing' ? 'bg-yellow-600/10 border-yellow-500 animate-pulse' :
+                    trainingStatus === 'completed' ? 'bg-green-600/10 border-green-500' : 'bg-red-600/20 border-red-500'
+                }`}>
                 <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${
-                    trainingStatus === 'training' ? 'bg-blue-500' : 
-                    trainingStatus === 'syncing' ? 'bg-yellow-500' :
-                    trainingStatus === 'completed' ? 'bg-green-500' : 'bg-red-500'
-                  }`}>
+                  <div className={`p-2 rounded-lg ${trainingStatus === 'training' ? 'bg-blue-500' :
+                      trainingStatus === 'syncing' ? 'bg-yellow-500' :
+                        trainingStatus === 'completed' ? 'bg-green-500' : 'bg-red-500'
+                    }`}>
                     {trainingStatus === 'syncing' ? <RefreshCw className="w-4 h-4 text-black animate-spin" /> : <Rocket className="w-4 h-4 text-black" />}
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center justify-between">
                       <div className="text-xs font-bold uppercase tracking-wider">
-                        {trainingStatus === 'training' ? 'Entrenando' : 
-                        trainingStatus === 'syncing' ? 'Sincronizando' :
-                        trainingStatus === 'completed' ? 'Finalizado' : 'Error'}
+                        {trainingStatus === 'training' ? 'Entrenando' :
+                          trainingStatus === 'syncing' ? 'Sincronizando' :
+                            trainingStatus === 'completed' ? 'Finalizado' : 'Error'}
                       </div>
-                      <button 
+                      <button
                         onClick={() => {
                           setTrainingStatus('idle')
                           setTrainingCallId(null)
@@ -558,9 +556,9 @@ export default function AITrainingFactory() {
                       </button>
                     </div>
                     <div className="text-[9px] text-gray-400">
-                      {trainingStatus === 'training' ? `Entrenando (${formatTime(trainingTimer)})...` : 
-                       trainingStatus === 'syncing' ? `Preparando dataset (${formatTime(trainingTimer)})...` :
-                       trainingStatus === 'completed' ? `Completado en ${totalDuration ? formatTime(Math.round(totalDuration)) : formatTime(trainingTimer)}` : 'Fallo en la conexión.'}
+                      {trainingStatus === 'training' ? `Entrenando (${formatTime(trainingTimer)})...` :
+                        trainingStatus === 'syncing' ? `Preparando dataset (${formatTime(trainingTimer)})...` :
+                          trainingStatus === 'completed' ? `Completado en ${totalDuration ? formatTime(Math.round(totalDuration)) : formatTime(trainingTimer)}` : 'Fallo en la conexión.'}
                     </div>
                   </div>
                 </div>
@@ -584,20 +582,19 @@ export default function AITrainingFactory() {
               if (s.rawData?.trainingIgnored) return false;
               return filter === 'all' || (filter === 'pending' ? !s.isCurated : s.isCurated);
             }).map(song => (
-              <div 
-                key={song.id} 
+              <div
+                key={song.id}
                 onClick={() => setSelectedSong(song)}
-                className={`group p-4 rounded-xl border transition-all cursor-pointer relative overflow-hidden ${
-                  selectedSong?.id === song.id 
-                    ? 'bg-blue-600/20 border-blue-500 shadow-lg shadow-blue-500/10' 
-                    : song.isCurated 
-                      ? 'bg-green-600/5 border-green-500/50 hover:border-green-400' 
+                className={`group p-4 rounded-xl border transition-all cursor-pointer relative overflow-hidden ${selectedSong?.id === song.id
+                    ? 'bg-blue-600/20 border-blue-500 shadow-lg shadow-blue-500/10'
+                    : song.isCurated
+                      ? 'bg-green-600/5 border-green-500/50 hover:border-green-400'
                       : 'bg-gray-800/50 border-gray-700 hover:border-gray-500'
-                }`}
+                  }`}
               >
                 {/* Boton para ignorar/ocultar */}
                 {!song.isCurated && (
-                  <button 
+                  <button
                     onClick={(e) => handleIgnoreSong(song.id, e)}
                     className="absolute top-2 right-2 p-1.5 opacity-0 group-hover:opacity-100 bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-lg transition-all z-20"
                     title="Ocultar de la lista de entrenamiento"
@@ -677,8 +674,8 @@ export default function AITrainingFactory() {
                       {Object.keys(selectedSong.trackSources).map(tk => (
                         <label key={tk} className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-all ${mapping.other.includes(tk) ? 'bg-blue-600/30 border-blue-500' : 'bg-gray-800 border-gray-700'}`}>
                           <input type="checkbox" checked={mapping.other.includes(tk)} onChange={e => {
-                            if (e.target.checked) setMapping({...mapping, other: [...mapping.other, tk]})
-                            else setMapping({...mapping, other: mapping.other.filter(x => x !== tk)})
+                            if (e.target.checked) setMapping({ ...mapping, other: [...mapping.other, tk] })
+                            else setMapping({ ...mapping, other: mapping.other.filter(x => x !== tk) })
                           }} className="w-4 h-4" />
                           <span className="text-sm truncate">{tk}</span>
                         </label>
