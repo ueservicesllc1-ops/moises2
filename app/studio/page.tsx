@@ -2075,22 +2075,22 @@ export default function Home() {
                     <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#a3a3a3]">
                       Título
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#a3a3a3]">
+                    <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#a3a3a3]">
                       Creado
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#a3a3a3]">
+                    <th className="hidden lg:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#a3a3a3]">
                       Género
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#a3a3a3]">
+                    <th className="hidden lg:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#a3a3a3]">
                       BPM
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#a3a3a3]">
+                    <th className="hidden xl:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#a3a3a3]">
                       Tonalidad
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#a3a3a3]">
+                    <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#a3a3a3]">
                       Duración
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#a3a3a3]">
+                    <th className="hidden md:table-cell px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-[#a3a3a3]">
                       Acciones
                     </th>
                   </tr>
@@ -2103,7 +2103,37 @@ export default function Home() {
                       className="border-b border-[#1f1f1f] transition hover:bg-[#262626]/60"
                     >
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          {/* Botón de opciones para móvil */}
+                          <div className="relative md:hidden">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setShowDropdown(showDropdown === song.id ? null : (song.id || ''))
+                              }}
+                              className="rounded-lg p-1 text-[#737373] hover:bg-[#262626] hover:text-white"
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </button>
+                            
+                            {showDropdown === song.id && (
+                              <div className="absolute left-0 top-full z-20 mt-1 min-w-[140px] rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] py-1 shadow-2xl">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setDeleteConfirmModal({ show: true, song: song })
+                                    setShowDropdown(null)
+                                  }}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-400 hover:bg-red-950/30"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  Eliminar
+                                </button>
+                              </div>
+                            )}
+                          </div>
                           <span className="w-5 text-right text-xs tabular-nums text-[#737373]">{index + 1}</span>
                           <button
                             type="button"
@@ -2134,7 +2164,7 @@ export default function Home() {
                           </button>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-[#a3a3a3]">
+                      <td className="hidden md:table-cell px-4 py-3 text-sm text-[#a3a3a3]">
                         {song.uploadedAt
                           ? (() => {
                               try {
@@ -2152,13 +2182,13 @@ export default function Home() {
                             })()
                           : '—'}
                       </td>
-                      <td className="px-4 py-3 text-sm text-[#a3a3a3]">{song.genre || '—'}</td>
-                      <td className="px-4 py-3 text-sm tabular-nums text-[#a3a3a3]">
+                      <td className="hidden lg:table-cell px-4 py-3 text-sm text-[#a3a3a3]">{song.genre || '—'}</td>
+                      <td className="hidden lg:table-cell px-4 py-3 text-sm tabular-nums text-[#a3a3a3]">
                         {song.bpm ? (song.bpm % 1 === 0 ? song.bpm.toFixed(0) : song.bpm.toFixed(1)) : '…'}
                       </td>
-                      <td className="px-4 py-3 text-sm text-[#a3a3a3]">{song.key || '—'}</td>
-                      <td className="px-4 py-3 text-sm tabular-nums text-[#a3a3a3]">{song.duration || '…'}</td>
-                      <td className="px-4 py-3">
+                      <td className="hidden xl:table-cell px-4 py-3 text-sm text-[#a3a3a3]">{song.key || '—'}</td>
+                      <td className="hidden md:table-cell px-4 py-3 text-sm tabular-nums text-[#a3a3a3]">{song.duration || '…'}</td>
+                      <td className="hidden md:table-cell px-4 py-3">
                         <div className="flex items-center gap-1">
                           {song.stems && Object.keys(song.stems).length > 0 && <></>}
                           <div className="flex items-center gap-0.5">
@@ -2294,20 +2324,47 @@ export default function Home() {
       {showSongModal && selectedSong && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
 
-          <div className="flex h-[100dvh] w-full max-w-[1400px] flex-col border border-white/20 bg-gray-800 md:h-[90vh] md:w-[90vw]">
+          <div className="flex h-[100dvh] w-full max-w-[1400px] flex-col border border-white/20 bg-gray-800 md:h-[90vh] md:w-[90vw] relative">
+            {/* Botón de cerrar Absoluto para móvil */}
+            <button
+              onClick={() => {
+                // Mismo logic que el botón de cerrar del header
+                Object.values(audioElements).forEach(audio => {
+                  audio.pause()
+                  audio.currentTime = 0
+                  audio.src = ''
+                })
+                Object.values(originalAudioElements).forEach(audio => {
+                  audio.pause()
+                  audio.currentTime = 0
+                  audio.src = ''
+                })
+                setAudioElements({})
+                setWaveforms({})
+                setTrackLoadingStates({})
+                setOriginalAudioElements({})
+                setCurrentPlayingSong(null)
+                closeSongModal()
+              }}
+              className="absolute top-2 right-2 z-[60] flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-md transition-all hover:bg-black/80 md:hidden"
+              aria-label="Cerrar mixer"
+            >
+              <X className="h-6 w-6" />
+            </button>
+
             {/* Header - 10% de la pantalla */}
-            <div className="bg-black min-h-[76px] flex flex-wrap items-center justify-between gap-2 px-3 py-2 md:h-[10vh] md:px-6">
+            <div className="bg-black min-h-[64px] flex items-center justify-between gap-2 px-2 py-1 md:h-[10vh] md:px-6">
               {/* Controles de audio en el lado izquierdo */}
-              <div className="flex items-center">
+              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
                 {/* Botón Play/Pause */}
                 <button
                   onClick={togglePlayPause}
-                  className="mobile-touch-target bg-black/40 backdrop-blur-md hover:bg-black/60 h-12 w-12 md:h-16 md:w-16 flex items-center justify-center transition-all duration-300 shadow-lg"
+                  className="mobile-touch-target bg-black/40 backdrop-blur-md hover:bg-black/60 h-10 w-10 md:h-16 md:w-16 flex items-center justify-center transition-all duration-300 shadow-lg shrink-0"
                 >
                   <img 
                     src={isPlaying ? "/images/pausa.png" : "/images/play.png"} 
                     alt={isPlaying ? "Pause" : "Play"}
-                    className="w-10 h-10"
+                    className="w-8 h-8 md:w-10 md:h-10"
                   />
                 </button>
                 
@@ -2316,34 +2373,26 @@ export default function Home() {
                   onClick={() => {
                     Object.entries(audioElements).forEach(([trackKey, audio]) => {
                       audio.pause();
-                      // Todos los tracks se resetean al tiempo 0
                       audio.currentTime = 0;
                     });
                     setIsPlaying(false);
-                    setCurrentTime(0); // Resetear el tiempo actual
-                    
-                    // Metrónomo deshabilitado temporalmente
-                    // stopMetronome();
+                    setCurrentTime(0);
                   }}
-                  className="mobile-touch-target bg-black/40 backdrop-blur-md hover:bg-black/60 -ml-1 h-12 w-12 md:-ml-2 md:h-16 md:w-16 flex items-center justify-center transition-all duration-300 shadow-lg"
+                  className="mobile-touch-target bg-black/40 backdrop-blur-md hover:bg-black/60 h-10 w-10 md:h-16 md:w-16 flex items-center justify-center transition-all duration-300 shadow-lg shrink-0"
                 >
                   <img 
                     src="/images/stop.png" 
                     alt="Stop"
-                    className="w-10 h-10"
+                    className="w-8 h-8 md:w-10 md:h-10"
                   />
                 </button>
                 
-                
                 {/* Pantalla LED - Tiempo actual */}
-                <div className="bg-black p-1 shadow-lg">
-                  <div className="bg-gray-800 text-gray-200 font-mono text-sm font-bold tracking-wider px-1 py-0.5">
+                <div className="bg-black p-0.5 shadow-lg shrink-0">
+                  <div className="bg-gray-800 text-gray-200 font-mono text-[10px] md:text-sm font-bold tracking-wider px-1 py-0.5">
                     {Math.floor(currentTime / 60)}:{Math.floor(currentTime % 60).toString().padStart(2, '0')}
                   </div>
                 </div>
-                
-                {/* Espacio separador */}
-                <div className="w-2"></div>
                 
                 {/* Barra de progreso */}
                 <input
@@ -2352,38 +2401,32 @@ export default function Home() {
                   max={duration || 0}
                   value={currentTime}
                   onChange={handleSeek}
-                  className="h-1 w-28 bg-gray-700 appearance-none cursor-pointer accent-teal-500 md:w-52"
+                  className="h-1 w-16 bg-gray-700 appearance-none cursor-pointer accent-teal-500 md:w-52 shrink-0"
                 />
                 
-                {/* Espacio separador */}
-                <div className="w-2"></div>
-                
                 {/* Pantalla LED - Duración total */}
-                <div className="bg-black p-1 shadow-lg">
-                  <div className="bg-gray-700 text-gray-100 font-mono text-sm font-bold tracking-wider px-1 py-0.5">
+                <div className="bg-black p-0.5 shadow-lg shrink-0">
+                  <div className="bg-gray-700 text-gray-100 font-mono text-[10px] md:text-sm font-bold tracking-wider px-1 py-0.5">
                     {duration ? `${Math.floor(duration / 60)}:${Math.floor(duration % 60).toString().padStart(2, '0')}` : '0:00'}
                   </div>
                 </div>
                 
-                {/* Espacio separador */}
-                <div className="w-2"></div>
-                
                 {/* Control de volumen */}
-                <div className="flex items-center space-x-3">
+                <div className="flex items-center gap-1 md:gap-3 shrink-0">
                   <button
                     onClick={toggleMute}
-                    className="mobile-touch-target bg-black/40 backdrop-blur-md hover:bg-black/60 h-12 w-12 md:h-16 md:w-16 flex items-center justify-center transition-all duration-300 shadow-lg"
+                    className="mobile-touch-target bg-black/40 backdrop-blur-md hover:bg-black/60 h-10 w-10 md:h-16 md:w-16 flex items-center justify-center transition-all duration-300 shadow-lg"
                   >
                     <img 
                       src={isMuted ? "/images/unmute.png" : "/images/mute.png"} 
                       alt={isMuted ? "Unmute" : "Mute"}
-                      className="w-10 h-10"
+                      className="w-8 h-8 md:w-10 md:h-10"
                     />
                   </button>
                   
                   {/* Control de volumen master */}
-                  <div className="flex items-center space-x-2">
-                    <span className="text-white text-xs font-mono">Vol</span>
+                  <div className="hidden sm:flex items-center space-x-2">
+                    <span className="text-white text-[10px] font-mono">Vol</span>
                     <input
                       type="range"
                       min="0"
@@ -2391,9 +2434,9 @@ export default function Home() {
                       step="0.1"
                       value={isMuted ? 0 : volume}
                       onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                      className="w-20 h-1 bg-gray-600 appearance-none cursor-pointer accent-yellow-400"
+                      className="w-16 md:w-20 h-1 bg-gray-600 appearance-none cursor-pointer accent-yellow-400"
                     />
-                    <span className="text-white text-xs font-mono w-8">
+                    <span className="text-white text-[10px] font-mono w-8">
                       {Math.round((isMuted ? 0 : volume) * 100)}%
                     </span>
                   </div>
@@ -2411,23 +2454,19 @@ export default function Home() {
 
               {/* Botón Metronome - REMOVED */}
               
-              {/* Botón de cerrar en el lado derecho */}
+              {/* Botón de cerrar en el lado derecho - Oculto en móvil ya que usamos el absoluto */}
               <button
                 onClick={() => {
-                  // Limpiar elementos de audio
                   Object.values(audioElements).forEach(audio => {
                     audio.pause()
                     audio.currentTime = 0
                     audio.src = ''
                   })
-                  
-                  // Limpiar también los elementos de audio original
                   Object.values(originalAudioElements).forEach(audio => {
                     audio.pause()
                     audio.currentTime = 0
                     audio.src = ''
                   })
-                  
                   setAudioElements({})
                   setWaveforms({})
                   setTrackLoadingStates({})
@@ -2435,7 +2474,7 @@ export default function Home() {
                   setCurrentPlayingSong(null)
                   closeSongModal()
                 }}
-                className="text-gray-400 hover:text-white"
+                className="hidden md:block text-gray-400 hover:text-white"
               >
                 <X className="w-6 h-6" />
               </button>
@@ -2445,9 +2484,9 @@ export default function Home() {
             <div className="h-[20px] bg-gray-950 w-full"></div>
             
             {/* Tracks Area - 60% */}
-            <div className="h-[calc(100dvh-180px)] bg-gray-900 flex overflow-hidden md:h-[60vh]">
+            <div className="h-[calc(100dvh-204px)] bg-gray-900 flex overflow-y-auto overflow-x-hidden md:h-[60vh]">
               {/* Área fija de controles a la izquierda */}
-              <div className="w-40 bg-gray-700 border-r border-gray-600 flex flex-col flex-shrink-0">
+              <div className="w-24 md:w-40 bg-gray-700 border-r border-gray-600 flex flex-col flex-shrink-0">
                 {(() => {
                   const tracks = selectedSong?.stems ? Object.entries(selectedSong.stems) : [];
                   
@@ -2489,23 +2528,22 @@ export default function Home() {
                     // Si es el track del metronome, renderizar componente especial - REMOVED
                     
                     return (
-                      <div key={trackKey} className="h-[12%] border-b border-gray-600 flex flex-col items-start justify-between p-2">
+                      <div key={trackKey} className="h-24 min-h-[96px] border-b border-gray-600 flex flex-col items-start justify-between p-2 shrink-0">
                         {/* Parte superior con nombre y color */}
                         <div className="flex items-start justify-between w-full">
-                          <div className="flex flex-col">
-                            <div className="flex items-center gap-2">
-                              <span className="text-white text-xs font-bold">{config.name}</span>
-                              {/* Mostrar mensaje especial para track temporal de generación */}
+                          <div className="flex flex-col min-w-0">
+                            <div className="flex items-center gap-1 md:gap-2">
+                              <span className="text-white text-[10px] md:text-xs font-bold truncate">{config.name}</span>
                               {trackUrl === undefined ? (
-                                <span className="text-gray-400 text-[10px] font-mono bg-gray-800/50 px-1 rounded animate-pulse">
-                                  Generando...
+                                <span className="text-gray-400 text-[8px] md:text-[10px] font-mono bg-gray-800/50 px-1 rounded animate-pulse">
+                                  ...
                                 </span>
                               ) : (
                                 <>
                                   {(() => {
                                     const onsetValue = trackOnsets[trackKey];
                                     return onsetValue !== undefined && (
-                                      <span className="text-gray-300 text-[10px] font-mono bg-gray-800/50 px-1 rounded">
+                                      <span className="hidden sm:inline text-gray-300 text-[10px] font-mono bg-gray-800/50 px-1 rounded">
                                         {onsetValue}ms
                                       </span>
                                     );
@@ -2523,7 +2561,7 @@ export default function Home() {
                               e.stopPropagation();
                               setShowColorPicker(trackKey);
                             }}
-                            className="h-5 w-6 min-h-0 min-w-0 rounded border border-gray-600 hover:border-white transition-all duration-300 animate-pulse shadow-lg"
+                            className="h-4 w-5 md:h-5 md:w-6 min-h-0 min-w-0 rounded border border-gray-600 hover:border-white transition-all duration-300 animate-pulse shadow-lg shrink-0"
                             style={{ 
                               backgroundColor: getColorFromClass(trackBackgroundColor),
                               boxShadow: `0 0 4px ${getColorFromClass(trackBackgroundColor)}, 0 0 8px ${getColorFromClass(trackBackgroundColor)}`
@@ -2611,7 +2649,7 @@ export default function Home() {
               </div>
               
               {/* Área de tracks (sin controles) */}
-              <div className="flex-1 overflow-x-auto overflow-y-hidden">
+              <div className="flex-1 overflow-x-auto overflow-y-hidden no-scrollbar">
                 <div className="h-full flex flex-col min-w-full">
                   {(() => {
                     const tracks = selectedSong?.stems ? Object.entries(selectedSong.stems) : [];
@@ -2653,7 +2691,7 @@ export default function Home() {
                     };
                     
                     return (
-                      <div key={trackKey} className="h-[12%] w-full md:min-w-[800px]">
+                      <div key={trackKey} className="h-24 min-h-[96px] w-full md:min-w-[800px] shrink-0">
                         {/* Track independiente */}
                         <div className={`h-full ${trackBackgroundColor} border-b border-gray-700 min-w-0 relative overflow-visible`}>
                           {/* Waveform Container - Sin restricciones */}
@@ -2808,7 +2846,7 @@ export default function Home() {
             </div>
             
             {/* Mixer Area - 30% */}
-            <div className="h-[30vh] bg-black pl-6 pr-[20px] pt-6 pb-6">
+            <div className="h-[30vh] bg-black pl-2 pr-2 md:pl-6 md:pr-[20px] pt-4 md:pt-6 pb-4 md:pb-6 overflow-y-auto">
               <div className="h-full">
                 {showEQInMixer ? (
                   <VolumeEQModal
