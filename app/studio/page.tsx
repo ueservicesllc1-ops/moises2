@@ -2813,7 +2813,7 @@ export default function Home() {
                   <div className="h-8 w-full border-b border-gray-600 bg-[#151515] relative shrink-0 z-30">
                     {(() => {
                       const markers = [];
-                      const songDuration = duration || selectedSong?.duration || 0;
+                      const songDuration = Number(duration || selectedSong?.duration || 0);
                       const step = 5; // Resolución ultra-fina
                       
                       if (songDuration > 0) {
@@ -2859,7 +2859,7 @@ export default function Home() {
                     <div 
                       className="absolute top-0 bottom-0 w-[1.5px] bg-yellow-400 z-40"
                       style={{ 
-                        left: `${(currentTime / Math.max(duration || selectedSong?.duration || 1, 0.1)) * 100}%`,
+                        left: `${(currentTime / Math.max(Number(duration || selectedSong?.duration || 1), 0.1)) * 100}%`,
                         boxShadow: '0 0 12px 2px rgba(234,179,8,0.7)'
                       }}
                     />

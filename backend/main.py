@@ -701,6 +701,18 @@ async def process_audio(
         print(f"\n[PROCESS] Demucs separation completed! Got {len(stems)} stems")
         print(f"   Stems: {list(stems.keys())}")
         
+        # Generar Click Track Sincronizado
+        update_progress(82, "Sincronizando metrónomo con la métrica del audio...")
+        try:
+            print("[PROCESS] Generando Click Track (Metrónomo)...")
+            click_path = target_dir / "click.wav"
+            # Execute synchronously in a background thread to prevent blocking
+            await asyncio.to_thread(generate_click_track_audio, str(task.file_path), str(click_path))
+            stems["click"] = str(click_path)
+            print("[PROCESS] Click track generado exitosamente")
+        except Exception as e:
+            print(f"[PROCESS] Error generando click track: {e}")
+        
         # Upload stems to B2 for online playback
         print(f"\n[PROCESS] Uploading {len(stems)} stems to B2...")
         task.progress = 85
@@ -1535,6 +1547,26 @@ def detect_offset(audio_path: str) -> float:
     
     # 5. Fallback: usar el primer beat detectado
     return round(float(max(0.1, beat_times[0])), 3)
+
+def generate_click_track_audio(audio_path: str, output_path: str):
+    """Generates a perfect click track synchronized to the detected beats of the song."""
+    import librosa
+    import soundfile as sf
+    import numpy as np
+
+    # Load audio
+    y, sr = librosa.load(audio_path, sr=44100, mono=True)
+    
+    # Analyze tempo and beats focusing on percussive onset
+    onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+    tempo, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
+    
+    # Generate the actual click synthesis
+    clicks = librosa.clicks(frames=beat_frames, sr=sr, length=len(y))
+    
+    # Write to WAV file
+    sf.write(output_path, clicks, sr, subtype='PCM_16')
+    return output_path
 
 def detect_bpm_and_duration(audio_path: str):
     """Detecta BPM promedio y duración del audio con algoritmo mejorado."""
