@@ -51,6 +51,9 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
   const [completedTrackCount, setCompletedTrackCount] = useState(2);
   const [monthlyUsedSeconds, setMonthlyUsedSeconds] = useState(0);
   const [usageLoading, setUsageLoading] = useState(false);
+  const [isQueued, setIsQueued] = useState(false);
+  const [queuePosition, setQueuePosition] = useState(0);
+  const [showQueuePopup, setShowQueuePopup] = useState(false);
   const [separationOptions, setSeparationOptions] = useState<SeparationOptions>({
     separationType: 'vocals-instrumental',
     vocals: false,
@@ -459,6 +462,33 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
         }
         const statusResult = await statusResponse.json();
         transientErrors = 0;
+
+        if (statusResult.status === 'queued') {
+          const pos = statusResult.queue_position || 1;
+          const isRealQueue = statusResult.is_real_queue || (pos > 1);
+          
+          setQueuePosition(pos);
+          setIsQueued(true);
+          
+          // Solo mostrar el popup si realmente hay una cola esperando (más de 2 activos)
+          if (isRealQueue) {
+            setShowQueuePopup(true);
+          }
+          
+          setUploadMessage(`Tu separación está en cola. Posición: ${pos}`);
+          setUploadProgress(5);
+          
+          console.log(`[QUEUE] Tarea ${taskId} en cola. Posición ${pos}`);
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          continue;
+        }
+
+        // Si ya no está en cola pero antes lo estaba
+        if (isQueued && statusResult.status !== 'queued') {
+          setIsQueued(false);
+          setShowQueuePopup(false);
+          console.log(`[QUEUE] Tarea ${taskId} salió de la cola.`);
+        }
 
         // Calcular progreso estimado basado en tiempo transcurrido
         const elapsedSeconds = (Date.now() - startTime) / 1000;
@@ -952,6 +982,57 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
                 className="mobile-touch-target bg-black border border-white/20 bg-gradient-to-b from-white/10 via-white/5 to-transparent hover:from-white/15 hover:via-white/8 text-white px-6 py-2 transition-all duration-300 shadow-lg overflow-hidden"
               >
                 Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Queue Popup Modal */}
+      {showQueuePopup && isQueued && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl animate-in zoom-in-95 duration-300">
+            {/* Background Accent */}
+            <div className="absolute top-0 right-0 -mr-16 -mt-16 h-48 w-48 rounded-full bg-blue-500/10 blur-3xl"></div>
+            
+            <button 
+              onClick={() => setShowQueuePopup(false)}
+              className="absolute top-4 right-4 p-1 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+
+            <div className="flex flex-col items-center text-center">
+              <div className="mb-4 relative">
+                <div className="absolute inset-0 rounded-full bg-blue-500/20 blur-xl animate-pulse"></div>
+                <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-slate-800 border border-blue-500/30">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin-slow"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                </div>
+              </div>
+
+              <h3 className="mb-2 text-xl font-bold text-white">Separación en Cola</h3>
+              <p className="mb-6 text-sm text-slate-400 leading-relaxed">
+                Tu separación está en cola por alta demanda de nuestro motor de IA. 
+                La procesaremos automáticamente en cuanto haya un espacio disponible.
+              </p>
+
+              <div className="flex w-full items-center justify-between rounded-xl border border-slate-700 bg-slate-800/50 p-4 mb-6">
+                <div className="text-left">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Estado Actual</span>
+                  <span className="text-sm font-semibold text-blue-400">Esperando en cola</span>
+                </div>
+                <div className="h-8 w-[1px] bg-slate-700"></div>
+                <div className="text-right">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Posición</span>
+                  <span className="text-lg font-bold text-white">#{queuePosition}</span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowQueuePopup(false)}
+                className="w-full rounded-xl bg-blue-600 py-3 text-sm font-bold text-white transition-all hover:bg-blue-500 active:scale-95 shadow-lg shadow-blue-600/20"
+              >
+                Entendido, seguiré esperando
               </button>
             </div>
           </div>

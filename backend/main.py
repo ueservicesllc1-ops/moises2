@@ -29,6 +29,66 @@ import numpy as np
 tasks_storage = {}
 DEPENDENCY_STATUS: Dict[str, object] = {"checked": False}
 
+class JobQueueManager:
+    def __init__(self, max_concurrent=2):
+        self.max_concurrent = max_concurrent
+        self.queue = []  # List of tuples (task_id, process_func, args, kwargs)
+        self.active_tasks = set()
+        self.lock = asyncio.Lock()
+
+    async def add_task(self, task_id, process_func, *args, **kwargs):
+        async with self.lock:
+            self.queue.append((task_id, process_func, args, kwargs))
+            if task_id in tasks_storage:
+                tasks_storage[task_id].status = TaskStatus.QUEUED
+                tasks_storage[task_id].progress = 0
+            
+            # Persistir estado en base de datos
+            try:
+                db = SessionLocal()
+                db.query(TaskDB).filter(TaskDB.id == task_id).update({
+                    "status": TaskStatus.QUEUED,
+                    "progress": 0
+                })
+                db.commit()
+                db.close()
+                print(f"[QUEUE] Task {task_id} added to queue.")
+            except Exception as e:
+                print(f"[QUEUE ERROR] DB update failed for task {task_id}: {e}")
+
+    def get_queue_position(self, task_id):
+        for i, item in enumerate(self.queue):
+            if item[0] == task_id:
+                return i + 1
+        return 0
+
+    async def process_loop(self):
+        print(f"[QUEUE] Starting background worker loop (max concurrency: {self.max_concurrent})")
+        while True:
+            try:
+                await asyncio.sleep(2)
+                async with self.lock:
+                    while len(self.active_tasks) < self.max_concurrent and self.queue:
+                        task_id, process_func, args, kwargs = self.queue.pop(0)
+                        self.active_tasks.add(task_id)
+                        print(f"[QUEUE] Starting task {task_id}. Active: {len(self.active_tasks)}")
+                        asyncio.create_task(self._run_task(task_id, process_func, *args, **kwargs))
+            except Exception as e:
+                print(f"[QUEUE ERROR] Error in process_loop: {e}")
+
+    async def _run_task(self, task_id, process_func, *args, **kwargs):
+        try:
+            await process_func(*args, **kwargs)
+        except Exception as e:
+            print(f"[QUEUE ERROR] Task {task_id} failed: {e}")
+        finally:
+            async with self.lock:
+                if task_id in self.active_tasks:
+                    self.active_tasks.remove(task_id)
+                print(f"[QUEUE] Task {task_id} finished. Active: {len(self.active_tasks)}")
+
+queue_manager = JobQueueManager(max_concurrent=2)
+
 app = FastAPI(
     title="Moises Clone API",
     description="AI-powered audio separation service",
@@ -138,6 +198,8 @@ async def startup_event():
     global DEPENDENCY_STATUS
     DEPENDENCY_STATUS = check_runtime_dependencies()
     print(f"[STARTUP] Runtime dependencies: {DEPENDENCY_STATUS}")
+    # Iniciar el bucle de procesamiento de la cola
+    asyncio.create_task(queue_manager.process_loop())
 
 # Audio processor instance (already imported)
 
@@ -489,10 +551,11 @@ async def separate_audio_handler(
         except Exception as db_e:
             print(f"[DATABASE ERROR] No se pudo guardar tarea inicial: {db_e}")
 
-        # Procesar en background
-        print(f"[DEBUG] HiFi Mode: {'ON' if is_hifi_bool else 'OFF'} (Value received: '{hi_fi}')")
+        # Encolar procesamiento en lugar de lanzarlo directamente
+        print(f"[QUEUE] Encolando tarea {task.id}...")
         
-        background_tasks.add_task(
+        await queue_manager.add_task(
+            task.id,
             process_audio,
             task,
             custom_tracks,
@@ -500,12 +563,17 @@ async def separate_audio_handler(
             task.quality_profile
         )
         
+        queue_pos = queue_manager.get_queue_position(task.id)
+        is_real_queue = len(queue_manager.active_tasks) >= queue_manager.max_concurrent
+        
         return {
             "success": True,
             "data": {
                 "task_id": task_id,
-                "status": "processing",
-                "message": "Separación iniciada con Demucs",
+                "status": "queued",
+                "queue_position": queue_pos,
+                "is_real_queue": is_real_queue,
+                "message": "Separación en cola por alta demanda" if is_real_queue else "Separación iniciada con Demucs",
                 "filename": file.filename
             }
         }
@@ -907,6 +975,9 @@ async def get_status(task_id: str):
     chords = getattr(task, 'chords', None)
     keyInfo = getattr(task, 'keyInfo', None)
     
+    queue_pos = queue_manager.get_queue_position(task_id)
+    is_real_queue = len(queue_manager.active_tasks) >= queue_manager.max_concurrent
+    
     response = {
         "task_id": task_id,
         "status": task.status,
@@ -918,8 +989,14 @@ async def get_status(task_id: str):
         "timeSignature": timeSignature,
         "duration": duration,
         "chords": chords,
-        "keyInfo": keyInfo
+        "keyInfo": keyInfo,
+        "queue_position": queue_pos if task.status == TaskStatus.QUEUED else 0,
+        "is_real_queue": is_real_queue
     }
+    
+    if task.status == TaskStatus.QUEUED:
+        response["message"] = f"Tu separación está en cola. Posición: {queue_pos}"
+    
     if hasattr(task, "quality_profile"):
         response["quality_profile"] = task.quality_profile
     if hasattr(task, "estimated_cost_usd"):

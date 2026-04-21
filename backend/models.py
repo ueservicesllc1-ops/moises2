@@ -5,6 +5,7 @@ from datetime import datetime
 
 class TaskStatus(str, Enum):
     PENDING = "pending"
+    QUEUED = "queued"
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"

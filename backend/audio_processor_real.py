@@ -212,8 +212,9 @@ class AudioProcessor:
     async def separate_custom_tracks(self, file_path: str, tracks: Dict[str, bool], hi_fi: bool = False) -> Dict[str, str]:
         """Separate custom tracks using Demucs + additional processing for 10+ tracks"""
         try:
-            # First separate with Demucs (gets 4 basic stems)
-            all_stems = await self.separate_with_demucs(file_path)
+            # First separate with Demucs (gets 4 basic stems, or 6 if requested)
+            requested_list = [k for k, v in tracks.items() if v]
+            all_stems = await self.separate_with_demucs(file_path, requested_tracks=requested_list)
             
             # Create additional tracks using AI processing
             extended_stems = await self.create_extended_tracks(file_path, all_stems)
@@ -251,16 +252,19 @@ class AudioProcessor:
                 "instrumental": self.create_instrumental(basic_stems, output_dir)
             }
             
-            # Add valid tracks to extended stems
+            # Add valid tracks to extended stems ONLY IF they don't exist yet
             for track_name, track_path in additional_tracks.items():
                 if track_path and Path(track_path).exists():
-                    extended_stems[track_name] = track_path
-                    print(f"Γ£à Created {track_name}: {track_path}")
+                    if track_name not in extended_stems:
+                        extended_stems[track_name] = track_path
+                        print(f"✅ Created {track_name}: {track_path}")
+                    else:
+                        print(f"ℹ️ Skipping {track_name} extraction as it already exists from Demucs")
             
             return extended_stems
             
         except Exception as e:
-            print(f"Γ¥î Error creating extended tracks: {e}")
+            print(f"❌ Error creating extended tracks: {e}")
             return basic_stems
     
     def extract_piano(self, audio: np.ndarray, sr: int, output_dir: Path) -> str:

@@ -34,6 +34,9 @@ import {
   Filter,
   ArrowUpDown,
   ArrowLeft,
+  GripVertical,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react'
 import MoisesStyleUpload from '@/components/MoisesStyleUpload'
 import ConnectionStatus from '@/components/ConnectionStatus'
@@ -179,9 +182,56 @@ export default function Home() {
   const [trackVolumeStates, setTrackVolumeStates] = useState<{ [key: string]: number }>({})
   const [showMixerEQ, setShowMixerEQ] = useState(false) // Mostrar EQ en el mixer
   const [trackSoloStates, setTrackSoloStates] = useState<{ [key: string]: boolean }>({})
+  const [trackOrder, setTrackOrder] = useState<string[]>([])
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   
-  // Estado para estilo de waveform
   const [waveformStyle, setWaveformStyle] = useState<'bars' | 'smooth' | 'dots'>('bars')
+  const [horizontalZoom, setHorizontalZoom] = useState(1);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Handlers para reordenar tracks con Drag & Drop
+  const handleTrackDragStart = (index: number) => {
+    setDraggedIndex(index);
+  };
+
+  const handleTrackDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === index) return;
+
+    const newOrder = [...trackOrder];
+    const draggedItem = newOrder[draggedIndex];
+    newOrder.splice(draggedIndex, 1);
+    newOrder.splice(index, 0, draggedItem);
+    
+    setDraggedIndex(index);
+    setTrackOrder(newOrder);
+  };
+
+  const handleTrackDragEnd = () => {
+    setDraggedIndex(null);
+  };
+
+  // Sincronizar trackOrder si cambian los stems de la canción (ej. nueva separación)
+  useEffect(() => {
+    if (selectedSong?.stems) {
+      const stemsKeys = Object.keys(selectedSong.stems).filter(k => k !== 'metronome');
+      setTrackOrder(prev => {
+        // Solo actualizar si las llaves han cambiado (nuevos tracks)
+        const hasNewTracks = stemsKeys.some(k => !prev.includes(k));
+        const hasRemovedTracks = prev.some(k => !stemsKeys.includes(k));
+        
+        if (hasNewTracks || hasRemovedTracks || prev.length === 0) {
+          // Mantener el orden previo para los que ya estaban, añadir los nuevos al final
+          const existingInNew = prev.filter(k => stemsKeys.includes(k));
+          const onlyNew = stemsKeys.filter(k => !prev.includes(k));
+          return [...existingInNew, ...onlyNew];
+        }
+        return prev;
+      });
+    } else {
+      setTrackOrder([]);
+    }
+  }, [selectedSong?.stems]);
 
   useEffect(() => {
     const loadUserPlan = async () => {
@@ -204,6 +254,27 @@ export default function Home() {
 
     loadUserPlan()
   }, [user?.uid])
+
+  // Manejar Zoom Horizontal con Ctrl + Rueda del ratón
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.2 : 0.2;
+        setHorizontalZoom(prev => Math.max(1, Math.min(10, prev + delta)));
+      }
+    };
+
+    const container = scrollContainerRef.current;
+    if (container) {
+      container.addEventListener('wheel', handleWheel, { passive: false });
+    }
+    return () => {
+      if (container) {
+        container.removeEventListener('wheel', handleWheel);
+      }
+    };
+  }, [showSongModal]);
 
   // Evitar scroll en el body cuando el modal del mixer está abierto
   useEffect(() => {
@@ -1344,6 +1415,10 @@ export default function Home() {
     });
     
     console.log('Estado de reproduccion reseteado para nueva cancion');
+
+    // Inicializar el orden de las pistas
+    const initialOrder = Object.keys(song.stems).filter(k => k !== 'metronome');
+    setTrackOrder(initialOrder);
 
     setIsLoadingAudio(true)
     const newAudioElements: { [key: string]: HTMLAudioElement } = {}
@@ -2528,21 +2603,45 @@ export default function Home() {
             <div className="flex-none md:flex-1 flex flex-col md:flex-row h-[121px] md:h-[60vh] min-h-[121px] md:min-h-0 overflow-y-auto overflow-x-hidden relative border-b border-gray-800">
               {/* Área fija de controles a la izquierda */}
               <div className="w-24 md:w-40 border-r border-gray-600 flex flex-col h-auto flex-shrink-0">
-                {(() => {
-                  const tracks = selectedSong?.stems 
-                    ? Object.entries(selectedSong.stems).filter(([k, v]) => v !== undefined && k !== 'metronome') 
-                    : [];
-                  
-                  return tracks.length > 0;
-                })() ? (
-                  (() => {
-                    const tracks = selectedSong?.stems 
-                      ? Object.entries(selectedSong.stems).filter(([k, v]) => v !== undefined && k !== 'metronome') 
-                      : [];
-                    
-                    
-                    return tracks;
-                  })().map(([trackKey, trackUrl], index) => {
+                {/* Cabecera del Timeline (Espacio vacío para alineación) */}
+                <div className="h-8 w-full border-b border-gray-700 bg-black/40 flex items-center justify-between px-2 md:px-4 shrink-0">
+                   <div className="flex items-center">
+                     <Clock size={12} className="text-gray-500 mr-2" />
+                     <span className="text-[9px] text-gray-500 font-bold tracking-tighter uppercase opacity-60">Mixer</span>
+                   </div>
+                   
+                   {/* Zoom Controls */}
+                   <div className="hidden md:flex items-center gap-1.5 ml-2">
+                     <button 
+                       onClick={() => setHorizontalZoom(prev => Math.max(1, prev - 0.5))}
+                       className="text-gray-600 hover:text-white transition-colors"
+                       title="Zoom Out (Ctrl + Scroll)"
+                     >
+                        <ZoomOut size={10} />
+                     </button>
+                     <input 
+                       type="range"
+                       min="1"
+                       max="10"
+                       step="0.1"
+                       value={horizontalZoom}
+                       onChange={(e) => setHorizontalZoom(parseFloat(e.target.value))}
+                       className="w-12 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500"
+                     />
+                     <button 
+                       onClick={() => setHorizontalZoom(prev => Math.min(10, prev + 0.5))}
+                       className="text-gray-600 hover:text-white transition-colors"
+                       title="Zoom In (Ctrl + Scroll)"
+                     >
+                        <ZoomIn size={10} />
+                     </button>
+                   </div>
+                </div>
+
+                {(trackOrder.length > 0 ? trackOrder : Object.keys(selectedSong?.stems || {}).filter(k => k !== 'metronome')).map((trackKey, index) => {
+                  const trackUrl = (selectedSong?.stems as any)?.[trackKey];
+                  const onsetValue = trackOnsets[trackKey];
+                  // Colores grises escalados para cada track (fallback)
                     // Colores grises escalados para cada track (fallback)
                     const grayColors = [
                       'bg-gray-700',  // Gris oscuro
@@ -2574,12 +2673,24 @@ export default function Home() {
                     // Si es el track del metronome, renderizar componente especial - REMOVED
                     
                     return (
-                      <div key={trackKey} className="h-[60px] min-h-[60px] bg-gray-700/50 border-b border-gray-600/50 flex flex-col items-start justify-between p-1.5 shrink-0 transition-colors">
+                      <div 
+                        key={trackKey} 
+                        draggable
+                        onDragStart={() => handleTrackDragStart(index)}
+                        onDragOver={(e) => handleTrackDragOver(e, index)}
+                        onDragEnd={handleTrackDragEnd}
+                        className={`h-[60px] min-h-[60px] bg-gray-700/50 border-b border-gray-600/50 flex flex-col items-start justify-between p-1.5 pl-2.5 shrink-0 transition-all duration-200 ${draggedIndex === index ? 'opacity-40 scale-[0.98]' : 'opacity-100'}`}
+                        style={{ cursor: 'grab' }}
+                      >
                         {/* Parte superior con nombre y color */}
                         <div className="flex items-start justify-between w-full">
                           <div className="flex flex-col min-w-0">
-                            <div className="flex items-center gap-1">
-                              <span className="text-white text-[9px] md:text-xs font-bold truncate">{config.name}</span>
+                            <div className="flex items-center gap-2">
+                              {/* Grab Handle - Estilo DAW */}
+                              <div className="text-gray-500 opacity-60 hover:opacity-100 transition-opacity cursor-grab shrink-0">
+                                <GripVertical size={12} strokeWidth={2.5} />
+                              </div>
+                              <span className="text-white text-[9px] md:text-xs font-bold truncate leading-none tracking-tight">{config.name}</span>
                               {trackUrl === undefined ? (
                                 <span className="text-gray-400 text-[7px] md:text-[9px] font-mono bg-gray-800/50 px-0.5 rounded animate-pulse">
                                   ...
@@ -2686,29 +2797,76 @@ export default function Home() {
                         )}
                       </div>
                     );
-                  })
-                ) : null}
+                  })}
               </div>
               
               {/* Área de tracks (sin controles) - Asegurar scroll horizontal en móvil */}
-              <div className="flex-1 overflow-x-auto overflow-y-hidden no-scrollbar bg-gray-900 border-l border-gray-800 md:border-none">
-                <div className="h-auto flex flex-col min-w-full">
-                  {(() => {
-                    const tracks = selectedSong?.stems 
-                      ? Object.entries(selectedSong.stems).filter(([k, v]) => v !== undefined && k !== 'metronome') 
-                      : [];
+              <div 
+                ref={scrollContainerRef}
+                className="flex-1 overflow-x-auto overflow-y-hidden no-scrollbar bg-gray-900 border-l border-gray-800 md:border-none"
+              >
+                <div 
+                  className="h-auto flex flex-col"
+                  style={{ width: `${horizontalZoom * 100}%`, minWidth: '100%' }}
+                >
+                  {/* Timeline Ruler - Estilo DAW Profesional */}
+                  <div className="h-8 w-full border-b border-gray-600 bg-[#151515] relative shrink-0 z-30">
+                    {(() => {
+                      const markers = [];
+                      const songDuration = duration || selectedSong?.duration || 0;
+                      const step = 5; // Resolución ultra-fina
+                      
+                      if (songDuration > 0) {
+                        for (let t = 0; t <= songDuration; t += step) {
+                          const mins = Math.floor(t / 60);
+                          const secs = Math.floor(t % 60);
+                          const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+                          const pos = (t / songDuration) * 100;
+                          
+                          const is30s = t % 30 === 0;
+                          const is15s = t % 15 === 0;
+
+                          markers.push({ timeStr, pos, is30s, is15s });
+                        }
+                      }
+                      
+                      return markers.map((m, i) => (
+                        <div 
+                          key={i} 
+                          className={`absolute top-0 h-full border-l transition-colors duration-300 ${m.is30s ? 'border-white/30' : m.is15s ? 'border-white/10' : 'border-white/5'}`}
+                          style={{ left: `${m.pos}%` }}
+                        >
+                          {/* Marca vertical con altura jerárquica */}
+                          <div className={`absolute top-0 left-0 w-px bg-white transition-opacity ${
+                            m.is30s ? 'h-3 opacity-60' : 
+                            m.is15s ? 'h-2 opacity-30' : 
+                            'h-1 opacity-10'
+                          }`}></div>
+                          
+                          {/* Solo mostrar texto en los marcadores de 30s con estilo premium */}
+                      {m.is30s && (
+                            <div className="absolute top-3 left-1 flex flex-col justify-start">
+                              <span className="text-[8px] md:text-[10px] text-white/50 font-mono font-bold tracking-tight select-none">
+                                {m.timeStr}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ));
+                    })()}
                     
-                    
-                    return tracks.length > 0;
-                  })() ? (
-                  (() => {
-                    const tracks = selectedSong?.stems 
-                      ? Object.entries(selectedSong.stems).filter(([k, v]) => v !== undefined && k !== 'metronome') 
-                      : [];
-                    
-                    
-                    return tracks;
-                  })().map(([trackKey, trackUrl], index) => {
+                    {/* Indicador de Tiempo Actual (Línea de Tiempo) con efecto de luz DAW */}
+                    <div 
+                      className="absolute top-0 bottom-0 w-[1.5px] bg-yellow-400 z-40"
+                      style={{ 
+                        left: `${(currentTime / Math.max(duration || selectedSong?.duration || 1, 0.1)) * 100}%`,
+                        boxShadow: '0 0 12px 2px rgba(234,179,8,0.7)'
+                      }}
+                    />
+                  </div>
+
+                  {(trackOrder.length > 0 ? trackOrder : Object.keys(selectedSong?.stems || {}).filter(k => k !== 'metronome')).map((trackKey, index) => {
+                    const trackUrl = (selectedSong?.stems as any)?.[trackKey];
                     // Colores grises escalados para cada track (fallback)
                     const grayColors = [
                       'bg-gray-700',  // Gris oscuro
@@ -2738,7 +2896,15 @@ export default function Home() {
                     };
                     
                     return (
-                      <div key={trackKey} className="h-[60px] min-h-[60px] w-full md:min-w-[800px] shrink-0">
+                      <div 
+                        key={trackKey} 
+                        draggable
+                        onDragStart={() => handleTrackDragStart(index)}
+                        onDragOver={(e) => handleTrackDragOver(e, index)}
+                        onDragEnd={handleTrackDragEnd}
+                        className={`h-[60px] min-h-[60px] w-full shrink-0 transition-opacity duration-200 ${draggedIndex === index ? 'opacity-40' : 'opacity-100'}`}
+                        style={{ cursor: 'grab' }}
+                      >
                         {/* Track independiente */}
                         <div className={`h-full ${trackBackgroundColor} border-b border-gray-700 min-w-0 relative overflow-visible`}>
                           {/* Waveform Container - Sin restricciones */}
@@ -2879,15 +3045,7 @@ export default function Home() {
                         </div>
                       </div>
                     );
-                  })
-                ) : (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="text-gray-400 text-center">
-                      <p>No stems available</p>
-                      <p className="text-xs mt-2">This song hasn&apos;t been processed yet</p>
-                    </div>
-                  </div>
-                  )}
+                  })}
                 </div>
               </div>
             </div>

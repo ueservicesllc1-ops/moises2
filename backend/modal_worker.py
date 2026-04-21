@@ -149,33 +149,33 @@ def separate_audio(
 
         needs_6s_stems = any(t in requested_tracks for t in ["guitar", "piano"])
 
-        finetuned_ckpt = Path(os.environ.get("DEMUCS_FINETUNED_PATH", "/finetuned/checkpoints/latest.th"))
-        use_finetuned = (not needs_6s_stems) and finetuned_ckpt.is_file()
+        # BUSCAR CONOCIMIENTO ENTRENADO (El trainer guarda epoch_020.pt)
+        finetuned_ckpt = Path(os.environ.get("DEMUCS_FINETUNED_PATH", "/finetuned/checkpoints/epoch_020.pt"))
+        use_finetuned = finetuned_ckpt.is_file()
 
-        if needs_6s_stems:
-            # Si piden 6 pistas (guitarra o piano explícito), estamos obligados a usar htdemucs_6s
-            primary_model_name = "htdemucs_6s"
-            profile_settings = {
-                "fast":        {"shifts": 1, "overlap": 0.20},
-                "pro_balanced": {"shifts": 3, "overlap": 0.30},
-                "hifi":        {"shifts": 5, "overlap": 0.40},
-            }
-        elif use_finetuned:
-            # Fine-tune HTDemucs entrenado en Modal (mismo volumen que modal_trainer)
+        if use_finetuned:
+            # SI HAY ENTRENAMIENTO: Usar nuestro cerebro personalizado
             primary_model_name = "finetuned_htdemucs"
             profile_settings = {
-                "fast":        {"shifts": 1, "overlap": 0.15},
+                "fast":         {"shifts": 1, "overlap": 0.20},
                 "pro_balanced": {"shifts": 3, "overlap": 0.30},
-                "hifi":        {"shifts": 4, "overlap": 0.35},
+                "hifi":         {"shifts": 5, "overlap": 0.40},
+            }
+        elif needs_6s_stems:
+            # Si no hay entrenamiento pero piden 6 pistas, usar el estándar de 6s
+            primary_model_name = "htdemucs_6s"
+            profile_settings = {
+                "fast":         {"shifts": 1, "overlap": 0.20},
+                "pro_balanced": {"shifts": 3, "overlap": 0.30},
+                "hifi":         {"shifts": 5, "overlap": 0.40},
             }
         else:
-            # Para Karaoke, Voz o 4 pistas maestras, usamos la magia de MDX Spectrograms
+            # Para 4 pistas o menos, usar MDX (el más limpio para voces/batería estándar)
             if profile_name == "fast":
                 primary_model_name = "mdx_extra_q"
             elif profile_name == "hifi":
-                primary_model_name = "mdx_extra"     # Pura de Estudio para el que Paga
+                primary_model_name = "mdx_extra"     
             else:  # pro_balanced
-                # Pro balanced prioriza calidad tímbrica sobre ahorro agresivo.
                 primary_model_name = "mdx_extra"
 
             # En MDX, overlap de 0 y shift de 0/1 es el estándar para q. Para HiFi inyectamos precision.
