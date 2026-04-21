@@ -24,7 +24,9 @@ import {
   Infinity as InfinityIcon,
   GaugeCircle,
   HelpCircle,
+  Globe,
 } from 'lucide-react'
+import { useLanguage } from '@/contexts/LanguageContext'
 
 /* ─────────────────────────────────── helpers ─────────────────────────────── */
 
@@ -199,6 +201,7 @@ export default function JudithLanding() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('annually')
+  const { lang, setLang, t } = useLanguage()
 
   return (
     <div className="min-h-[100dvh] bg-[#060608] text-white overflow-x-hidden selection:bg-violet-500/30">
@@ -222,7 +225,7 @@ export default function JudithLanding() {
           </Link>
 
           <nav className="hidden md:flex items-center gap-7 text-[14px] font-medium text-zinc-400">
-            {[['Inicio', '/'], ['Características', '#features'], ['Precios', '#planes'], ['Contacto', '/contacto']].map(([label, href]) => (
+            {[[t('nav.home'), '/'], [t('nav.features'), '#features'], [t('nav.pricing'), '#planes'], [t('nav.contact'), '/contacto']].map(([label, href]) => (
               <Link key={label} href={href} className="hover:text-white transition-colors hover:drop-shadow-[0_0_8px_rgba(167,139,250,0.6)]">
                 {label}
               </Link>
@@ -230,18 +233,26 @@ export default function JudithLanding() {
           </nav>
 
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setLang(lang === 'es' ? 'en' : 'es')}
+              className="flex items-center gap-1 px-2 py-1 rounded-full text-[12px] font-medium text-zinc-300 hover:text-white border border-white/10 hover:border-white/20 transition-all bg-white/[0.02]"
+              title="Switch Language"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span className="uppercase">{lang}</span>
+            </button>
             <Link
               href="/login"
               className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[13px] font-medium text-zinc-300 hover:text-white border border-white/10 hover:border-white/20 hover:bg-white/[0.04] transition-all"
             >
-              Iniciar sesión
+              {t('nav.login')}
             </Link>
             <Link
               href="/login"
               className="mobile-touch-target inline-flex items-center gap-1.5 px-4 sm:px-5 py-2.5 rounded-full text-[13px] font-semibold text-white transition-all hover:brightness-110 hover:scale-105"
               style={{ background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', boxShadow: '0 0 20px rgba(124,58,237,0.4)' }}
             >
-              Probar gratis <ArrowRight className="w-3.5 h-3.5" />
+              {t('nav.tryFree')} <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
         </div>

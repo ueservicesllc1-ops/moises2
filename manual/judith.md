@@ -69,3 +69,7 @@ Judith ofrece flexibilidad para cada tipo de usuario:
 
 > [!TIP]
 > Para obtener los mejores resultados, intenta subir archivos con una tasa de bits alta (320kbps o superior). La calidad del resultado final depende directamente de la calidad del archivo original.
+
+---
+
+© 2026 Judith — Todos los derechos reservados.

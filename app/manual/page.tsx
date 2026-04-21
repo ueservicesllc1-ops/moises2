@@ -160,7 +160,7 @@ export default function ManualPage() {
         </div>
 
         <footer className="mt-32 pt-8 border-t border-white/5 text-center text-xs text-zinc-600">
-          © {new Date().getFullYear()} Judith Audio AI — Todos los derechos reservados.
+          <p>© {new Date().getFullYear()} Judith Audio AI — Todos los derechos reservados.</p>
         </footer>
       </main>
     </div>

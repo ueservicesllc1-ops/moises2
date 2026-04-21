@@ -2525,7 +2525,7 @@ export default function Home() {
             </div>
             
             
-            <div className="flex-none flex flex-col md:flex-row h-[121px] min-h-[121px] overflow-y-auto md:overflow-y-auto overflow-x-hidden relative border-b border-gray-800">
+            <div className="flex-none md:flex-1 flex flex-col md:flex-row h-[121px] md:h-[60vh] min-h-[121px] md:min-h-0 overflow-y-auto overflow-x-hidden relative border-b border-gray-800">
               {/* Área fija de controles a la izquierda */}
               <div className="w-24 md:w-40 border-r border-gray-600 flex flex-col h-auto flex-shrink-0">
                 {(() => {
@@ -2562,6 +2562,7 @@ export default function Home() {
                       bass: { color: 'bg-green-500', letter: 'B', name: 'Bass' },
                       other: { color: 'bg-purple-500', letter: 'O', name: 'Other' },
                       piano: { color: 'bg-yellow-500', letter: 'P', name: 'Piano' },
+                      guitar: { color: 'bg-teal-500', letter: 'G', name: 'Guitar' },
                     };
                     
                     const config = trackConfig[trackKey as keyof typeof trackConfig] || { 
@@ -2727,6 +2728,7 @@ export default function Home() {
                       bass: { color: 'bg-green-500', letter: 'B', name: 'Bass' },
                       other: { color: 'bg-purple-500', letter: 'O', name: 'Other' },
                       piano: { color: 'bg-yellow-500', letter: 'P', name: 'Piano' },
+                      guitar: { color: 'bg-teal-500', letter: 'G', name: 'Guitar' },
                     };
                     
                     const config = trackConfig[trackKey as keyof typeof trackConfig] || { 
