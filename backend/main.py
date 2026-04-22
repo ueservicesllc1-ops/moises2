@@ -724,6 +724,13 @@ async def process_audio(
         
         # 3. Extraer Tracks De Vueltos por internet y escupirlos al Disco para subida a B2
         print("[MODAL] Remote extraction finished, writing stems to disk...")
+        try:
+            modal_keys = list((stems_bytes or {}).keys())
+            print(f"[CLICK_DEBUG] Modal returned stems keys: {modal_keys}")
+            for k, v in (stems_bytes or {}).items():
+                print(f"[CLICK_DEBUG] Modal stem bytes {k}: {len(v) if v else 0}")
+        except Exception as _dbg_e:
+            print(f"[CLICK_DEBUG] Error inspecting Modal stems_bytes: {_dbg_e}")
         update_progress(80, "¡La cirugía fue un éxito! Recibiendo partes diseccionadas desde el Espacio Exterior...")
         
         stems = {}
@@ -735,33 +742,51 @@ async def process_audio(
             with open(stem_path, "wb") as f_out:
                 f_out.write(byte_stream)
             stems[key_name] = str(stem_path)
+            try:
+                size = stem_path.stat().st_size
+                print(f"[CLICK_DEBUG] Wrote stem file {key_name}: path={stem_path} size={size}")
+            except Exception as _size_e:
+                print(f"[CLICK_DEBUG] Could not stat stem file {key_name}: {_size_e}")
         
         print(f"\n[PROCESS] Demucs separation completed! Got {len(stems)} stems")
         print(f"   Stems: {list(stems.keys())}")
         
         # Generar Click Track Sincronizado (preferido: viene desde Modal).
         update_progress(82, "Sincronizando metrónomo con la métrica del audio...")
+        print(f"[CLICK_DEBUG] Pre-click stems keys at backend: {list(stems.keys())}")
         if "click" not in stems:
             try:
                 print("[PROCESS] Click no vino desde Modal, ejecutando fallback local...")
                 click_path = target_dir / "click.wav"
                 click_source_path = stems.get("instrumental") or next(iter(stems.values()))
+                print(f"[CLICK_DEBUG] Local click source selected: {click_source_path}")
                 await asyncio.to_thread(generate_click_track_audio, str(click_source_path), str(click_path))
                 stems["click"] = str(click_path)
-                print("[PROCESS] Click track generado localmente (fallback)")
+                click_size = click_path.stat().st_size if click_path.exists() else 0
+                print(f"[PROCESS] Click track generado localmente (fallback) size={click_size} path={click_path}")
             except Exception as e:
                 print(f"[PROCESS] Error generando click track en fallback local: {e}")
                 import traceback
                 print(f"[PROCESS] Click track traceback:\n{traceback.format_exc()}")
+        else:
+            try:
+                click_path = Path(stems["click"])
+                click_size = click_path.stat().st_size if click_path.exists() else 0
+                print(f"[CLICK_DEBUG] Click came from Modal: path={click_path} exists={click_path.exists()} size={click_size}")
+            except Exception as _click_dbg_e:
+                print(f"[CLICK_DEBUG] Error inspecting Modal click file: {_click_dbg_e}")
         
         # Upload stems to B2 for online playback
         print(f"\n[PROCESS] Uploading {len(stems)} stems to B2...")
+        print(f"[CLICK_DEBUG] Upload input stems keys: {list(stems.keys())}")
         task.progress = 85
         tasks_storage[task.id] = task
         
         stem_urls = await upload_stems_to_b2(stems, task.id)
         
         print(f"[PROCESS] B2 upload completed! {len(stem_urls)} stems uploaded")
+        print(f"[CLICK_DEBUG] Upload output stem URLs keys: {list(stem_urls.keys())}")
+        print(f"[CLICK_DEBUG] Upload output has_click={'click' in stem_urls}")
         
         task.progress = 95
         tasks_storage[task.id] = task
@@ -963,26 +988,39 @@ async def process_audio(
 
 async def upload_stems_to_b2(stems: Dict[str, str], task_id: str) -> Dict[str, str]:
     """Upload separated stems to B2 and return URLs"""
+    backend_url = os.getenv("BACKEND_URL", os.getenv("NEXT_PUBLIC_BACKEND_URL", "http://localhost:8000"))
+
+    def build_fallback_url(stem_path: str) -> str:
+        try:
+            rel_path = Path(stem_path).relative_to(Path.cwd())
+            return f"{backend_url}/audio/{rel_path}".replace("\\", "/")
+        except Exception:
+            return f"{backend_url}/audio/{stem_path}".replace("\\", "/")
+
     try:
         from b2_uploader import b2_uploader
         
         b2_stems = await b2_uploader.upload_all_stems_to_b2(stems, "system", task_id)
-        return b2_stems
+        print(f"[CLICK_DEBUG] Raw B2 response keys: {list((b2_stems or {}).keys())}")
+        # Si B2 devuelve incompleto, completar faltantes con fallback local.
+        merged_stems = dict(b2_stems or {})
+        for stem_name, stem_path in stems.items():
+            if stem_name not in merged_stems:
+                fallback_url = build_fallback_url(stem_path)
+                merged_stems[stem_name] = fallback_url
+                print(f"Fallback URL for missing B2 stem {stem_name}: {fallback_url}")
+        print(f"[CLICK_DEBUG] Merged stems keys after fallback completion: {list(merged_stems.keys())}")
+        return merged_stems
         
     except Exception as e:
         print(f"ERROR uploading stems to B2: {e}")
         # Si falla B2, convertir rutas locales a URLs del backend
-        backend_url = os.getenv("BACKEND_URL", os.getenv("NEXT_PUBLIC_BACKEND_URL", "http://localhost:8000"))
         fallback_urls = {}
         for stem_name, stem_path in stems.items():
-            # Convertir ruta absoluta a relativa desde backend
-            try:
-                rel_path = Path(stem_path).relative_to(Path.cwd())
-                stem_url = f"{backend_url}/audio/{rel_path}".replace("\\", "/")
-                fallback_urls[stem_name] = stem_url
-                print(f"Fallback URL for {stem_name}: {stem_url}")
-            except:
-                fallback_urls[stem_name] = f"{backend_url}/audio/{stem_path}".replace("\\", "/")
+            stem_url = build_fallback_url(stem_path)
+            fallback_urls[stem_name] = stem_url
+            print(f"Fallback URL for {stem_name}: {stem_url}")
+        print(f"[CLICK_DEBUG] Full fallback stems keys (B2 exception path): {list(fallback_urls.keys())}")
         return fallback_urls
 
 @app.get("/debug/tasks")
