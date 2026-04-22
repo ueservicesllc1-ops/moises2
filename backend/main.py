@@ -1649,7 +1649,7 @@ def detect_offset(audio_path: str) -> float:
     return round(float(max(0.1, beat_times[0])), 3)
 
 def generate_click_track_audio(audio_path: str, output_dir: str) -> float:
-    """Generate click track aligned to song tempo and return detected BPM."""
+    """Generate a professional click track aligned to real beat events."""
     import soundfile as sf
     import numpy as np
     from scipy import signal
@@ -1680,41 +1680,85 @@ def generate_click_track_audio(audio_path: str, output_dir: str) -> float:
     output_sr = sr_sf
     clicks = None
 
-    # Prefer local-accurate path (same behavior as local env): librosa beat tracking.
+    def _normalize_bpm(value: float) -> float:
+        bpm = float(value)
+        while bpm < 75.0:
+            bpm *= 2.0
+        while bpm > 180.0:
+            bpm /= 2.0
+        return float(max(70.0, min(180.0, bpm)))
+
+    # Prefer professional path: robust tempo + dynamic beat events + onset snapping.
     try:
         import librosa  # type: ignore
 
         y_lb, sr_lb = librosa.load(audio_path, sr=44100, mono=True)
-        # Priorizar componente percusiva para BPM más estable en temas complejos.
+        # Percussive component gives a more reliable rhythmic footprint.
         _, y_perc = librosa.effects.hpss(y_lb)
-        onset_env = librosa.onset.onset_strength(y=y_perc, sr=sr_lb)
+        onset_env = librosa.onset.onset_strength(
+            y=y_perc,
+            sr=sr_lb,
+            lag=1,
+            max_size=3,
+            detrend=True,
+            aggregate=np.median,
+        )
+        # 1) Robust tempo proposal from frame-wise tempo distribution.
+        tempo_candidates = librosa.feature.tempo(
+            onset_envelope=onset_env,
+            sr=sr_lb,
+            aggregate=None,
+            max_tempo=220.0,
+        )
+        if tempo_candidates.size == 0:
+            raise RuntimeError("No tempo candidates")
+        tempo_candidates = np.asarray(tempo_candidates, dtype=float).reshape(-1)
+        tempo_candidates = tempo_candidates[np.isfinite(tempo_candidates)]
+        if tempo_candidates.size == 0:
+            raise RuntimeError("Invalid tempo candidates")
+        tempo_candidates = np.array([_normalize_bpm(t) for t in tempo_candidates], dtype=float)
+
+        # Histogram mode gives stable global BPM in songs with local fluctuations.
+        bins = np.arange(70.0, 181.0, 1.0)
+        hist, edges = np.histogram(tempo_candidates, bins=bins)
+        mode_idx = int(np.argmax(hist))
+        bpm_seed = float((edges[mode_idx] + edges[mode_idx + 1]) / 2.0)
+
+        # 2) Dynamic beat tracking with strict tempo prior.
         tempo, beat_frames = librosa.beat.beat_track(
             onset_envelope=onset_env,
             sr=sr_lb,
-            start_bpm=120.0,
-            tightness=100,
+            start_bpm=bpm_seed,
+            bpm=bpm_seed,
+            tightness=180,
+            trim=False,
         )
         tempo_arr = np.asarray(tempo).reshape(-1)
-        bpm_val = float(tempo_arr[0]) if tempo_arr.size else 120.0
+        bpm_val = float(tempo_arr[0]) if tempo_arr.size else bpm_seed
 
         beat_frames = np.asarray(beat_frames, dtype=int).reshape(-1)
         if beat_frames.size == 0:
             raise RuntimeError("No beat frames detected by librosa")
 
-        # Usar tiempos reales de beat (no rejilla fija) para evitar drift/desfase.
         beat_times = librosa.frames_to_time(beat_frames, sr=sr_lb)
         beat_times = np.asarray(beat_times, dtype=float).reshape(-1)
 
-        # Refinar cada beat al onset percusivo más cercano para mejor fase.
+        # 3) Snap each beat to nearest strong onset (phase correction).
         onset_times = librosa.onset.onset_detect(
             onset_envelope=onset_env,
             sr=sr_lb,
             units="time",
-            backtrack=False,
+            backtrack=True,
+            pre_max=3,
+            post_max=3,
+            pre_avg=8,
+            post_avg=8,
+            delta=0.15,
+            wait=2,
         )
         onset_times = np.asarray(onset_times, dtype=float).reshape(-1)
         if onset_times.size > 0 and beat_times.size > 0:
-            tolerance = 0.08  # 80 ms
+            tolerance = 0.055  # 55ms max correction
             refined = []
             for bt in beat_times:
                 idx = int(np.argmin(np.abs(onset_times - bt)))
@@ -1737,19 +1781,25 @@ def generate_click_track_audio(audio_path: str, output_dir: str) -> float:
         if intervals.size > 0:
             bpm_val = 60.0 / float(np.median(intervals))
 
-        # Resolver ambigüedad half/double respecto a una zona musical útil.
-        while bpm_val < 80.0:
-            bpm_val *= 2.0
-        while bpm_val > 170.0:
-            bpm_val /= 2.0
-        bpm_int = int(round(max(70.0, min(180.0, bpm_val))))
+        bpm_val = _normalize_bpm(bpm_val)
+        bpm_int = int(round(bpm_val))
+
+        # Confidence check: on-beat energy should clearly exceed median envelope.
+        onset_norm = onset_env / (np.max(onset_env) + 1e-8)
+        beat_env_idx = np.clip(beat_frames, 0, len(onset_norm) - 1)
+        on_beat_strength = float(np.mean(onset_norm[beat_env_idx])) if beat_env_idx.size else 0.0
+        median_strength = float(np.median(onset_norm))
+        confidence = on_beat_strength / (median_strength + 1e-6)
+        if confidence < 1.15:
+            raise RuntimeError(f"Low beat confidence ({confidence:.2f})")
 
         clicks = librosa.clicks(times=beat_times, sr=sr_lb, length=len(y_lb), click=custom_click)
         output_sr = sr_lb
         print(
             f"[CLICK_DEBUG] Librosa beat-track selected bpm={bpm_int} "
             f"raw_tempo={float(tempo_arr[0]) if tempo_arr.size else 0:.2f} "
-            f"beats={beat_frames.size} refined_beats={beat_times.size}"
+            f"seed={bpm_seed:.2f} beats={beat_frames.size} refined_beats={beat_times.size} "
+            f"confidence={confidence:.2f}"
         )
     except Exception as lb_err:
         # Fallback path when librosa/pkg_resources is unavailable.
