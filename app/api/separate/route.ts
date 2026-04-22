@@ -29,7 +29,18 @@ export async function POST(request: NextRequest) {
       console.warn(`⚠️ Backend 404 en ${path}, probando siguiente ruta...`)
     }
 
-    if (!response || !response.ok) {
+    if (!response) {
+      return NextResponse.json(
+        {
+          error: 'Backend error: no response from backend',
+          details: 'No backend response was returned after trying all candidate routes.',
+          triedRoutes: tried,
+        },
+        { status: 502 }
+      )
+    }
+
+    if (!response.ok) {
       const errorText = await response.text()
       return NextResponse.json(
         {
