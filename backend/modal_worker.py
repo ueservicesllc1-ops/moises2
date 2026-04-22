@@ -149,9 +149,9 @@ def separate_audio(
 
         needs_6s_stems = any(t in requested_tracks for t in ["guitar", "piano"])
 
-        # BUSCAR CONOCIMIENTO ENTRENADO (El trainer guarda epoch_020.pt)
+        # Fine-tune deshabilitado hasta que el checkpoint sea reentrenado con la versión actual de demucs
         finetuned_ckpt = Path(os.environ.get("DEMUCS_FINETUNED_PATH", "/finetuned/checkpoints/epoch_020.pt"))
-        use_finetuned = finetuned_ckpt.is_file()
+        use_finetuned = False
 
         if use_finetuned:
             # SI HAY ENTRENAMIENTO: Usar nuestro cerebro personalizado
@@ -192,17 +192,8 @@ def separate_audio(
         print(f"[MODAL GPU] Modelo principal: {primary_model_name}")
         print(f"[MODAL GPU] Inferencia: {shifts_amt} pasadas, {overlap_amt:.2f} solapamiento")
 
-        # Cargar y correr modelo principal
-        if use_finetuned:
-            try:
-                print(f"[MODAL GPU] Cargando fine-tune desde {finetuned_ckpt}")
-                model = load_model(str(finetuned_ckpt), strict=False)
-            except Exception as ft_err:
-                print(f"[MODAL GPU] ⚠️ Checkpoint incompatible ({ft_err}), fallback a htdemucs_ft")
-                use_finetuned = False
-                model = get_model("htdemucs_ft")
-        else:
-            model = get_model(primary_model_name)
+        # Cargar modelo estándar
+        model = get_model(primary_model_name)
         model.cuda()
         model.eval()
 
