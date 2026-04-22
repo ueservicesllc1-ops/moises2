@@ -739,19 +739,20 @@ async def process_audio(
         print(f"\n[PROCESS] Demucs separation completed! Got {len(stems)} stems")
         print(f"   Stems: {list(stems.keys())}")
         
-        # Generar Click Track Sincronizado
+        # Generar Click Track Sincronizado (preferido: viene desde Modal).
         update_progress(82, "Sincronizando metrónomo con la métrica del audio...")
-        try:
-            print("[PROCESS] Generando Click Track (Metrónomo)...")
-            click_path = target_dir / "click.wav"
-            # Execute synchronously in a background thread to prevent blocking
-            await asyncio.to_thread(generate_click_track_audio, str(task.file_path), str(click_path))
-            stems["click"] = str(click_path)
-            print("[PROCESS] Click track generado exitosamente")
-        except Exception as e:
-            print(f"[PROCESS] Error generando click track: {e}")
-            import traceback
-            print(f"[PROCESS] Click track traceback:\n{traceback.format_exc()}")
+        if "click" not in stems:
+            try:
+                print("[PROCESS] Click no vino desde Modal, ejecutando fallback local...")
+                click_path = target_dir / "click.wav"
+                click_source_path = stems.get("instrumental") or next(iter(stems.values()))
+                await asyncio.to_thread(generate_click_track_audio, str(click_source_path), str(click_path))
+                stems["click"] = str(click_path)
+                print("[PROCESS] Click track generado localmente (fallback)")
+            except Exception as e:
+                print(f"[PROCESS] Error generando click track en fallback local: {e}")
+                import traceback
+                print(f"[PROCESS] Click track traceback:\n{traceback.format_exc()}")
         
         # Upload stems to B2 for online playback
         print(f"\n[PROCESS] Uploading {len(stems)} stems to B2...")

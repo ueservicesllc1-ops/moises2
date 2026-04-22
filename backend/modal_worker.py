@@ -22,6 +22,7 @@ image = (
         "torchaudio",
         "demucs",
         "soundfile",
+        "librosa",
         "numpy",
         "scipy",   # Para spectral smoothing en HiFi
         "diffq",   # Requerido por mdx_extra_q para deserializar el modelo
@@ -49,6 +50,7 @@ def separate_audio(
     import numpy as np
     import tempfile
     import soundfile as sf
+    import librosa
     from pathlib import Path
 
     from demucs.pretrained import get_model
@@ -98,6 +100,40 @@ def separate_audio(
                 overlap=overlap_amt,
                 progress=True
             )[0]
+
+    def build_click_track_bytes(source_audio: np.ndarray, sr: int, output_subtype: str) -> bytes:
+        """Generate click track bytes from source audio with beat fallback."""
+        if source_audio.ndim == 2:
+            mono = source_audio.mean(axis=1)
+        else:
+            mono = source_audio
+        mono = np.asarray(mono, dtype=np.float32).reshape(-1)
+        if mono.size == 0:
+            raise RuntimeError("Audio vacío para generar click")
+
+        click_dur = 0.05
+        t = np.linspace(0, click_dur, int(sr * click_dur), endpoint=False)
+        click_wave = np.sin(2 * np.pi * 1000 * t) + 0.5 * np.sin(2 * np.pi * 2000 * t)
+        envelope = np.exp(-t * 200)
+        custom_click = click_wave * envelope
+        custom_click = (custom_click / np.max(np.abs(custom_click))) * 0.8
+
+        click_kwargs = {"sr": sr, "length": len(mono), "click": custom_click}
+        try:
+            onset_env = librosa.onset.onset_strength(y=mono, sr=sr)
+            _, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
+            beat_frames = np.asarray(beat_frames, dtype=int).reshape(-1)
+            if beat_frames.size == 0:
+                raise RuntimeError("No beat frames detected")
+            clicks = librosa.clicks(frames=beat_frames, **click_kwargs)
+        except Exception as beat_error:
+            print(f"[MODAL GPU] Click fallback 120 BPM: {beat_error}")
+            times = np.arange(0.0, max((len(mono) / sr), 0.5), 0.5, dtype=float)
+            clicks = librosa.clicks(times=times, **click_kwargs)
+
+        buf = io.BytesIO()
+        sf.write(buf, clicks, sr, format='WAV', subtype=output_subtype)
+        return buf.getvalue()
 
     # =========================================================================
     # INICIO DEL PROCESAMIENTO
@@ -289,6 +325,13 @@ def separate_audio(
             sf.write(buf, instrumental_audio, model.samplerate, format='WAV', subtype=output_subtype)
             stems_bytes["instrumental"] = buf.getvalue()
             print(f"[MODAL GPU]   OK instrumental -> {len(stems_bytes['instrumental']) // 1024}KB ({output_subtype})")
+
+        try:
+            click_source = instrumental_audio if "instrumental_audio" in locals() else wav_numpy
+            stems_bytes["click"] = build_click_track_bytes(click_source, model.samplerate, output_subtype)
+            print(f"[MODAL GPU]   OK click -> {len(stems_bytes['click']) // 1024}KB ({output_subtype})")
+        except Exception as click_error:
+            print(f"[MODAL GPU] Error generando click: {click_error}")
 
         print(f"[MODAL GPU] ✅ Finalizado con éxito. {len(stems_bytes)} stems exportados.")
         return stems_bytes
