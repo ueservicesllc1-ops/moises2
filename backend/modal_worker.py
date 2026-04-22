@@ -194,8 +194,13 @@ def separate_audio(
 
         # Cargar y correr modelo principal
         if use_finetuned:
-            print(f"[MODAL GPU] Cargando fine-tune desde {finetuned_ckpt}")
-            model = load_model(str(finetuned_ckpt), strict=False)
+            try:
+                print(f"[MODAL GPU] Cargando fine-tune desde {finetuned_ckpt}")
+                model = load_model(str(finetuned_ckpt), strict=False)
+            except Exception as ft_err:
+                print(f"[MODAL GPU] ⚠️ Checkpoint incompatible ({ft_err}), fallback a htdemucs_ft")
+                use_finetuned = False
+                model = get_model("htdemucs_ft")
         else:
             model = get_model(primary_model_name)
         model.cuda()
