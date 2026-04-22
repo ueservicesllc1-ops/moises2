@@ -685,10 +685,12 @@ async def process_audio(
                 )
                 break
             except Exception as remote_e:
+                import traceback as _tb
                 last_remote_error = remote_e
                 print(
                     f"[MODAL] Remote attempt {attempt_idx + 1}/{total_attempts} failed: {remote_e}"
                 )
+                print(f"[MODAL] Traceback:\n{_tb.format_exc()}")
                 if attempt_idx >= total_attempts - 1:
                     break
 

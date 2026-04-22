@@ -33,6 +33,7 @@ export async function GET() {
       backend: 'up' as const,
       backendHealth: backendHealth?.status ?? 'ok',
       backendUrl,
+      dependencies: backendHealth?.dependencies ?? null,
     })
   } catch {
     return NextResponse.json({
