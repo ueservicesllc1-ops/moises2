@@ -13,9 +13,9 @@ export async function POST(request: NextRequest) {
 
     console.log('🎬 Extrayendo audio de YouTube:', url)
 
-    // En Railway, el backend está en el mismo contenedor
-    // Usar 127.0.0.1 en vez de localhost para forzar IPv4
-    const backendUrl = 'http://127.0.0.1:8000'
+    // Usar la misma URL que el resto de proxies (respeta BACKEND_INTERNAL_URL en Railway)
+    const { getServerBackendUrl } = await import('@/lib/backendUrl')
+    const backendUrl = getServerBackendUrl()
     console.log('   Backend URL:', backendUrl)
     console.log('   Endpoint completo:', `${backendUrl}/youtube-extract`)
     
