@@ -132,6 +132,7 @@ export default function Home() {
   const [youtubeExtractError, setYoutubeExtractError] = useState('')
 
   const [songDelay, setSongDelay] = useState<number>(0)
+  const [timeFormat, setTimeFormat] = useState<'time' | 'beats'>('time')
   const [audioElements, setAudioElements] = useState<{ [key: string]: HTMLAudioElement }>({})
   const [isLoadingAudio, setIsLoadingAudio] = useState(false)
   const [waveforms, setWaveforms] = useState<{ [key: string]: number[] }>({})
@@ -1359,6 +1360,17 @@ export default function Home() {
     
     // Si ya es una ruta relativa local, dejarla
     if (url.startsWith('/')) return url;
+
+    // URLs locales legacy del backend (/audio/...) -> proxy interno estable de Next.
+    // Esto evita depender del puerto Python visible desde el navegador.
+    if (
+      url.startsWith('http://localhost:8000/audio/') ||
+      url.startsWith('http://127.0.0.1:8000/audio/')
+    ) {
+      return url
+        .replace('http://localhost:8000/audio/', '/backend-audio/')
+        .replace('http://127.0.0.1:8000/audio/', '/backend-audio/');
+    }
     
     // Si contiene el IP viejo, redirigir al proxy inverso
     const oldIp = '104.197.145.173';
@@ -2602,12 +2614,24 @@ export default function Home() {
             
             <div className="flex-none md:flex-1 flex flex-col md:flex-row h-[121px] md:h-[60vh] min-h-[121px] md:min-h-0 overflow-y-auto overflow-x-hidden relative border-b border-gray-800">
               {/* Área fija de controles a la izquierda */}
-              <div className="w-24 md:w-40 border-r border-gray-600 flex flex-col h-auto flex-shrink-0">
+              <div className="w-[130px] md:w-52 border-r border-gray-600 flex flex-col h-auto flex-shrink-0">
                 {/* Cabecera del Timeline (Espacio vacío para alineación) */}
                 <div className="h-8 w-full border-b border-gray-700 bg-black/40 flex items-center justify-between px-2 md:px-4 shrink-0">
-                   <div className="flex items-center">
-                     <Clock size={12} className="text-gray-500 mr-2" />
-                     <span className="text-[9px] text-gray-500 font-bold tracking-tighter uppercase opacity-60">Mixer</span>
+                   <div className="flex items-center gap-1 bg-[#1a1a1a] p-0.5 rounded border border-gray-700">
+                     <button
+                       onClick={() => setTimeFormat('time')}
+                       className={`text-[9px] font-bold px-2 py-0.5 rounded transition-all ${timeFormat === 'time' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
+                       title="Formato de Tiempo (Minutos:Segundos)"
+                     >
+                       ⏱️ TIME
+                     </button>
+                     <button
+                       onClick={() => setTimeFormat('beats')}
+                       className={`text-[9px] font-bold px-2 py-0.5 rounded transition-all ${timeFormat === 'beats' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
+                       title="Formato de Compases (Measures/Beats)"
+                     >
+                       🎵 COMPÁS
+                     </button>
                    </div>
                    
                    {/* Zoom Controls */}
@@ -2814,19 +2838,47 @@ export default function Home() {
                     {(() => {
                       const markers = [];
                       const songDuration = Number(duration || selectedSong?.duration || 0);
-                      const step = 5; // Resolución ultra-fina
+                      const currentBpm = Number(selectedSong?.bpm || 120);
+                      
+                      // 1 compás (measure) en 4/4 = 4 beats
+                      const beatDuration = 60 / currentBpm;
+                      const measureDuration = beatDuration * 4;
                       
                       if (songDuration > 0) {
-                        for (let t = 0; t <= songDuration; t += step) {
-                          const mins = Math.floor(t / 60);
-                          const secs = Math.floor(t % 60);
-                          const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
-                          const pos = (t / songDuration) * 100;
-                          
-                          const is30s = t % 30 === 0;
-                          const is15s = t % 15 === 0;
+                        if (timeFormat === 'time') {
+                          const step = 5; // Resolución ultra-fina
+                          for (let t = 0; t <= songDuration; t += step) {
+                            const mins = Math.floor(t / 60);
+                            const secs = Math.floor(t % 60);
+                            const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+                            const pos = (t / songDuration) * 100;
+                            
+                            const is30s = t % 30 === 0;
+                            const is15s = t % 15 === 0;
 
-                          markers.push({ timeStr, pos, is30s, is15s });
+                            markers.push({ timeStr, pos, is30s, is15s });
+                          }
+                        } else {
+                          // Formato de compases (Measures)
+                          const totalMeasures = Math.ceil(songDuration / measureDuration);
+                          
+                          // Mostrar más o menos texto dependiendo del zoom para no saturar
+                          const textInterval = horizontalZoom > 4 ? 1 : (horizontalZoom > 2 ? 4 : 8);
+                          
+                          for (let m = 1; m <= totalMeasures; m++) {
+                            const t = (m - 1) * measureDuration;
+                            const pos = (t / songDuration) * 100;
+                            
+                            const is30s = (m - 1) % textInterval === 0;
+                            const is15s = (m - 1) % Math.max(1, textInterval / 2) === 0;
+
+                            markers.push({ 
+                              timeStr: m.toString(), 
+                              pos, 
+                              is30s, 
+                              is15s 
+                            });
+                          }
                         }
                       }
                       

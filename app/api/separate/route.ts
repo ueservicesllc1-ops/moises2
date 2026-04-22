@@ -7,12 +7,36 @@ export async function POST(request: NextRequest) {
 
     console.log('🔗 POST /separate →', process.env.BACKEND_FETCH_MODE === 'remote' ? 'FastAPI remoto' : 'FastAPI local (getServerBackendUrl)')
 
-    const response = await postFormDataToBackend('/separate', formData, { timeoutMs: 300_000 })
+    // Compatibilidad entre despliegues: distintos backends usan rutas diferentes.
+    const candidatePaths = ['/separate', '/api/separate-demucs', '/api/separate']
+    const tried: Array<{ path: string; status: number; statusText: string }> = []
+    let response: Response | null = null
 
-    if (!response.ok) {
+    for (const path of candidatePaths) {
+      response = await postFormDataToBackend(path, formData, { timeoutMs: 300_000 })
+      tried.push({ path, status: response.status, statusText: response.statusText })
+
+      if (response.ok) {
+        console.log(`✅ Backend separation route found: ${path}`)
+        break
+      }
+
+      if (response.status !== 404) {
+        // Si no es 404, no seguimos intentando para no ocultar errores reales (400/500/etc)
+        break
+      }
+
+      console.warn(`⚠️ Backend 404 en ${path}, probando siguiente ruta...`)
+    }
+
+    if (!response || !response.ok) {
       const errorText = await response.text()
       return NextResponse.json(
-        { error: `Backend error: ${response.status} ${response.statusText}`, details: errorText },
+        {
+          error: `Backend error: ${response.status} ${response.statusText}`,
+          details: errorText,
+          triedRoutes: tried,
+        },
         { status: response.status }
       )
     }

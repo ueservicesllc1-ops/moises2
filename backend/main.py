@@ -56,6 +56,12 @@ class JobQueueManager:
             except Exception as e:
                 print(f"[QUEUE ERROR] DB update failed for task {task_id}: {e}")
 
+    def has_real_queue(self) -> bool:
+        """
+        Cola real = ya alcanzamos concurrencia maxima y aun quedan tareas esperando.
+        """
+        return len(self.active_tasks) >= self.max_concurrent and len(self.queue) > 0
+
     def get_queue_position(self, task_id):
         for i, item in enumerate(self.queue):
             if item[0] == task_id:
@@ -564,7 +570,7 @@ async def separate_audio_handler(
         )
         
         queue_pos = queue_manager.get_queue_position(task.id)
-        is_real_queue = len(queue_manager.active_tasks) >= queue_manager.max_concurrent
+        is_real_queue = queue_manager.has_real_queue()
         
         return {
             "success": True,
@@ -988,7 +994,7 @@ async def get_status(task_id: str):
     keyInfo = getattr(task, 'keyInfo', None)
     
     queue_pos = queue_manager.get_queue_position(task_id)
-    is_real_queue = len(queue_manager.active_tasks) >= queue_manager.max_concurrent
+    is_real_queue = task.status == TaskStatus.QUEUED and queue_manager.has_real_queue()
     
     response = {
         "task_id": task_id,
@@ -1561,8 +1567,18 @@ def generate_click_track_audio(audio_path: str, output_path: str):
     onset_env = librosa.onset.onset_strength(y=y, sr=sr)
     tempo, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
     
+    # Sintetizar un click estético: mezcla de sinusoides para tono y una caída percusiva (decay)
+    click_dur = 0.05  # 50 ms
+    t = np.linspace(0, click_dur, int(sr * click_dur), endpoint=False)
+    # Tono agudo y claro como un Woodblock moderno/Metrónomo digital
+    click_wave = np.sin(2 * np.pi * 1000 * t) + 0.5 * np.sin(2 * np.pi * 2000 * t)
+    envelope = np.exp(-t * 200) # Envolvente con decaimiento rápido al estilo percusivo
+    custom_click = click_wave * envelope
+    # Normalizar levemente para que tenga un nivel saludable (0.8) sin saturar
+    custom_click = (custom_click / np.max(np.abs(custom_click))) * 0.8
+    
     # Generate the actual click synthesis
-    clicks = librosa.clicks(frames=beat_frames, sr=sr, length=len(y))
+    clicks = librosa.clicks(frames=beat_frames, sr=sr, length=len(y), click=custom_click)
     
     # Write to WAV file
     sf.write(output_path, clicks, sr, subtype='PCM_16')
