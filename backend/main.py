@@ -1628,13 +1628,17 @@ def detect_offset(audio_path: str) -> float:
     return round(float(max(0.1, beat_times[0])), 3)
 
 def generate_click_track_audio(audio_path: str, output_path: str):
-    """Generate click track with beat-detection fallback for constrained runtimes."""
-    import librosa
+    """Generate a robust click track without external beat-analysis dependencies."""
     import soundfile as sf
     import numpy as np
 
-    # Load audio
-    y, sr = librosa.load(audio_path, sr=44100, mono=True)
+    # Load audio via soundfile to avoid librosa/pkg_resources runtime issues.
+    y, sr = sf.read(audio_path, dtype="float32")
+    if y.ndim == 2:
+        y = y.mean(axis=1)
+    y = np.asarray(y, dtype=np.float32).reshape(-1)
+    if y.size == 0:
+        raise RuntimeError("Audio vacío para generar click")
     duration_sec = float(len(y) / sr) if sr else 0.0
 
     # Sintetizar un click estético: mezcla de sinusoides para tono y una caída percusiva (decay)
@@ -1647,22 +1651,14 @@ def generate_click_track_audio(audio_path: str, output_path: str):
     # Normalizar levemente para que tenga un nivel saludable (0.8) sin saturar
     custom_click = (custom_click / np.max(np.abs(custom_click))) * 0.8
 
-    click_kwargs = {"sr": sr, "length": len(y), "click": custom_click}
-    try:
-        # Analyze tempo and beats focusing on percussive onset
-        onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-        _, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
-        beat_frames = np.asarray(beat_frames, dtype=int).reshape(-1)
-        if beat_frames.size == 0:
-            raise RuntimeError("No beat frames detected")
-        clicks = librosa.clicks(frames=beat_frames, **click_kwargs)
-    except Exception as beat_error:
-        # Railway-safe fallback: metrónomo regular a 120 BPM si falla detección de beats.
-        print(f"[CLICK] Beat detection fallback activado: {beat_error}")
-        bpm_fallback = 120.0
-        interval = 60.0 / bpm_fallback
-        times = np.arange(0.0, max(duration_sec, interval), interval, dtype=float)
-        clicks = librosa.clicks(times=times, **click_kwargs)
+    # Robust fallback: fixed-tempo metronome at 120 BPM for full track duration.
+    interval_samples = int(sr * 0.5)  # 120 BPM => 0.5s per beat
+    clicks = np.zeros(len(y), dtype=np.float32)
+    click_len = min(len(custom_click), len(clicks))
+    for start in range(0, len(clicks), max(1, interval_samples)):
+        end = min(start + click_len, len(clicks))
+        clicks[start:end] += custom_click[: end - start]
+    clicks = np.clip(clicks, -1.0, 1.0)
 
     # Write to WAV file
     sf.write(output_path, clicks, sr, subtype='PCM_16')
