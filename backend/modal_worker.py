@@ -18,6 +18,7 @@ image = (
     modal.Image.debian_slim(python_version="3.10")
     .apt_install("ffmpeg")
     .pip_install(
+        "setuptools",
         "torch",
         "torchaudio",
         "demucs",
