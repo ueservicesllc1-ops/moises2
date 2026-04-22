@@ -773,7 +773,9 @@ async def process_audio(
         # Analizar metadata del audio original (En hilo separado para NO bloquear el event loop)
         print(f"[PROCESS] Analizando metadata del audio...")
         try:
-            bpm, duration = await asyncio.to_thread(detect_bpm_and_duration, task.file_path)
+            _meta = await asyncio.to_thread(detect_bpm_and_duration, task.file_path)
+            bpm = _meta["bpm"]
+            duration = _meta["duration"]
             print(f"[PROCESS] BPM detectado: {bpm}, Duración: {duration}s")
         except Exception as e:
             print(f"[PROCESS] Error detectando BPM: {e}")
