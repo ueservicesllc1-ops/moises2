@@ -750,6 +750,8 @@ async def process_audio(
             print("[PROCESS] Click track generado exitosamente")
         except Exception as e:
             print(f"[PROCESS] Error generando click track: {e}")
+            import traceback
+            print(f"[PROCESS] Click track traceback:\n{traceback.format_exc()}")
         
         # Upload stems to B2 for online playback
         print(f"\n[PROCESS] Uploading {len(stems)} stems to B2...")
@@ -1587,18 +1589,15 @@ def detect_offset(audio_path: str) -> float:
     return round(float(max(0.1, beat_times[0])), 3)
 
 def generate_click_track_audio(audio_path: str, output_path: str):
-    """Generates a perfect click track synchronized to the detected beats of the song."""
+    """Generate click track with beat-detection fallback for constrained runtimes."""
     import librosa
     import soundfile as sf
     import numpy as np
 
     # Load audio
     y, sr = librosa.load(audio_path, sr=44100, mono=True)
-    
-    # Analyze tempo and beats focusing on percussive onset
-    onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-    tempo, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
-    
+    duration_sec = float(len(y) / sr) if sr else 0.0
+
     # Sintetizar un click estético: mezcla de sinusoides para tono y una caída percusiva (decay)
     click_dur = 0.05  # 50 ms
     t = np.linspace(0, click_dur, int(sr * click_dur), endpoint=False)
@@ -1608,10 +1607,24 @@ def generate_click_track_audio(audio_path: str, output_path: str):
     custom_click = click_wave * envelope
     # Normalizar levemente para que tenga un nivel saludable (0.8) sin saturar
     custom_click = (custom_click / np.max(np.abs(custom_click))) * 0.8
-    
-    # Generate the actual click synthesis
-    clicks = librosa.clicks(frames=beat_frames, sr=sr, length=len(y), click=custom_click)
-    
+
+    click_kwargs = {"sr": sr, "length": len(y), "click": custom_click}
+    try:
+        # Analyze tempo and beats focusing on percussive onset
+        onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+        _, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
+        beat_frames = np.asarray(beat_frames, dtype=int).reshape(-1)
+        if beat_frames.size == 0:
+            raise RuntimeError("No beat frames detected")
+        clicks = librosa.clicks(frames=beat_frames, **click_kwargs)
+    except Exception as beat_error:
+        # Railway-safe fallback: metrónomo regular a 120 BPM si falla detección de beats.
+        print(f"[CLICK] Beat detection fallback activado: {beat_error}")
+        bpm_fallback = 120.0
+        interval = 60.0 / bpm_fallback
+        times = np.arange(0.0, max(duration_sec, interval), interval, dtype=float)
+        clicks = librosa.clicks(times=times, **click_kwargs)
+
     # Write to WAV file
     sf.write(output_path, clicks, sr, subtype='PCM_16')
     return output_path
