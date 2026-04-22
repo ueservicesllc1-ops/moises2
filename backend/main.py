@@ -105,6 +105,7 @@ CACHE_MODEL_VERSION = os.getenv("SEPARATION_MODEL_VERSION", "demucs_pro_v3")
 CACHE_TTL_HOURS = int(os.getenv("SEPARATION_CACHE_TTL_HOURS", "168"))
 REMOTE_SEPARATION_TIMEOUT_SECONDS = int(os.getenv("REMOTE_SEPARATION_TIMEOUT_SECONDS", "300"))
 REMOTE_SEPARATION_RETRIES = int(os.getenv("REMOTE_SEPARATION_RETRIES", "1"))
+CLICK_DEBUG_BUILD = os.getenv("CLICK_DEBUG_BUILD", "build-unknown")
 
 
 def check_runtime_dependencies() -> Dict[str, object]:
@@ -216,6 +217,8 @@ async def startup_event():
     await b2_storage.initialize()
     global DEPENDENCY_STATUS
     DEPENDENCY_STATUS = check_runtime_dependencies()
+    DEPENDENCY_STATUS["click_debug_build"] = CLICK_DEBUG_BUILD
+    print(f"[STARTUP] CLICK_DEBUG_BUILD={CLICK_DEBUG_BUILD}")
     print(f"[STARTUP] Runtime dependencies: {DEPENDENCY_STATUS}")
     # Iniciar el bucle de procesamiento de la cola
     asyncio.create_task(queue_manager.process_loop())
