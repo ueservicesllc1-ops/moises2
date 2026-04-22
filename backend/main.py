@@ -22,7 +22,6 @@ from datetime import datetime
 from datetime import timedelta
 
 from b2_storage import b2_storage
-import librosa
 import numpy as np
 
 # In-memory task storage
@@ -1457,244 +1456,159 @@ async def process_chord_analysis(task: ProcessingTask):
 
 @app.post("/api/analyze-bpm")
 async def analyze_bpm(file: UploadFile = File(...)):
-    """
-    Analiza el BPM y offset del primer beat de un archivo de audio
-    """
+    """Analiza el BPM y offset del primer beat de un archivo de audio."""
     try:
-        # Crear directorio temporal si no existe
-        temp_dir = Path("temp_analysis")
-        temp_dir.mkdir(exist_ok=True)
-        
-        # Guardar archivo temporal
-        temp_file = temp_dir / f"temp_{uuid.uuid4()}_{file.filename}"
-        with open(temp_file, "wb") as buffer:
-            content = await file.read()
-            buffer.write(content)
-        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            tmp.write(await file.read())
+            tmp_path = tmp.name
         try:
-            # Cargar audio con librosa (asegurando mono para análisis)
-            y, sr = librosa.load(str(temp_file), mono=True)
-            
-            # Detectar tempo y beats
-            tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, units='time')
-            tempo_array = np.asarray(tempo).reshape(-1)
-            tempo_value = float(tempo_array[0]) if tempo_array.size > 0 else 0.0
-            
-            # Calcular offset del primer beat
-            first_beat_time = 0.0
-            beat_times = np.asarray(beat_frames, dtype=float).reshape(-1)
-            if len(beat_times) > 0:
-                first_beat_time = float(beat_times[0])
-            
-            # Detectar onset del primer ataque fuerte
-            onsets = np.asarray(librosa.onset.onset_detect(y=y, sr=sr, units='time'), dtype=float).reshape(-1)
-            first_onset = float(onsets[0]) if len(onsets) > 0 else 0.0
-            
-            # Usar el menor entre primer beat y primer onset
-            offset = min(first_beat_time, first_onset) if first_onset > 0 else first_beat_time
-            
-            # Duración del audio
-            duration = len(y) / sr
-            
-            # Detectar compás (time signature)
-            # Análisis básico de patrones de acentuación
-            if len(beat_times) >= 4:
-                # Analizar patrones de acentuación en los primeros beats
-                energy_per_beat = []
-                for i in range(min(8, len(beat_times) - 1)):
-                    start_frame = int(beat_times[i] * sr)
-                    end_frame = int(beat_times[i + 1] * sr)
-                    beat_energy = np.mean(np.abs(y[start_frame:end_frame]))
-                    energy_per_beat.append(beat_energy)
-                
-                # Detectar patrón de acentuación (4/4, 3/4, etc.)
-                if len(energy_per_beat) >= 4:
-                    # Buscar patrones de acentuación cada 4 beats
-                    accent_pattern = 4  # Default
-                    if len(energy_per_beat) >= 8:
-                        # Analizar si hay acentuación cada 3 beats (3/4)
-                        three_beat_energy = np.mean([energy_per_beat[i] for i in range(0, len(energy_per_beat), 3)])
-                        four_beat_energy = np.mean([energy_per_beat[i] for i in range(0, len(energy_per_beat), 4)])
-                        
-                        if three_beat_energy > four_beat_energy * 1.2:
-                            accent_pattern = 3
-            else:
-                accent_pattern = 4
-            
-            result = {
-                "bpm": float(round(tempo_value)),
-                "offset": float(offset),
-                "duration": float(duration),
-                "time_signature": f"{accent_pattern}/4",
-                "beat_times": beat_times.tolist()[:20],  # Primeros 20 beats
-                "onsets": onsets.tolist()[:10]  # Primeros 10 onsets
-            }
-            
-            return result
-            
+            result = await asyncio.to_thread(detect_bpm_and_duration, tmp_path)
+            return {**result, "time_signature": "4/4"}
         finally:
-            # Limpiar archivo temporal
-            if temp_file.exists():
-                temp_file.unlink()
-                
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
     except Exception as e:
-        print(f"Error analyzing BPM: {e}")
-        raise HTTPException(status_code=500, detail=f"Error analyzing audio: {str(e)}")
+        print(f"[ANALYZE-BPM] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-def detect_offset(audio_path: str) -> float:
-    """Detecta el downbeat real (primer beat fuerte del compás) en segundos."""
-    y, sr = librosa.load(audio_path, sr=None, mono=True)
-    
-    # 1. Detectar tempo y beats
-    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, units="frames")
-    beat_times = librosa.frames_to_time(beat_frames, sr=sr)
-    
-    # 2. Detectar onsets (ataques)
-    onset_strength = librosa.onset.onset_strength(y=y, sr=sr)
-    onset_frames = librosa.onset.onset_detect(
-        onset_envelope=onset_strength, sr=sr, units="frames",
-        pre_max=3, post_max=3, pre_avg=3, post_avg=5, 
-        delta=0.5, wait=20
-    )
-    onset_times = librosa.frames_to_time(onset_frames, sr=sr)
-    
-    if len(beat_times) == 0 or len(onset_times) == 0:
-        return 0.1  # Fallback
-    
-    # 3. Buscar el primer onset que coincida con un beat (downbeat real)
-    tolerance = 0.15  # 150ms de tolerancia
-    
-    for beat_time in beat_times:
-        # Buscar onsets cerca de este beat
-        for onset_time in onset_times:
-            if abs(onset_time - beat_time) <= tolerance:
-                # Encontramos un onset que coincide con un beat
-                return round(float(max(0.1, onset_time)), 3)
-    
-    # 4. Si no hay coincidencia exacta, buscar el primer beat fuerte
-    # Analizar energía alrededor de cada beat
-    energy = np.abs(y)
-    beat_energies = []
-    
-    for beat_time in beat_times[:5]:  # Solo los primeros 5 beats
-        start_frame = int((beat_time - 0.1) * sr)
-        end_frame = int((beat_time + 0.1) * sr)
-        start_frame = max(0, start_frame)
-        end_frame = min(len(energy), end_frame)
-        
-        if end_frame > start_frame:
-            beat_energy = np.mean(energy[start_frame:end_frame])
-            beat_energies.append((beat_time, beat_energy))
-    
-    if beat_energies:
-        # Tomar el beat con mayor energía (más probable que sea el downbeat)
-        strongest_beat = max(beat_energies, key=lambda x: x[1])
-        return round(float(max(0.1, strongest_beat[0])), 3)
-    
-    # 5. Fallback: usar el primer beat detectado
-    return round(float(max(0.1, beat_times[0])), 3)
+# ─────────────────────────────────────────────────────────────────────────────
+# BPM / CLICK TRACK ENGINE  (numpy + scipy + soundfile — sin librosa)
+# ─────────────────────────────────────────────────────────────────────────────
 
-def generate_click_track_audio(audio_path: str, output_path: str):
-    """Generates a perfect click track synchronized to the detected beats of the song."""
-    import librosa
+def _load_audio_mono(audio_path: str, target_sr: int = 22050):
+    """Carga cualquier audio como mono float32. Usa ffmpeg si soundfile no puede."""
     import soundfile as sf
     import numpy as np
+    import subprocess, tempfile, os
 
-    # Load audio
-    y, sr = librosa.load(audio_path, sr=44100, mono=True)
-    
-    # Analyze tempo and beats focusing on percussive onset
-    onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-    tempo, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
-    
-    # Sintetizar un click estético: mezcla de sinusoides para tono y una caída percusiva (decay)
-    click_dur = 0.05  # 50 ms
-    t = np.linspace(0, click_dur, int(sr * click_dur), endpoint=False)
-    # Tono agudo y claro como un Woodblock moderno/Metrónomo digital
-    click_wave = np.sin(2 * np.pi * 1000 * t) + 0.5 * np.sin(2 * np.pi * 2000 * t)
-    envelope = np.exp(-t * 200) # Envolvente con decaimiento rápido al estilo percusivo
-    custom_click = click_wave * envelope
-    # Normalizar levemente para que tenga un nivel saludable (0.8) sin saturar
-    custom_click = (custom_click / np.max(np.abs(custom_click))) * 0.8
-    
-    # Generate the actual click synthesis
-    clicks = librosa.clicks(frames=beat_frames, sr=sr, length=len(y), click=custom_click)
-    
-    # Write to WAV file
-    sf.write(output_path, clicks, sr, subtype='PCM_16')
+    try:
+        data, sr = sf.read(audio_path, dtype="float32", always_2d=True)
+        mono = data.mean(axis=1)
+    except Exception:
+        # Fallback: convertir con ffmpeg a WAV PCM
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp_path = tmp.name
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", audio_path, "-ar", str(target_sr), "-ac", "1", tmp_path],
+            capture_output=True, check=True,
+        )
+        data, sr = sf.read(tmp_path, dtype="float32")
+        os.unlink(tmp_path)
+        mono = data
+
+    if sr != target_sr:
+        from scipy.signal import resample_poly
+        from math import gcd
+        g = gcd(int(sr), target_sr)
+        mono = resample_poly(mono, target_sr // g, int(sr) // g).astype(np.float32)
+        sr = target_sr
+
+    return mono.astype(np.float32), int(sr)
+
+
+def _onset_strength(y: np.ndarray, sr: int, hop: int = 512) -> np.ndarray:
+    """Envolvente de onset por diferencia de energía (media rectificada)."""
+    frame_len = hop * 2
+    n_frames = (len(y) - frame_len) // hop
+    energy = np.array([np.sum(y[i*hop : i*hop + frame_len] ** 2) for i in range(n_frames)])
+    diff = np.diff(energy, prepend=energy[0])
+    env = np.maximum(0.0, diff)
+    mx = env.max()
+    return env / mx if mx > 0 else env
+
+
+def _estimate_bpm(env: np.ndarray, sr: int, hop: int = 512) -> float:
+    """Estima BPM via autocorrelación de la envolvente de onset."""
+    fps = sr / hop
+    ac = np.correlate(env, env, mode="full")[len(env) - 1:]
+    lo = max(1, int(fps * 60 / 250))   # 250 BPM
+    hi = min(len(ac) - 1, int(fps * 60 / 40))  # 40 BPM
+    if lo >= hi:
+        return 120.0
+    best_lag = np.argmax(ac[lo:hi]) + lo
+    bpm = fps * 60.0 / best_lag
+    return float(np.clip(round(bpm * 2) / 2, 40.0, 250.0))
+
+
+def _first_onset_time(env: np.ndarray, sr: int, hop: int = 512) -> float:
+    """Devuelve el tiempo del primer onset fuerte (>30 % del máximo)."""
+    threshold = env.max() * 0.30
+    for i, v in enumerate(env):
+        if v >= threshold:
+            return i * hop / sr
+    return 0.0
+
+
+def detect_offset(audio_path: str) -> float:
+    """Detecta el tiempo del primer beat fuerte en segundos."""
+    try:
+        y, sr = _load_audio_mono(audio_path, target_sr=22050)
+        env = _onset_strength(y, sr)
+        bpm = _estimate_bpm(env, sr)
+        offset = _first_onset_time(env, sr)
+        beat_interval = 60.0 / bpm
+        # Clampea al interior del primer pulso
+        offset = float(np.clip(offset, 0.0, beat_interval * 0.95))
+        return round(offset, 3)
+    except Exception:
+        return 0.1
+
+
+def generate_click_track_audio(audio_path: str, output_path: str) -> str:
+    """Genera un click track WAV sincronizado al tempo de la canción."""
+    import soundfile as sf
+
+    SR = 44100
+    y, _ = _load_audio_mono(audio_path, target_sr=SR)
+    duration = len(y) / SR
+
+    env = _onset_strength(y, SR)
+    bpm = _estimate_bpm(env, SR)
+    offset = _first_onset_time(env, SR)
+    beat_interval = 60.0 / bpm
+    offset = float(np.clip(offset, 0.0, beat_interval * 0.95))
+
+    # Síntesis del click: woodblock digital (mezcla de armónicos + decay rápido)
+    click_dur = 0.04
+    t = np.linspace(0, click_dur, int(SR * click_dur), endpoint=False)
+    click = (
+        np.sin(2 * np.pi * 1200 * t)
+        + 0.6 * np.sin(2 * np.pi * 2400 * t)
+        + 0.3 * np.sin(2 * np.pi * 3600 * t)
+    )
+    click *= np.exp(-t * 150)
+    click = (click / np.max(np.abs(click)) * 0.85).astype(np.float32)
+
+    # Colocar clicks en cada beat
+    track = np.zeros(len(y), dtype=np.float32)
+    beat_time = offset
+    while beat_time < duration:
+        start = int(beat_time * SR)
+        end = min(start + len(click), len(track))
+        track[start:end] += click[: end - start]
+        beat_time += beat_interval
+
+    track = np.clip(track, -1.0, 1.0)
+    sf.write(output_path, track, SR, subtype="PCM_16")
     return output_path
 
-def detect_bpm_and_duration(audio_path: str):
-    """Detecta BPM promedio y duración del audio con algoritmo mejorado."""
-    y, sr = librosa.load(audio_path, sr=None, mono=True)
-    
-    duration = float(len(y) / sr) if sr else 0.0
 
-    # Usar múltiples métodos para detectar BPM más preciso
-    # Método 1: beat_track con diferentes parámetros
-    tempo1, beats1 = librosa.beat.beat_track(y=y, sr=sr, start_bpm=60, tightness=100)
-    
-    # Método 2: beat_track con parámetros más conservadores
-    tempo2, beats2 = librosa.beat.beat_track(y=y, sr=sr, start_bpm=120, tightness=50)
-    
-    # Método 3: Usar onset_strength para detectar tempo
-    onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-    tempo3, beats3 = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
-    
-    # Método 4: Análisis de espectro para detectar tempo
-    tempo4, beats4 = librosa.beat.beat_track(y=y, sr=sr, units='time', hop_length=512)
-    
-    # Método 5: Usar tempo con diferentes hop_length
-    tempo5, beats5 = librosa.beat.beat_track(y=y, sr=sr, hop_length=1024)
-    
-    # Método 6: Análisis de tempo con diferentes unidades
-    tempo6, beats6 = librosa.beat.beat_track(y=y, sr=sr, units='frames')
-    
-    # Calcular promedio de los métodos
-    tempos = [tempo1, tempo2, tempo3, tempo4, tempo5, tempo6]
-    
-    # Filtrar valores extremos (menos de 40 o más de 250 BPM)
-    valid_tempos = [t for t in tempos if 40 <= t <= 250]
-    
-    if valid_tempos:
-        # Usar la mediana para evitar outliers
-        tempo = np.median(valid_tempos)
-        
-        # Verificar si el tempo es consistente con los beats detectados
-        if len(beats1) > 0:
-            beat_times = librosa.frames_to_time(beats1, sr=sr)
-            if len(beat_times) > 1:
-                # Calcular BPM basado en intervalos entre beats
-                intervals = np.diff(beat_times)
-                median_interval = np.median(intervals)
-                calculated_bpm = 60.0 / median_interval
-                
-                # Si el BPM calculado es muy diferente, usar el calculado
-                if abs(calculated_bpm - tempo) > 20:
-                    tempo = calculated_bpm
-    else:
-        # Fallback al primer método si todos son inválidos
-        tempo = tempo1
-    
-    # Normalización del BPM para rango musical estándar
-    if tempo < 70:
-        tempo = tempo * 2  # Subir al doble si está muy lento
-    elif tempo > 180:
-        tempo = tempo / 2  # Bajar a la mitad si está muy rápido
-    
-    # Asegurar que el tempo esté en un rango razonable
-    tempo = max(60, min(180, tempo))
-    
-    # Redondear a números enteros (120, 121, 122, etc.)
-    original_tempo = tempo
-    print(f"BPM antes del redondeo: {tempo}")
-    
-    # Redondear al entero más cercano
-    tempo = round(tempo)
-    
-    print(f"BPM después del redondeo: {original_tempo} -> {tempo}")
-    print(f"BPM final que se devuelve: {tempo}")
-    return tempo, duration
+def detect_bpm_and_duration(audio_path: str):
+    """Detecta BPM y duración sin librosa."""
+    y, sr = _load_audio_mono(audio_path, target_sr=22050)
+    duration = round(len(y) / sr, 2)
+    env = _onset_strength(y, sr)
+    bpm = _estimate_bpm(env, sr)
+    offset = _first_onset_time(env, sr)
+    beat_interval = 60.0 / bpm
+    beat_times = list(np.arange(offset, duration, beat_interval)[:20])
+    return {
+        "bpm": float(round(bpm)),
+        "duration": duration,
+        "offset": round(offset, 3),
+        "beat_times": beat_times,
+    }
+
 
 
 def estimate_processing_cost(duration_seconds: float, requested_tracks: List[str], quality_profile: str, hi_fi: bool) -> float:
@@ -1727,11 +1641,9 @@ async def analyze_key(file: UploadFile = File(...)):
             buffer.write(content)
             
         try:
-            # Cargar audio (mono para análisis de pitch)
-            y, sr = librosa.load(str(temp_file), mono=True)
-            
-            # Extraer Chroma CQT
-            chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+            import librosa as _librosa  # optional feature
+            y, sr = _librosa.load(str(temp_file), mono=True)
+            chroma = _librosa.feature.chroma_cqt(y=y, sr=sr)
             chroma_mean = np.mean(chroma, axis=1)
             
             # Definir plantillas de acordes mayores y menores
@@ -1772,31 +1684,19 @@ async def analyze_key(file: UploadFile = File(...)):
 @app.post("/api/analyze-audio")
 async def analyze_audio(file: UploadFile = File(...)):
     try:
-        # Guardar el archivo temporalmente
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            content = await file.read()
-            tmp.write(content)
+            tmp.write(await file.read())
             tmp_path = tmp.name
 
-        # Detectar offset, bpm y duración
-        offset = detect_offset(tmp_path)
-        bpm, duration = detect_bpm_and_duration(tmp_path)
-
-        # Eliminar archivo temporal
+        result = await asyncio.to_thread(detect_bpm_and_duration, tmp_path)
         os.remove(tmp_path)
 
-        print(f"RESULTADO FINAL: offset={offset}, bpm={bpm}, duration={duration}")
-        
-        return {
-            "success": True,
-            "offset": offset,
-            "bpm": bpm,
-            "duration": duration
-        }
+        print(f"[ANALYZE-AUDIO] bpm={result['bpm']} offset={result['offset']} duration={result['duration']}")
+        return {"success": True, **result}
 
     except Exception as e:
-        print(f"Error analyzing audio: {e}")
-        raise HTTPException(status_code=500, detail=f"Error analyzing audio: {str(e)}")
+        print(f"[ANALYZE-AUDIO] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 def _validate_training_manifest(manifest: dict) -> None:
     """
@@ -2232,8 +2132,8 @@ async def pitch_shift_audio(request: Request):
         with open(temp_input, 'wb') as f:
             f.write(audio_data)
         
-        # Cargar audio
-        y, sr = librosa.load(str(temp_input), sr=None, mono=False)
+        import librosa as _librosa  # optional feature
+        y, sr = _librosa.load(str(temp_input), sr=None, mono=False)
         print(f"[PITCH SHIFT] Audio cargado: {y.shape}, SR: {sr}")
         
         # Aplicar pitch shift SIN cambiar tempo
@@ -2292,9 +2192,9 @@ async def export_audio(
         with open(temp_input, "wb") as f:
             f.write(payload)
 
-        y, sr = librosa.load(str(temp_input), sr=None, mono=False)
+        import librosa as _librosa  # optional feature — pitch/tempo shift
+        y, sr = _librosa.load(str(temp_input), sr=None, mono=False)
 
-        # librosa can return mono as shape (n,), normalize to (channels, n)
         y2 = np.asarray(y)
         if y2.ndim == 1:
             y2 = np.expand_dims(y2, axis=0)
@@ -2303,10 +2203,10 @@ async def export_audio(
         n_steps = float(pitch_semitones)
 
         if abs(rate - 1.0) > 1e-6:
-            y2 = np.vstack([librosa.effects.time_stretch(ch, rate=rate) for ch in y2])
+            y2 = np.vstack([_librosa.effects.time_stretch(ch, rate=rate) for ch in y2])
 
         if abs(n_steps) > 1e-6:
-            y2 = np.vstack([librosa.effects.pitch_shift(ch, sr=sr, n_steps=n_steps) for ch in y2])
+            y2 = np.vstack([_librosa.effects.pitch_shift(ch, sr=sr, n_steps=n_steps) for ch in y2])
 
         y2 = np.clip(y2, -1.0, 1.0)
 
