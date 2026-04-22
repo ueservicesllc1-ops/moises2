@@ -1,5 +1,5 @@
 # ─── Stage 1: Node build ───────────────────────────────────────────────────
-FROM node:18-bullseye-slim AS builder
+FROM node:18-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ RUN npm run build
 # ─── Stage 2: Python venv ──────────────────────────────────────────────────
 # Modal handles all ML (demucs/spleeter) — Railway only needs:
 #   fastapi, librosa (BPM/chords), modal client, yt-dlp, misc utils
-FROM node:18-bullseye-slim AS pybuilder
+FROM node:18-bookworm-slim AS pybuilder
 
 RUN apt-get update && apt-get install -y \
     python3 \
@@ -36,7 +36,7 @@ RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir --timeout 300 --retries 3 -r requirements.txt
 
 # ─── Stage 3: Production ───────────────────────────────────────────────────
-FROM node:18-bullseye-slim
+FROM node:18-bookworm-slim
 
 RUN apt-get update && apt-get install -y \
     python3 \

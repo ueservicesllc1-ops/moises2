@@ -31,5 +31,5 @@ python-dotenv>=1.0.0
 aioboto3==12.3.0
 
 # Cloud AI Engine (runs demucs on Modal GPU)
-# Railway image uses Python 3.9, so keep a py39-compatible pinned Modal release.
-modal==0.73.173
+# bookworm (Debian 12) ships Python 3.11 so modal==1.4.1 (py>=3.10) works fine.
+modal==1.4.1
