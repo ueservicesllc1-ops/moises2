@@ -1649,26 +1649,26 @@ def detect_offset(audio_path: str) -> float:
     return round(float(max(0.1, beat_times[0])), 3)
 
 def generate_click_track_audio(audio_path: str, output_dir: str) -> float:
-    """Generate click track aligned to percussive pulse and return detected BPM."""
+    """Generate click track aligned to song tempo and return detected BPM."""
     import soundfile as sf
     import numpy as np
     from scipy import signal
     from pathlib import Path
 
-    # Load audio via soundfile to avoid librosa/pkg_resources runtime issues.
-    y, sr = sf.read(audio_path, dtype="float32")
-    if y.ndim == 2:
-        y = y.mean(axis=1)
-    y = np.asarray(y, dtype=np.float32).reshape(-1)
-    if y.size == 0:
+    # Sintetizar un click estético: mezcla de sinusoides para tono y una caída percusiva (decay)
+    y_sf, sr_sf = sf.read(audio_path, dtype="float32")
+    if y_sf.ndim == 2:
+        y_sf = y_sf.mean(axis=1)
+    y_sf = np.asarray(y_sf, dtype=np.float32).reshape(-1)
+    if y_sf.size == 0:
         raise RuntimeError("Audio vacío para generar click")
-    duration_sec = float(len(y) / sr) if sr else 0.0
+
+    duration_sec = float(len(y_sf) / sr_sf) if sr_sf else 0.0
     if duration_sec < 0.25:
         raise RuntimeError("Audio demasiado corto para detectar pulso")
 
-    # Sintetizar un click estético: mezcla de sinusoides para tono y una caída percusiva (decay)
     click_dur = 0.05  # 50 ms
-    t = np.linspace(0, click_dur, int(sr * click_dur), endpoint=False)
+    t = np.linspace(0, click_dur, int(sr_sf * click_dur), endpoint=False)
     # Tono agudo y claro como un Woodblock moderno/Metrónomo digital
     click_wave = np.sin(2 * np.pi * 1000 * t) + 0.5 * np.sin(2 * np.pi * 2000 * t)
     envelope = np.exp(-t * 200) # Envolvente con decaimiento rápido al estilo percusivo
@@ -1676,99 +1676,107 @@ def generate_click_track_audio(audio_path: str, output_dir: str) -> float:
     # Normalizar levemente para que tenga un nivel saludable (0.8) sin saturar
     custom_click = (custom_click / np.max(np.abs(custom_click))) * 0.8
 
-    # --- Beat detection without librosa ---
-    # 1) Band-pass to focus kick/snare region.
-    nyq = 0.5 * sr
-    low = max(20.0 / nyq, 1e-6)
-    high = min(250.0 / nyq, 0.999)
-    if low >= high:
-        low, high = 0.01, 0.25
-    b, a = signal.butter(2, [low, high], btype="bandpass")
-    y_bp = signal.filtfilt(b, a, y)
+    bpm_int = 120
+    output_sr = sr_sf
+    clicks = None
 
-    # 2) Onset envelope from half-wave rectified energy.
-    rectified = np.maximum(y_bp, 0.0)
-    env_win = max(1, int(sr * 0.01))  # 10 ms smoothing
-    onset_env = signal.convolve(rectified, np.ones(env_win) / env_win, mode="same")
-    onset_env = np.maximum(0.0, onset_env - np.median(onset_env))
-    onset_env = onset_env / (np.max(onset_env) + 1e-8)
+    # Prefer local-accurate path (same behavior as local env): librosa beat tracking.
+    try:
+        import librosa  # type: ignore
 
-    # 3) Downsample envelope for tempo detection.
-    env_hz = 200.0
-    env_step = max(1, int(sr / env_hz))
-    onset_ds = onset_env[::env_step]
-    onset_ds = onset_ds - np.mean(onset_ds)
+        y_lb, sr_lb = librosa.load(audio_path, sr=44100, mono=True)
+        # Priorizar componente percusiva para BPM más estable en temas complejos.
+        _, y_perc = librosa.effects.hpss(y_lb)
+        onset_env = librosa.onset.onset_strength(y=y_perc, sr=sr_lb)
+        tempo, beat_frames = librosa.beat.beat_track(
+            onset_envelope=onset_env,
+            sr=sr_lb,
+            start_bpm=120.0,
+            tightness=100,
+        )
+        tempo_arr = np.asarray(tempo).reshape(-1)
+        bpm_val = float(tempo_arr[0]) if tempo_arr.size else 120.0
 
-    # 4) Autocorrelation in BPM range.
-    min_bpm, max_bpm = 70.0, 190.0
-    min_lag = int(env_hz * 60.0 / max_bpm)
-    max_lag = int(env_hz * 60.0 / min_bpm)
-    ac = signal.correlate(onset_ds, onset_ds, mode="full")
-    ac = ac[len(ac) // 2 :]
-    max_lag = min(max_lag, len(ac) - 1)
-    if max_lag <= min_lag:
-        raise RuntimeError("No se pudo estimar tempo (autocorrelation vacía)")
+        beat_frames = np.asarray(beat_frames, dtype=int).reshape(-1)
+        if beat_frames.size == 0:
+            raise RuntimeError("No beat frames detected by librosa")
 
-    ac_band = ac[min_lag : max_lag + 1]
-    best_lag = int(np.argmax(ac_band)) + min_lag
+        # Calcular BPM desde intervalos reales entre beats para evitar "va volando".
+        beat_times = librosa.frames_to_time(beat_frames, sr=sr_lb)
+        if beat_times.size > 2:
+            intervals = np.diff(beat_times)
+            intervals = intervals[(intervals > 0.2) & (intervals < 1.2)]  # 50..300 BPM
+            if intervals.size > 0:
+                bpm_from_intervals = 60.0 / float(np.median(intervals))
+                bpm_val = bpm_from_intervals
 
-    # Resolver ambiguedad x2/÷2 entre lags cercanos (musica real).
-    candidate_lags = {best_lag}
-    if best_lag * 2 <= max_lag:
-        candidate_lags.add(best_lag * 2)
-    if best_lag // 2 >= min_lag:
-        candidate_lags.add(best_lag // 2)
-    candidate_lags = sorted(candidate_lags)
+        # Resolver ambigüedad half/double respecto a una zona musical útil.
+        while bpm_val < 80.0:
+            bpm_val *= 2.0
+        while bpm_val > 170.0:
+            bpm_val /= 2.0
+        bpm_int = int(round(max(70.0, min(180.0, bpm_val))))
 
-    def lag_score(lag_value: int) -> float:
-        phase_scores = []
-        for phase in range(lag_value):
-            idx = np.arange(phase, len(onset_ds), lag_value, dtype=int)
-            if idx.size == 0:
-                continue
-            phase_scores.append(float(np.sum(onset_ds[idx])))
-        return max(phase_scores) if phase_scores else -1.0
-
-    best_lag = max(candidate_lags, key=lag_score)
-    beat_period_sec = best_lag / env_hz
-    bpm = 60.0 / max(beat_period_sec, 1e-6)
-
-    # 5) Phase alignment: choose start offset maximizing onset energy on beat grid.
-    phase_candidates = np.arange(best_lag)
-    sample_count = len(onset_ds)
-    best_phase = 0
-    best_score = -1.0
-    for phase in phase_candidates:
-        idx = np.arange(phase, sample_count, best_lag, dtype=int)
-        if idx.size == 0:
-            continue
-        score = float(np.sum(onset_ds[idx]))
-        if score > best_score:
-            best_score = score
-            best_phase = int(phase)
-
-    first_beat_sample = int(best_phase * env_step)
-    beat_interval_samples = int(round(beat_period_sec * sr))
-    beat_interval_samples = max(1, beat_interval_samples)
-
-    print(
-        f"[CLICK_DEBUG] Beat grid detected: bpm={bpm:.2f}, "
-        f"interval_samples={beat_interval_samples}, first_beat_sample={first_beat_sample}"
-    )
-
-    # 6) Build click track on detected beat grid.
-    clicks = np.zeros(len(y), dtype=np.float32)
-    click_len = min(len(custom_click), len(clicks))
-    for start in range(first_beat_sample, len(clicks), beat_interval_samples):
-        end = min(start + click_len, len(clicks))
-        clicks[start:end] += custom_click[: end - start]
-    clicks = np.clip(clicks, -1.0, 1.0)
+        # Re-construir grilla regular usando BPM estabilizado y primer beat detectado.
+        first_beat = float(beat_times[0]) if beat_times.size else 0.0
+        beat_interval = 60.0 / bpm_int
+        beat_count = int(np.ceil(max(0.0, (len(y_lb) / sr_lb - first_beat)) / beat_interval)) + 1
+        beat_grid = first_beat + np.arange(beat_count) * beat_interval
+        beat_grid = beat_grid[(beat_grid >= 0.0) & (beat_grid * sr_lb < len(y_lb))]
+        clicks = librosa.clicks(times=beat_grid, sr=sr_lb, length=len(y_lb), click=custom_click)
+        output_sr = sr_lb
+        print(
+            f"[CLICK_DEBUG] Librosa beat-track selected bpm={bpm_int} "
+            f"raw_tempo={float(tempo_arr[0]) if tempo_arr.size else 0:.2f} beats={beat_frames.size}"
+        )
+    except Exception as lb_err:
+        # Fallback path when librosa/pkg_resources is unavailable.
+        print(f"[CLICK_DEBUG] Librosa path failed, using scipy fallback: {lb_err}")
+        y = y_sf
+        sr = sr_sf
+        nyq = 0.5 * sr
+        low = max(20.0 / nyq, 1e-6)
+        high = min(250.0 / nyq, 0.999)
+        if low >= high:
+            low, high = 0.01, 0.25
+        b, a = signal.butter(2, [low, high], btype="bandpass")
+        y_bp = signal.filtfilt(b, a, y)
+        rectified = np.maximum(y_bp, 0.0)
+        env_win = max(1, int(sr * 0.01))
+        onset_env = signal.convolve(rectified, np.ones(env_win) / env_win, mode="same")
+        onset_env = np.maximum(0.0, onset_env - np.median(onset_env))
+        onset_env = onset_env / (np.max(onset_env) + 1e-8)
+        env_hz = 200.0
+        env_step = max(1, int(sr / env_hz))
+        onset_ds = onset_env[::env_step] - np.mean(onset_env[::env_step])
+        min_bpm, max_bpm = 70.0, 190.0
+        min_lag = int(env_hz * 60.0 / max_bpm)
+        max_lag = min(int(env_hz * 60.0 / min_bpm), len(onset_ds) - 1)
+        if max_lag <= min_lag:
+            raise RuntimeError("No se pudo estimar tempo en fallback scipy")
+        ac = signal.correlate(onset_ds, onset_ds, mode="full")
+        ac = ac[len(ac) // 2 :]
+        best_lag = int(np.argmax(ac[min_lag:max_lag + 1])) + min_lag
+        bpm_val = 60.0 / max((best_lag / env_hz), 1e-6)
+        while bpm_val < 70.0:
+            bpm_val *= 2.0
+        while bpm_val > 190.0:
+            bpm_val /= 2.0
+        bpm_int = int(round(max(60.0, min(200.0, bpm_val))))
+        beat_interval_samples = max(1, int(round((60.0 / bpm_int) * sr)))
+        clicks = np.zeros(len(y), dtype=np.float32)
+        click_len = min(len(custom_click), len(clicks))
+        for start in range(0, len(clicks), beat_interval_samples):
+            end = min(start + click_len, len(clicks))
+            clicks[start:end] += custom_click[: end - start]
+        clicks = np.clip(clicks, -1.0, 1.0)
+        output_sr = sr
+        print(f"[CLICK_DEBUG] Scipy fallback selected bpm={bpm_int} interval={beat_interval_samples}")
 
     # Write to WAV file with BPM in stem name.
-    bpm_int = int(round(bpm))
     click_key = f"click_{bpm_int}"
     output_path = Path(output_dir) / f"{click_key}.wav"
-    sf.write(str(output_path), clicks, sr, subtype='PCM_16')
+    sf.write(str(output_path), clicks, output_sr, subtype='PCM_16')
     return float(bpm_int)
 
 def detect_bpm_and_duration(audio_path: str):
