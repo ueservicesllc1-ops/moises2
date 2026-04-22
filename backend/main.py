@@ -675,8 +675,7 @@ async def process_audio(
                         f"Reintentando separación remota ({attempt_idx + 1}/{total_attempts})..."
                     )
                 stems_bytes = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        remote_gpu_func.remote,
+                    remote_gpu_func.remote.aio(
                         audio_bytes,
                         requested_tracks,
                         hi_fi,
