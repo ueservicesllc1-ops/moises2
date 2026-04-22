@@ -116,6 +116,9 @@ def check_runtime_dependencies() -> Dict[str, object]:
         "ffmpeg": False,
         "ytdlp_cli": False,
         "ytdlp_python_module": False,
+        "modal_client": False,
+        "modal_token_id_present": bool(os.getenv("MODAL_TOKEN_ID")),
+        "modal_token_secret_present": bool(os.getenv("MODAL_TOKEN_SECRET")),
         "python_executable": os.getenv("PYTHON_EXECUTABLE", ""),
     }
 
@@ -147,6 +150,16 @@ def check_runtime_dependencies() -> Dict[str, object]:
     except Exception as e:
         status["ytdlp_python_module"] = False
         status["ytdlp_error"] = str(e)[:300]
+
+    # modal client (version + import sanity)
+    try:
+        import modal  # type: ignore
+
+        status["modal_client"] = True
+        status["modal_version"] = getattr(modal, "__version__", "unknown")
+    except Exception as e:
+        status["modal_client"] = False
+        status["modal_error"] = str(e)[:300]
 
     return status
 

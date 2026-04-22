@@ -31,4 +31,5 @@ python-dotenv>=1.0.0
 aioboto3==12.3.0
 
 # Cloud AI Engine (runs demucs on Modal GPU)
-modal>=0.64.0
+# Pin exact version to avoid Railway drift/regressions between deploys.
+modal==1.4.1
