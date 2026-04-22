@@ -1631,9 +1631,10 @@ def detect_offset(audio_path: str) -> float:
     return round(float(max(0.1, beat_times[0])), 3)
 
 def generate_click_track_audio(audio_path: str, output_path: str):
-    """Generate a robust click track without external beat-analysis dependencies."""
+    """Generate click track aligned to detected percussive pulse."""
     import soundfile as sf
     import numpy as np
+    from scipy import signal
 
     # Load audio via soundfile to avoid librosa/pkg_resources runtime issues.
     y, sr = sf.read(audio_path, dtype="float32")
@@ -1643,6 +1644,8 @@ def generate_click_track_audio(audio_path: str, output_path: str):
     if y.size == 0:
         raise RuntimeError("Audio vacío para generar click")
     duration_sec = float(len(y) / sr) if sr else 0.0
+    if duration_sec < 0.25:
+        raise RuntimeError("Audio demasiado corto para detectar pulso")
 
     # Sintetizar un click estético: mezcla de sinusoides para tono y una caída percusiva (decay)
     click_dur = 0.05  # 50 ms
@@ -1654,11 +1657,71 @@ def generate_click_track_audio(audio_path: str, output_path: str):
     # Normalizar levemente para que tenga un nivel saludable (0.8) sin saturar
     custom_click = (custom_click / np.max(np.abs(custom_click))) * 0.8
 
-    # Robust fallback: fixed-tempo metronome at 120 BPM for full track duration.
-    interval_samples = int(sr * 0.5)  # 120 BPM => 0.5s per beat
+    # --- Beat detection without librosa ---
+    # 1) Band-pass to focus kick/snare region.
+    nyq = 0.5 * sr
+    low = max(20.0 / nyq, 1e-6)
+    high = min(250.0 / nyq, 0.999)
+    if low >= high:
+        low, high = 0.01, 0.25
+    b, a = signal.butter(2, [low, high], btype="bandpass")
+    y_bp = signal.filtfilt(b, a, y)
+
+    # 2) Onset envelope from half-wave rectified energy.
+    rectified = np.maximum(y_bp, 0.0)
+    env_win = max(1, int(sr * 0.01))  # 10 ms smoothing
+    onset_env = signal.convolve(rectified, np.ones(env_win) / env_win, mode="same")
+    onset_env = np.maximum(0.0, onset_env - np.median(onset_env))
+    onset_env = onset_env / (np.max(onset_env) + 1e-8)
+
+    # 3) Downsample envelope for tempo detection.
+    env_hz = 200.0
+    env_step = max(1, int(sr / env_hz))
+    onset_ds = onset_env[::env_step]
+    onset_ds = onset_ds - np.mean(onset_ds)
+
+    # 4) Autocorrelation in BPM range.
+    min_bpm, max_bpm = 70.0, 190.0
+    min_lag = int(env_hz * 60.0 / max_bpm)
+    max_lag = int(env_hz * 60.0 / min_bpm)
+    ac = signal.correlate(onset_ds, onset_ds, mode="full")
+    ac = ac[len(ac) // 2 :]
+    max_lag = min(max_lag, len(ac) - 1)
+    if max_lag <= min_lag:
+        raise RuntimeError("No se pudo estimar tempo (autocorrelation vacía)")
+
+    ac_band = ac[min_lag : max_lag + 1]
+    best_lag = int(np.argmax(ac_band)) + min_lag
+    beat_period_sec = best_lag / env_hz
+    bpm = 60.0 / max(beat_period_sec, 1e-6)
+
+    # 5) Phase alignment: choose start offset maximizing onset energy on beat grid.
+    phase_candidates = np.arange(best_lag)
+    sample_count = len(onset_ds)
+    best_phase = 0
+    best_score = -1.0
+    for phase in phase_candidates:
+        idx = np.arange(phase, sample_count, best_lag, dtype=int)
+        if idx.size == 0:
+            continue
+        score = float(np.sum(onset_ds[idx]))
+        if score > best_score:
+            best_score = score
+            best_phase = int(phase)
+
+    first_beat_sample = int(best_phase * env_step)
+    beat_interval_samples = int(round(beat_period_sec * sr))
+    beat_interval_samples = max(1, beat_interval_samples)
+
+    print(
+        f"[CLICK_DEBUG] Beat grid detected: bpm={bpm:.2f}, "
+        f"interval_samples={beat_interval_samples}, first_beat_sample={first_beat_sample}"
+    )
+
+    # 6) Build click track on detected beat grid.
     clicks = np.zeros(len(y), dtype=np.float32)
     click_len = min(len(custom_click), len(clicks))
-    for start in range(0, len(clicks), max(1, interval_samples)):
+    for start in range(first_beat_sample, len(clicks), beat_interval_samples):
         end = min(start + click_len, len(clicks))
         clicks[start:end] += custom_click[: end - start]
     clicks = np.clip(clicks, -1.0, 1.0)
