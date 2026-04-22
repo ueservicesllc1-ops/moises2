@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Download, Music } from 'lucide-react'
 import { updateSongBpm } from '@/lib/firestore'
-import { getBackendUrl } from '@/lib/config'
 
 interface ClickStemGeneratorProps {
   songTitle: string
@@ -146,8 +145,7 @@ const ClickStemGenerator: React.FC<ClickStemGeneratorProps> = ({
       formData.append('file', file)
 
       console.log('🚀 Enviando a backend para análisis completo...')
-      const backendUrl = getBackendUrl();
-      const analyzeResponse = await fetch(`${backendUrl}/api/analyze-audio`, {
+      const analyzeResponse = await fetch('/api/analyze-audio', {
         method: 'POST',
         body: formData,
       })
