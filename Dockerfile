@@ -34,6 +34,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir --timeout 300 --retries 3 -r requirements.txt
+RUN pip install --no-cache-dir --force-reinstall setuptools
 
 # ─── Stage 3: Production ───────────────────────────────────────────────────
 FROM node:18-bookworm-slim
