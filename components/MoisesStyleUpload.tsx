@@ -149,12 +149,28 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
   const buildUserFriendlySeparationError = (rawError: string): string => {
     const msg = (rawError || '').toLowerCase();
     if (
-      msg.includes('worker remoto') ||
       msg.includes('timeout') ||
       msg.includes('saturado') ||
       msg.includes('tiempo de espera')
     ) {
       return 'El motor de separación está ocupado temporalmente. Intenta de nuevo en 1-2 minutos.';
+    }
+    if (
+      msg.includes('unauthorized') ||
+      msg.includes('forbidden') ||
+      msg.includes('modal') ||
+      msg.includes('token') ||
+      msg.includes('credentials')
+    ) {
+      return 'El servicio de separación remota no está autenticado correctamente. Revisa credenciales de Railway/Modal.';
+    }
+    if (
+      msg.includes('not found') ||
+      msg.includes('404') ||
+      msg.includes('function') ||
+      msg.includes('moises-demucs-worker')
+    ) {
+      return 'El worker remoto de separación no está disponible en este entorno. Verifica el despliegue del worker.';
     }
     if (msg.includes('error del servidor (500)')) {
       return 'El servidor de IA devolvió un error interno. Reintenta en unos minutos.';

@@ -681,10 +681,24 @@ async def process_audio(
                     break
 
         if stems_bytes is None:
-            base_msg = "Worker remoto no disponible o saturado"
+            base_msg = "Worker remoto no disponible"
             if isinstance(last_remote_error, asyncio.TimeoutError):
                 raise RuntimeError(
-                    f"{base_msg}: timeout de {REMOTE_SEPARATION_TIMEOUT_SECONDS}s agotado"
+                    f"{base_msg}: timeout de {REMOTE_SEPARATION_TIMEOUT_SECONDS}s agotado (saturado o lento)"
+                )
+            err_txt = str(last_remote_error or "").lower()
+            if (
+                "unauthorized" in err_txt
+                or "forbidden" in err_txt
+                or "token" in err_txt
+                or "credential" in err_txt
+            ):
+                raise RuntimeError(
+                    f"{base_msg}: credenciales de Modal inválidas o faltantes ({last_remote_error})"
+                )
+            if "not found" in err_txt or "404" in err_txt:
+                raise RuntimeError(
+                    f"{base_msg}: función Modal no encontrada (moises-demucs-worker.separate_audio)"
                 )
             raise RuntimeError(
                 f"{base_msg}: {last_remote_error or 'error desconocido en worker'}"
