@@ -161,6 +161,14 @@ def check_runtime_dependencies() -> Dict[str, object]:
         status["modal_client"] = False
         status["modal_error"] = str(e)[:300]
 
+    # pkg_resources / setuptools check (needed by librosa → click track / BPM)
+    try:
+        import pkg_resources  # noqa: F401
+        status["pkg_resources"] = True
+    except ImportError as e:
+        status["pkg_resources"] = False
+        status["pkg_resources_error"] = str(e)[:200]
+
     return status
 
 
