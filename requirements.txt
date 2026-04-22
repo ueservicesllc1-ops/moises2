@@ -19,6 +19,7 @@ sqlalchemy>=2.0.0
 databases[sqlite]>=0.8.0
 
 # Utilities
+setuptools>=68.0.0
 aiofiles==23.2.1
 aiohttp>=3.8.0
 httpx>=0.24.0
