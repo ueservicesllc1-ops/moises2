@@ -102,7 +102,7 @@ def separate_audio(
                 progress=True
             )[0]
 
-    def build_click_track_bytes(source_audio: np.ndarray, sr: int, output_subtype: str) -> bytes:
+    def build_click_track_bytes(source_audio: np.ndarray, sr: int, output_subtype: str) -> tuple[bytes, int]:
         """Generate click track bytes from source audio with beat fallback."""
         if source_audio.ndim == 2:
             mono = source_audio.mean(axis=1)
@@ -120,9 +120,13 @@ def separate_audio(
         custom_click = (custom_click / np.max(np.abs(custom_click))) * 0.8
 
         click_kwargs = {"sr": sr, "length": len(mono), "click": custom_click}
+        bpm_used = 120
         try:
             onset_env = librosa.onset.onset_strength(y=mono, sr=sr)
-            _, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
+            tempo, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
+            tempo_arr = np.asarray(tempo).reshape(-1)
+            if tempo_arr.size > 0:
+                bpm_used = int(round(float(tempo_arr[0])))
             beat_frames = np.asarray(beat_frames, dtype=int).reshape(-1)
             if beat_frames.size == 0:
                 raise RuntimeError("No beat frames detected")
@@ -131,10 +135,12 @@ def separate_audio(
             print(f"[MODAL GPU] Click fallback 120 BPM: {beat_error}")
             times = np.arange(0.0, max((len(mono) / sr), 0.5), 0.5, dtype=float)
             clicks = librosa.clicks(times=times, **click_kwargs)
+            bpm_used = 120
 
         buf = io.BytesIO()
         sf.write(buf, clicks, sr, format='WAV', subtype=output_subtype)
-        return buf.getvalue()
+        bpm_used = max(40, min(240, bpm_used))
+        return buf.getvalue(), int(bpm_used)
 
     # =========================================================================
     # INICIO DEL PROCESAMIENTO
@@ -329,8 +335,10 @@ def separate_audio(
 
         try:
             click_source = instrumental_audio if "instrumental_audio" in locals() else wav_numpy
-            stems_bytes["click"] = build_click_track_bytes(click_source, model.samplerate, output_subtype)
-            print(f"[MODAL GPU]   OK click -> {len(stems_bytes['click']) // 1024}KB ({output_subtype})")
+            click_bytes, click_bpm = build_click_track_bytes(click_source, model.samplerate, output_subtype)
+            click_key = f"click_{click_bpm}"
+            stems_bytes[click_key] = click_bytes
+            print(f"[MODAL GPU]   OK {click_key} -> {len(stems_bytes[click_key]) // 1024}KB ({output_subtype})")
         except Exception as click_error:
             print(f"[MODAL GPU] Error generando click: {click_error}")
 

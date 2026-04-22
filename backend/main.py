@@ -107,6 +107,12 @@ REMOTE_SEPARATION_TIMEOUT_SECONDS = int(os.getenv("REMOTE_SEPARATION_TIMEOUT_SEC
 REMOTE_SEPARATION_RETRIES = int(os.getenv("REMOTE_SEPARATION_RETRIES", "1"))
 CLICK_DEBUG_BUILD = os.getenv("CLICK_DEBUG_BUILD", "build-unknown")
 
+def _find_click_key(stems: Dict[str, str]) -> Optional[str]:
+    for key in stems.keys():
+        if key == "click" or key.startswith("click_"):
+            return key
+    return None
+
 
 def check_runtime_dependencies() -> Dict[str, object]:
     """
@@ -757,25 +763,37 @@ async def process_audio(
         # Generar Click Track Sincronizado (preferido: viene desde Modal).
         update_progress(82, "Sincronizando metrónomo con la métrica del audio...")
         print(f"[CLICK_DEBUG] Pre-click stems keys at backend: {list(stems.keys())}")
-        if "click" not in stems:
+        click_key = _find_click_key(stems)
+        if not click_key:
             try:
                 print("[PROCESS] Click no vino desde Modal, ejecutando fallback local...")
-                click_path = target_dir / "click.wav"
                 click_source_path = stems.get("instrumental") or next(iter(stems.values()))
                 print(f"[CLICK_DEBUG] Local click source selected: {click_source_path}")
-                await asyncio.to_thread(generate_click_track_audio, str(click_source_path), str(click_path))
-                stems["click"] = str(click_path)
+                click_bpm = await asyncio.to_thread(
+                    generate_click_track_audio,
+                    str(click_source_path),
+                    str(target_dir),
+                )
+                click_key = f"click_{int(round(click_bpm))}"
+                click_path = target_dir / f"{click_key}.wav"
+                stems[click_key] = str(click_path)
                 click_size = click_path.stat().st_size if click_path.exists() else 0
-                print(f"[PROCESS] Click track generado localmente (fallback) size={click_size} path={click_path}")
+                print(
+                    f"[PROCESS] Click track generado localmente (fallback) "
+                    f"key={click_key} size={click_size} path={click_path}"
+                )
             except Exception as e:
                 print(f"[PROCESS] Error generando click track en fallback local: {e}")
                 import traceback
                 print(f"[PROCESS] Click track traceback:\n{traceback.format_exc()}")
         else:
             try:
-                click_path = Path(stems["click"])
+                click_path = Path(stems[click_key])
                 click_size = click_path.stat().st_size if click_path.exists() else 0
-                print(f"[CLICK_DEBUG] Click came from Modal: path={click_path} exists={click_path.exists()} size={click_size}")
+                print(
+                    f"[CLICK_DEBUG] Click came from Modal: key={click_key} "
+                    f"path={click_path} exists={click_path.exists()} size={click_size}"
+                )
             except Exception as _click_dbg_e:
                 print(f"[CLICK_DEBUG] Error inspecting Modal click file: {_click_dbg_e}")
         
@@ -1630,11 +1648,12 @@ def detect_offset(audio_path: str) -> float:
     # 5. Fallback: usar el primer beat detectado
     return round(float(max(0.1, beat_times[0])), 3)
 
-def generate_click_track_audio(audio_path: str, output_path: str):
-    """Generate click track aligned to detected percussive pulse."""
+def generate_click_track_audio(audio_path: str, output_dir: str) -> float:
+    """Generate click track aligned to percussive pulse and return detected BPM."""
     import soundfile as sf
     import numpy as np
     from scipy import signal
+    from pathlib import Path
 
     # Load audio via soundfile to avoid librosa/pkg_resources runtime issues.
     y, sr = sf.read(audio_path, dtype="float32")
@@ -1692,6 +1711,25 @@ def generate_click_track_audio(audio_path: str, output_path: str):
 
     ac_band = ac[min_lag : max_lag + 1]
     best_lag = int(np.argmax(ac_band)) + min_lag
+
+    # Resolver ambiguedad x2/÷2 entre lags cercanos (musica real).
+    candidate_lags = {best_lag}
+    if best_lag * 2 <= max_lag:
+        candidate_lags.add(best_lag * 2)
+    if best_lag // 2 >= min_lag:
+        candidate_lags.add(best_lag // 2)
+    candidate_lags = sorted(candidate_lags)
+
+    def lag_score(lag_value: int) -> float:
+        phase_scores = []
+        for phase in range(lag_value):
+            idx = np.arange(phase, len(onset_ds), lag_value, dtype=int)
+            if idx.size == 0:
+                continue
+            phase_scores.append(float(np.sum(onset_ds[idx])))
+        return max(phase_scores) if phase_scores else -1.0
+
+    best_lag = max(candidate_lags, key=lag_score)
     beat_period_sec = best_lag / env_hz
     bpm = 60.0 / max(beat_period_sec, 1e-6)
 
@@ -1726,9 +1764,12 @@ def generate_click_track_audio(audio_path: str, output_path: str):
         clicks[start:end] += custom_click[: end - start]
     clicks = np.clip(clicks, -1.0, 1.0)
 
-    # Write to WAV file
-    sf.write(output_path, clicks, sr, subtype='PCM_16')
-    return output_path
+    # Write to WAV file with BPM in stem name.
+    bpm_int = int(round(bpm))
+    click_key = f"click_{bpm_int}"
+    output_path = Path(output_dir) / f"{click_key}.wav"
+    sf.write(str(output_path), clicks, sr, subtype='PCM_16')
+    return float(bpm_int)
 
 def detect_bpm_and_duration(audio_path: str):
     """Detecta BPM promedio y duración del audio con algoritmo mejorado."""
