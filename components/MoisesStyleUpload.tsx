@@ -160,9 +160,10 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
       msg.includes('forbidden') ||
       msg.includes('modal') ||
       msg.includes('token') ||
-      msg.includes('credentials')
+      msg.includes('credentials') ||
+      msg.includes('klass')
     ) {
-      return 'El servicio de separación remota no está autenticado correctamente. Revisa credenciales de Railway/Modal.';
+      return 'El servicio de separación remota en Railway tiene un problema de cliente/credenciales de Modal. Revisa variables y versión del cliente Modal.';
     }
     if (
       msg.includes('not found') ||

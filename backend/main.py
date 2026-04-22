@@ -700,6 +700,10 @@ async def process_audio(
                 raise RuntimeError(
                     f"{base_msg}: función Modal no encontrada (moises-demucs-worker.separate_audio)"
                 )
+            if "klass" in err_txt or "keyerror" in err_txt:
+                raise RuntimeError(
+                    f"{base_msg}: incompatibilidad del cliente Modal en Railway (error interno: {last_remote_error})"
+                )
             raise RuntimeError(
                 f"{base_msg}: {last_remote_error or 'error desconocido en worker'}"
             )
