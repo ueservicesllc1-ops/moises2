@@ -1701,14 +1701,41 @@ def generate_click_track_audio(audio_path: str, output_dir: str) -> float:
         if beat_frames.size == 0:
             raise RuntimeError("No beat frames detected by librosa")
 
-        # Calcular BPM desde intervalos reales entre beats para evitar "va volando".
+        # Usar tiempos reales de beat (no rejilla fija) para evitar drift/desfase.
         beat_times = librosa.frames_to_time(beat_frames, sr=sr_lb)
-        if beat_times.size > 2:
-            intervals = np.diff(beat_times)
-            intervals = intervals[(intervals > 0.2) & (intervals < 1.2)]  # 50..300 BPM
-            if intervals.size > 0:
-                bpm_from_intervals = 60.0 / float(np.median(intervals))
-                bpm_val = bpm_from_intervals
+        beat_times = np.asarray(beat_times, dtype=float).reshape(-1)
+
+        # Refinar cada beat al onset percusivo más cercano para mejor fase.
+        onset_times = librosa.onset.onset_detect(
+            onset_envelope=onset_env,
+            sr=sr_lb,
+            units="time",
+            backtrack=False,
+        )
+        onset_times = np.asarray(onset_times, dtype=float).reshape(-1)
+        if onset_times.size > 0 and beat_times.size > 0:
+            tolerance = 0.08  # 80 ms
+            refined = []
+            for bt in beat_times:
+                idx = int(np.argmin(np.abs(onset_times - bt)))
+                candidate = float(onset_times[idx])
+                if abs(candidate - bt) <= tolerance:
+                    refined.append(candidate)
+                else:
+                    refined.append(float(bt))
+            beat_times = np.asarray(refined, dtype=float)
+
+        # Ordenar/limpiar tiempos por seguridad.
+        beat_times = np.unique(np.clip(beat_times, 0.0, len(y_lb) / sr_lb))
+        beat_times = beat_times[(beat_times * sr_lb) < len(y_lb)]
+        if beat_times.size < 2:
+            raise RuntimeError("Insufficient beat times after refinement")
+
+        # BPM robusto desde intervalos reales entre beats detectados.
+        intervals = np.diff(beat_times)
+        intervals = intervals[(intervals > 0.2) & (intervals < 1.2)]  # 50..300 BPM
+        if intervals.size > 0:
+            bpm_val = 60.0 / float(np.median(intervals))
 
         # Resolver ambigüedad half/double respecto a una zona musical útil.
         while bpm_val < 80.0:
@@ -1717,17 +1744,12 @@ def generate_click_track_audio(audio_path: str, output_dir: str) -> float:
             bpm_val /= 2.0
         bpm_int = int(round(max(70.0, min(180.0, bpm_val))))
 
-        # Re-construir grilla regular usando BPM estabilizado y primer beat detectado.
-        first_beat = float(beat_times[0]) if beat_times.size else 0.0
-        beat_interval = 60.0 / bpm_int
-        beat_count = int(np.ceil(max(0.0, (len(y_lb) / sr_lb - first_beat)) / beat_interval)) + 1
-        beat_grid = first_beat + np.arange(beat_count) * beat_interval
-        beat_grid = beat_grid[(beat_grid >= 0.0) & (beat_grid * sr_lb < len(y_lb))]
-        clicks = librosa.clicks(times=beat_grid, sr=sr_lb, length=len(y_lb), click=custom_click)
+        clicks = librosa.clicks(times=beat_times, sr=sr_lb, length=len(y_lb), click=custom_click)
         output_sr = sr_lb
         print(
             f"[CLICK_DEBUG] Librosa beat-track selected bpm={bpm_int} "
-            f"raw_tempo={float(tempo_arr[0]) if tempo_arr.size else 0:.2f} beats={beat_frames.size}"
+            f"raw_tempo={float(tempo_arr[0]) if tempo_arr.size else 0:.2f} "
+            f"beats={beat_frames.size} refined_beats={beat_times.size}"
         )
     except Exception as lb_err:
         # Fallback path when librosa/pkg_resources is unavailable.
