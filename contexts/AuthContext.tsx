@@ -8,7 +8,8 @@ import {
   signOut, 
   onAuthStateChanged,
   signInWithPopup,
-  GoogleAuthProvider
+  GoogleAuthProvider,
+  sendPasswordResetEmail
 } from 'firebase/auth'
 import { auth, googleProvider, db } from '@/lib/firebase'
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore'
@@ -19,6 +20,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<void>
   signUp: (email: string, password: string) => Promise<void>
   signInWithGoogle: () => Promise<void>
+  requestPasswordReset: (email: string) => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -93,6 +95,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  const requestPasswordReset = async (email: string) => {
+    try {
+      await sendPasswordResetEmail(auth, email)
+    } catch (error) {
+      throw error
+    }
+  }
+
   const logout = async () => {
     try {
       await signOut(auth)
@@ -107,6 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signIn,
     signUp,
     signInWithGoogle,
+    requestPasswordReset,
     logout
   }
 

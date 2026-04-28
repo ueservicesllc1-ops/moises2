@@ -103,7 +103,7 @@ function TrackWavePlaceholder() {
 }
 
 export default function Home() {
-  const { user, loading, logout } = useAuth()
+  const { user, loading, logout, requestPasswordReset } = useAuth()
   const [currentPlanId, setCurrentPlanId] = useState<PlanId>('starter')
   const isPremium = currentPlanId !== 'starter' || user?.email === 'ueservicesllc1@gmail.com'
   const router = useRouter()
@@ -733,6 +733,30 @@ export default function Home() {
       router.push('/login')
     } catch (error) {
       console.error('Error al cerrar sesión:', error)
+    }
+  }
+
+  const canChangePassword = useMemo(() => {
+    if (!user?.providerData?.length) return false
+    return user.providerData.some((p) => p?.providerId === 'password')
+  }, [user])
+
+  const handlePasswordReset = async () => {
+    if (!user?.email) {
+      alert('No se encontró email para esta cuenta.')
+      return
+    }
+    try {
+      await requestPasswordReset(user.email)
+      alert('Te enviamos un correo para cambiar tu contraseña.')
+    } catch (error: any) {
+      const code = error?.code || ''
+      if (code === 'auth/too-many-requests') {
+        alert('Demasiados intentos. Espera unos minutos e inténtalo otra vez.')
+        return
+      }
+      console.error('Error enviando reset de contraseña:', error)
+      alert('No se pudo enviar el correo de cambio de contraseña.')
     }
   }
 
@@ -1926,6 +1950,15 @@ export default function Home() {
               <LogOut className="h-4 w-4" />
             </button>
           </div>
+          {canChangePassword && (
+            <button
+              type="button"
+              onClick={handlePasswordReset}
+              className="mb-2 w-full rounded-lg border border-[#2a2a2a] px-3 py-2 text-left text-xs text-[#bdbdbd] transition hover:bg-[#1a1a1a] hover:text-white"
+            >
+              Cambiar contraseña
+            </button>
+          )}
           <p className="px-1 text-[10px] uppercase tracking-wider text-[#525252]">Judith · Estudio v1.0</p>
         </div>
       </aside>
