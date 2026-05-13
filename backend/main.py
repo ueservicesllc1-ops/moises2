@@ -2179,6 +2179,38 @@ async def get_training_status(call_id: str):
         print(f"[STATUS] Error consultando Modal: {e}")
         return {"status": "error", "message": f"Error de conexión: {str(e)}"}
 
+
+def youtube_video_id_from_url(url: str) -> Optional[str]:
+    """Extrae el ID de 11 caracteres de URLs comunes de YouTube (watch, Shorts, youtu.be, embed, live)."""
+    if not url or not isinstance(url, str):
+        return None
+    u = url.strip()
+    patterns = [
+        r"(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([0-9A-Za-z_-]{11})\b",
+        r"youtube\.com/shorts/([0-9A-Za-z_-]{11})\b",
+        r"youtube\.com/live/([0-9A-Za-z_-]{11})\b",
+        r"m\.youtube\.com/watch\?v=([0-9A-Za-z_-]{11})\b",
+        r"music\.youtube\.com/watch\?v=([0-9A-Za-z_-]{11})\b",
+        r"[?&]v=([0-9A-Za-z_-]{11})\b",
+    ]
+    for pat in patterns:
+        m = re.search(pat, u, re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return None
+
+
+# Args recomendados para reducir bloqueos anti-bot de YouTube (requiere yt-dlp reciente).
+_YTDLP_YOUTUBE_ARGS = [
+    "--extractor-args",
+    "youtube:player_client=android",
+    "--retries",
+    "5",
+    "--fragment-retries",
+    "5",
+]
+
+
 async def extract_with_ytdlp(youtube_url: str, video_id: str):
     """Extraer audio usando yt-dlp"""
     try:
@@ -2187,8 +2219,13 @@ async def extract_with_ytdlp(youtube_url: str, video_id: str):
         import re
         import sys
         
+        source_url = (youtube_url or "").strip()
+        if not source_url:
+            raise HTTPException(status_code=400, detail="URL vacía")
         clean_url = f"https://www.youtube.com/watch?v={video_id}"
-        print(f"[yt-dlp] Descargando audio de: {clean_url}")
+        # Preferir la URL original para yt-dlp (Shorts, music, params); fallback a watch estándar.
+        dl_url = source_url if "youtube.com" in source_url or "youtu.be" in source_url else clean_url
+        print(f"[yt-dlp] Descargando audio de: {dl_url}")
 
         def run_ytdlp(args, timeout=300):
             """
@@ -2211,8 +2248,8 @@ async def extract_with_ytdlp(youtube_url: str, video_id: str):
         
         # Primero obtener el título real del video
         print(f"[yt-dlp] Obteniendo título del video...")
-        title_args = ["--no-playlist", "--get-title", clean_url]
-        title_result = run_ytdlp(title_args, timeout=30)
+        title_args = ["--no-playlist", *_YTDLP_YOUTUBE_ARGS, "--get-title", dl_url]
+        title_result = run_ytdlp(title_args, timeout=60)
         
         if title_result.returncode == 0 and title_result.stdout.strip():
             video_title = title_result.stdout.strip()
@@ -2228,11 +2265,12 @@ async def extract_with_ytdlp(youtube_url: str, video_id: str):
         # Comando yt-dlp para descargar solo audio
         ytdlp_args = [
             "--no-playlist",
+            *_YTDLP_YOUTUBE_ARGS,
             "-x",  # Extract audio
             "--audio-format", "mp3",
             "--audio-quality", "0",  # Best quality
             "-o", str(output_file),
-            clean_url
+            dl_url,
         ]
         
         print(f"[yt-dlp] Ejecutando descarga de audio...")
@@ -2241,9 +2279,21 @@ async def extract_with_ytdlp(youtube_url: str, video_id: str):
         result = run_ytdlp(ytdlp_args, timeout=300)
         
         if result.returncode != 0:
-            print(f"[yt-dlp] Error: {result.stderr}")
-            raise HTTPException(status_code=500, detail=f"yt-dlp error: {result.stderr}")
+            err = (result.stderr or result.stdout or "").strip()
+            print(f"[yt-dlp] Error: {err}")
+            err_short = err[:2000] if err else "sin salida de error"
+            raise HTTPException(status_code=500, detail=f"yt-dlp error: {err_short}")
         
+        if not output_file.exists():
+            matches = sorted(
+                temp_dir.glob(f"{video_id}*.mp3"),
+                key=lambda p: p.stat().st_mtime if p.exists() else 0,
+                reverse=True,
+            )
+            if matches:
+                output_file = matches[0]
+                print(f"[yt-dlp] Archivo de salida alternativo: {output_file}")
+
         print(f"[yt-dlp] Descarga completada: {output_file}")
         
         # Leer el archivo
@@ -2264,6 +2314,8 @@ async def extract_with_ytdlp(youtube_url: str, video_id: str):
             "format": "mp3"
         }
         
+    except HTTPException:
+        raise
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=500, detail="Timeout descargando de YouTube")
     except FileNotFoundError:
@@ -2281,7 +2333,6 @@ async def extract_youtube_audio(request: Request):
     """
     try:
         import httpx
-        import re
         
         data = await request.json()
         youtube_url = data.get("url")
@@ -2291,12 +2342,9 @@ async def extract_youtube_audio(request: Request):
         
         print(f"[YouTube API] Extrayendo audio de: {youtube_url}")
         
-        # Extraer video ID de la URL
-        video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', youtube_url)
-        if not video_id_match:
+        video_id = youtube_video_id_from_url(youtube_url)
+        if not video_id:
             raise HTTPException(status_code=400, detail="URL de YouTube inválida")
-        
-        video_id = video_id_match.group(1)
         print(f"[YouTube API] Video ID: {video_id}")
         
         # Provider selection (default: local/free via yt-dlp)
