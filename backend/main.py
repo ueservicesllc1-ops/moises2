@@ -114,6 +114,79 @@ def _find_click_key(stems: Dict[str, str]) -> Optional[str]:
     return None
 
 
+def _normalize_bpm_octave(bpm: float) -> float:
+    """Lleva BPM a rango musical típico (70–180) resolviendo mitad/doble tempo."""
+    x = float(bpm)
+    while x < 70.0:
+        x *= 2.0
+    while x > 190.0:
+        x /= 2.0
+    return float(max(65.0, min(200.0, x)))
+
+
+def estimate_bpm_scipy_path(audio_path: str) -> float:
+    """
+    Estima BPM global con envolvente de onsets + autocorrelación (sin librosa).
+    Útil como prior para click y cuando librosa falla en servidor.
+    """
+    import soundfile as sf
+    import numpy as np
+    from scipy import signal
+
+    y, sr = sf.read(audio_path, dtype="float32")
+    if y.ndim == 2:
+        y = y.mean(axis=1)
+    y = np.asarray(y, dtype=np.float32).reshape(-1)
+    if y.size < sr * 0.5:
+        raise RuntimeError("Audio demasiado corto para estimar BPM")
+
+    nyq = 0.5 * sr
+    low = max(20.0 / nyq, 1e-6)
+    high = min(280.0 / nyq, 0.999)
+    if low >= high:
+        low, high = 0.01, 0.35
+    b, a = signal.butter(2, [low, high], btype="bandpass")
+    y_bp = signal.filtfilt(b, a, y)
+    rect = np.maximum(y_bp, 0.0)
+    env_win = max(1, int(sr * 0.01))
+    onset_env = signal.convolve(rect, np.ones(env_win) / env_win, mode="same")
+    onset_env = np.maximum(0.0, onset_env - np.median(onset_env))
+    onset_env = onset_env / (np.max(onset_env) + 1e-8)
+
+    env_hz = 200.0
+    env_step = max(1, int(sr / env_hz))
+    onset_ds = onset_env[::env_step] - np.mean(onset_env[::env_step])
+    if onset_ds.size < 64:
+        raise RuntimeError("Muestras insuficientes para autocorrelación de BPM")
+
+    min_bpm, max_bpm = 65.0, 200.0
+    min_lag = max(2, int(env_hz * 60.0 / max_bpm))
+    max_lag = min(int(env_hz * 60.0 / min_bpm), len(onset_ds) - 1)
+    if max_lag <= min_lag:
+        raise RuntimeError("Rango de lag inválido para BPM")
+
+    ac = signal.correlate(onset_ds, onset_ds, mode="full")
+    ac = ac[len(ac) // 2 :]
+
+    def lag_energy_score(lag: int) -> float:
+        if lag < min_lag or lag >= len(onset_ds):
+            return -1.0
+        idx = np.arange(0, len(onset_ds), lag, dtype=int)
+        if idx.size < 3:
+            return -1.0
+        return float(np.sum(onset_ds[idx]))
+
+    peak_lag = int(np.argmax(ac[min_lag : max_lag + 1])) + min_lag
+    candidates = {peak_lag}
+    if peak_lag * 2 <= max_lag:
+        candidates.add(peak_lag * 2)
+    if peak_lag // 2 >= min_lag:
+        candidates.add(peak_lag // 2)
+    best_lag = max(candidates, key=lag_energy_score)
+    bpm_raw = 60.0 / max(best_lag / env_hz, 1e-6)
+    return _normalize_bpm_octave(bpm_raw)
+
+
 def check_runtime_dependencies() -> Dict[str, object]:
     """
     Verifica dependencias externas críticas para evitar fallos tardíos en runtime.
@@ -769,10 +842,17 @@ async def process_audio(
                 print("[PROCESS] Click no vino desde Modal, ejecutando fallback local...")
                 click_source_path = stems.get("instrumental") or next(iter(stems.values()))
                 print(f"[CLICK_DEBUG] Local click source selected: {click_source_path}")
+                bpm_from_original: Optional[float] = None
+                try:
+                    bpm_from_original = await asyncio.to_thread(estimate_bpm_scipy_path, str(task.file_path))
+                    print(f"[CLICK_DEBUG] BPM estimado desde audio original: {bpm_from_original:.1f}")
+                except Exception as bpm_e:
+                    print(f"[CLICK_DEBUG] BPM desde original no disponible: {bpm_e}")
                 click_bpm = await asyncio.to_thread(
                     generate_click_track_audio,
                     str(click_source_path),
                     str(target_dir),
+                    bpm_from_original,
                 )
                 click_key = f"click_{int(round(click_bpm))}"
                 click_path = target_dir / f"{click_key}.wav"
@@ -819,7 +899,13 @@ async def process_audio(
             print(f"[PROCESS] BPM detectado: {bpm}, Duración: {duration}s")
         except Exception as e:
             print(f"[PROCESS] Error detectando BPM: {e}")
-            bpm = 126
+            try:
+                bpm = float(await asyncio.to_thread(estimate_bpm_scipy_path, str(task.file_path)))
+                bpm = int(round(_normalize_bpm_octave(bpm)))
+                print(f"[PROCESS] BPM desde estimación scipy (original): {bpm}")
+            except Exception as bpm_fb_e:
+                print(f"[PROCESS] BPM scipy fallback no disponible: {bpm_fb_e}")
+                bpm = 126
             duration = 0
         
         # Detectar key (tonalidad) y acordes
@@ -1648,8 +1734,12 @@ def detect_offset(audio_path: str) -> float:
     # 5. Fallback: usar el primer beat detectado
     return round(float(max(0.1, beat_times[0])), 3)
 
-def generate_click_track_audio(audio_path: str, output_dir: str) -> float:
-    """Generate a professional click track aligned to real beat events."""
+def generate_click_track_audio(
+    audio_path: str,
+    output_dir: str,
+    bpm_from_original: Optional[float] = None,
+) -> float:
+    """Click alineado al tempo real: prioriza BPM del mix original y refina con el stem."""
     import soundfile as sf
     import numpy as np
     from scipy import signal
@@ -1676,19 +1766,25 @@ def generate_click_track_audio(audio_path: str, output_dir: str) -> float:
     # Normalizar levemente para que tenga un nivel saludable (0.8) sin saturar
     custom_click = (custom_click / np.max(np.abs(custom_click))) * 0.8
 
-    bpm_int = 120
+    # Semilla de tempo: mezcla original (si existe) + refino leve con el stem usado para el click.
+    if bpm_from_original is not None and np.isfinite(float(bpm_from_original)) and float(bpm_from_original) > 40:
+        bpm_seed = _normalize_bpm_octave(float(bpm_from_original))
+        try:
+            stem_bpm = estimate_bpm_scipy_path(audio_path)
+            if abs(stem_bpm - bpm_seed) <= 22:
+                bpm_seed = _normalize_bpm_octave(0.62 * bpm_seed + 0.38 * stem_bpm)
+        except Exception:
+            pass
+        print(f"[CLICK_DEBUG] BPM seed (original+stem): {bpm_seed:.1f}")
+    else:
+        bpm_seed = estimate_bpm_scipy_path(audio_path)
+        print(f"[CLICK_DEBUG] BPM seed (solo stem scipy): {bpm_seed:.1f}")
+
     output_sr = sr_sf
     clicks = None
+    bpm_int = int(round(float(bpm_seed)))
 
-    def _normalize_bpm(value: float) -> float:
-        bpm = float(value)
-        while bpm < 75.0:
-            bpm *= 2.0
-        while bpm > 180.0:
-            bpm /= 2.0
-        return float(max(70.0, min(180.0, bpm)))
-
-    # Prefer professional path: robust tempo + dynamic beat events + onset snapping.
+    # Prefer professional path: beat tracking con semilla del tempo real (no histograma fijo).
     try:
         import librosa  # type: ignore
 
@@ -1703,38 +1799,17 @@ def generate_click_track_audio(audio_path: str, output_dir: str) -> float:
             detrend=True,
             aggregate=np.median,
         )
-        # 1) Robust tempo proposal from frame-wise tempo distribution.
-        tempo_candidates = librosa.feature.tempo(
-            onset_envelope=onset_env,
-            sr=sr_lb,
-            aggregate=None,
-            max_tempo=220.0,
-        )
-        if tempo_candidates.size == 0:
-            raise RuntimeError("No tempo candidates")
-        tempo_candidates = np.asarray(tempo_candidates, dtype=float).reshape(-1)
-        tempo_candidates = tempo_candidates[np.isfinite(tempo_candidates)]
-        if tempo_candidates.size == 0:
-            raise RuntimeError("Invalid tempo candidates")
-        tempo_candidates = np.array([_normalize_bpm(t) for t in tempo_candidates], dtype=float)
 
-        # Histogram mode gives stable global BPM in songs with local fluctuations.
-        bins = np.arange(70.0, 181.0, 1.0)
-        hist, edges = np.histogram(tempo_candidates, bins=bins)
-        mode_idx = int(np.argmax(hist))
-        bpm_seed = float((edges[mode_idx] + edges[mode_idx + 1]) / 2.0)
-
-        # 2) Dynamic beat tracking with strict tempo prior.
         tempo, beat_frames = librosa.beat.beat_track(
             onset_envelope=onset_env,
             sr=sr_lb,
-            start_bpm=bpm_seed,
-            bpm=bpm_seed,
-            tightness=180,
+            start_bpm=float(bpm_seed),
+            bpm=float(bpm_seed),
+            tightness=160,
             trim=False,
         )
         tempo_arr = np.asarray(tempo).reshape(-1)
-        bpm_val = float(tempo_arr[0]) if tempo_arr.size else bpm_seed
+        bpm_val = float(tempo_arr[0]) if tempo_arr.size else float(bpm_seed)
 
         beat_frames = np.asarray(beat_frames, dtype=int).reshape(-1)
         if beat_frames.size == 0:
@@ -1743,7 +1818,7 @@ def generate_click_track_audio(audio_path: str, output_dir: str) -> float:
         beat_times = librosa.frames_to_time(beat_frames, sr=sr_lb)
         beat_times = np.asarray(beat_times, dtype=float).reshape(-1)
 
-        # 3) Snap each beat to nearest strong onset (phase correction).
+        # Snap each beat to nearest strong onset (phase correction).
         onset_times = librosa.onset.onset_detect(
             onset_envelope=onset_env,
             sr=sr_lb,
@@ -1769,41 +1844,38 @@ def generate_click_track_audio(audio_path: str, output_dir: str) -> float:
                     refined.append(float(bt))
             beat_times = np.asarray(refined, dtype=float)
 
-        # Ordenar/limpiar tiempos por seguridad.
         beat_times = np.unique(np.clip(beat_times, 0.0, len(y_lb) / sr_lb))
         beat_times = beat_times[(beat_times * sr_lb) < len(y_lb)]
         if beat_times.size < 2:
             raise RuntimeError("Insufficient beat times after refinement")
 
-        # BPM robusto desde intervalos reales entre beats detectados.
         intervals = np.diff(beat_times)
         intervals = intervals[(intervals > 0.2) & (intervals < 1.2)]  # 50..300 BPM
         if intervals.size > 0:
             bpm_val = 60.0 / float(np.median(intervals))
 
-        bpm_val = _normalize_bpm(bpm_val)
-        bpm_int = int(round(bpm_val))
+        bpm_val = _normalize_bpm_octave(float(bpm_val))
+        bpm_int = int(round(float(bpm_val)))
 
-        # Confidence check: on-beat energy should clearly exceed median envelope.
         onset_norm = onset_env / (np.max(onset_env) + 1e-8)
         beat_env_idx = np.clip(beat_frames, 0, len(onset_norm) - 1)
         on_beat_strength = float(np.mean(onset_norm[beat_env_idx])) if beat_env_idx.size else 0.0
         median_strength = float(np.median(onset_norm))
         confidence = on_beat_strength / (median_strength + 1e-6)
-        if confidence < 1.15:
-            raise RuntimeError(f"Low beat confidence ({confidence:.2f})")
+        if confidence < 1.08:
+            print(f"[CLICK_DEBUG] Low beat confidence ({confidence:.2f}), keeping grid anyway")
 
         clicks = librosa.clicks(times=beat_times, sr=sr_lb, length=len(y_lb), click=custom_click)
         output_sr = sr_lb
         print(
-            f"[CLICK_DEBUG] Librosa beat-track selected bpm={bpm_int} "
+            f"[CLICK_DEBUG] Librosa beat-track bpm={bpm_int} "
             f"raw_tempo={float(tempo_arr[0]) if tempo_arr.size else 0:.2f} "
             f"seed={bpm_seed:.2f} beats={beat_frames.size} refined_beats={beat_times.size} "
             f"confidence={confidence:.2f}"
         )
     except Exception as lb_err:
-        # Fallback path when librosa/pkg_resources is unavailable.
-        print(f"[CLICK_DEBUG] Librosa path failed, using scipy fallback: {lb_err}")
+        # Fallback: rejilla estable al BPM semilla (tempo real estimado), fase por primer pico de envolvente.
+        print(f"[CLICK_DEBUG] Librosa path failed, using steady grid from seed: {lb_err}")
         y = y_sf
         sr = sr_sf
         nyq = 0.5 * sr
@@ -1818,32 +1890,27 @@ def generate_click_track_audio(audio_path: str, output_dir: str) -> float:
         onset_env = signal.convolve(rectified, np.ones(env_win) / env_win, mode="same")
         onset_env = np.maximum(0.0, onset_env - np.median(onset_env))
         onset_env = onset_env / (np.max(onset_env) + 1e-8)
-        env_hz = 200.0
-        env_step = max(1, int(sr / env_hz))
-        onset_ds = onset_env[::env_step] - np.mean(onset_env[::env_step])
-        min_bpm, max_bpm = 70.0, 190.0
-        min_lag = int(env_hz * 60.0 / max_bpm)
-        max_lag = min(int(env_hz * 60.0 / min_bpm), len(onset_ds) - 1)
-        if max_lag <= min_lag:
-            raise RuntimeError("No se pudo estimar tempo en fallback scipy")
-        ac = signal.correlate(onset_ds, onset_ds, mode="full")
-        ac = ac[len(ac) // 2 :]
-        best_lag = int(np.argmax(ac[min_lag:max_lag + 1])) + min_lag
-        bpm_val = 60.0 / max((best_lag / env_hz), 1e-6)
-        while bpm_val < 70.0:
-            bpm_val *= 2.0
-        while bpm_val > 190.0:
-            bpm_val /= 2.0
-        bpm_int = int(round(max(60.0, min(200.0, bpm_val))))
-        beat_interval_samples = max(1, int(round((60.0 / bpm_int) * sr)))
+
+        bpm_int = int(round(float(bpm_seed)))
+        period_sec = 60.0 / max(float(bpm_int), 1e-6)
+        search = min(len(onset_env), int(sr * max(4.0, period_sec * 4)))
+        peak_idx = int(np.argmax(onset_env[:search])) if search > 0 else 0
+        first_beat_sec = float(peak_idx) / float(sr)
+        phase = first_beat_sec % period_sec
+
         clicks = np.zeros(len(y), dtype=np.float32)
         click_len = min(len(custom_click), len(clicks))
-        for start in range(0, len(clicks), beat_interval_samples):
+        t0 = phase
+        while t0 < len(y) / sr:
+            start = int(round(t0 * sr))
+            if start >= len(clicks):
+                break
             end = min(start + click_len, len(clicks))
             clicks[start:end] += custom_click[: end - start]
+            t0 += period_sec
         clicks = np.clip(clicks, -1.0, 1.0)
         output_sr = sr
-        print(f"[CLICK_DEBUG] Scipy fallback selected bpm={bpm_int} interval={beat_interval_samples}")
+        print(f"[CLICK_DEBUG] Steady-grid fallback bpm={bpm_int} period_sec={period_sec:.4f} phase={phase:.4f}s")
 
     # Write to WAV file with BPM in stem name.
     click_key = f"click_{bpm_int}"
