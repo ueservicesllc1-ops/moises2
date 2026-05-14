@@ -8,6 +8,8 @@ import asyncio
 import hashlib
 import tempfile
 import re
+import requests
+from urllib.parse import quote
 import subprocess
 import shutil
 import sys
@@ -1227,6 +1229,14 @@ async def get_status(task_id: str):
     
     return response
 
+def _b2_public_file_url(rel_path: str) -> str:
+    """URL pública B2 (segmentos codificados; mismo criterio que el proxy Next)."""
+    bucket = (os.getenv("B2_BUCKET_NAME") or "Multitrack").strip()
+    b2_key = rel_path if rel_path.startswith("audio/") else f"audio/{rel_path}"
+    key_parts = "/".join(quote(seg, safe="") for seg in b2_key.split("/"))
+    return f"https://f005.backblazeb2.com/file/{quote(bucket, safe='')}/{key_parts}"
+
+
 @app.get("/audio/{path:path}")
 async def serve_audio(path: str):
     """
@@ -1234,79 +1244,84 @@ async def serve_audio(path: str):
     Priority order:
       1. Exact local path (Path.cwd() / path)
       2. Demucs output fallback: stems/{task_id}/{stem}.wav → uploads/{task_id}/demucs_output/{stem}.wav
-      3. B2 proxy (production / when B2 is reachable)
+      3. B2 público (timeout largo; en local una red lenta no debe volver 500 por ReadTimeout de 8s)
     """
-    try:
-        cwd = Path.cwd()
+    cwd = Path.cwd()
 
-        # 1. Exact local path check
+    try:
         local_path = Path(path) if Path(path).is_absolute() else cwd / path
         if local_path.exists() and local_path.is_file():
             print(f"[AUDIO] Serving from local path: {local_path}")
             return FileResponse(
                 path=str(local_path),
                 media_type="audio/wav",
-                headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600"}
+                headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600"},
             )
+    except OSError as e:
+        print(f"[AUDIO] local path check: {e}")
 
-        # 2. Demucs output fallback
-        # B2 path format:   stems/{task_id}/{stem}.wav
-        # Local disk format: uploads/{task_id}/demucs_output/{stem}.wav
-        import re
-        stems_match = re.match(r'^stems/([^/]+)/([^/]+\.wav)$', path)
-        if stems_match:
-            task_id = stems_match.group(1)
-            stem_file = stems_match.group(2)
-            demucs_path = cwd / "uploads" / task_id / "demucs_output" / stem_file
-            if demucs_path.exists() and demucs_path.is_file():
-                print(f"[AUDIO] Serving from demucs_output fallback: {demucs_path}")
-                return FileResponse(
-                    path=str(demucs_path),
-                    media_type="audio/wav",
-                    headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600"}
-                )
-            else:
-                print(f"[AUDIO] demucs_output path not found: {demucs_path}")
-
-        # 3. B2 proxy fallback (production)
-        import requests
-        b2_bucket = os.getenv("B2_BUCKET_NAME", "Multitrack")
-        b2_key = f"audio/{path}" if not path.startswith("audio/") else path
-        b2_url = f"https://f005.backblazeb2.com/file/{b2_bucket}/{b2_key}"
-
-        print(f"[RESCUE] Proxying to B2 --> {b2_url}")
-
-        def fetch():
-            return requests.get(b2_url, timeout=8)  # 8s timeout — fail fast locally
-
-        r = await asyncio.to_thread(fetch)
-        print(f"[RESCUE] B2 Status: {r.status_code}")
-
-        if r.status_code == 200:
-            return Response(
-                content=r.content,
+    stems_match = re.match(r"^stems/([^/]+)/([^/]+\.wav)$", path)
+    if stems_match:
+        task_id = stems_match.group(1)
+        stem_file = stems_match.group(2)
+        demucs_path = cwd / "uploads" / task_id / "demucs_output" / stem_file
+        if demucs_path.exists() and demucs_path.is_file():
+            print(f"[AUDIO] Serving from demucs_output fallback: {demucs_path}")
+            return FileResponse(
+                path=str(demucs_path),
                 media_type="audio/wav",
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Content-Length": str(len(r.content)),
-                    "Cache-Control": "public, max-age=3600"
-                }
+                headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600"},
             )
-        else:
-            print(f"[RESCUE] B2 Error: {r.status_code}")
-            return Response(
-                content=json.dumps({"error": "B2 failure", "status": r.status_code, "url_tried": b2_url}),
-                media_type="application/json",
-                status_code=r.status_code
-            )
+        print(f"[AUDIO] demucs_output path not found: {demucs_path}")
 
-    except Exception as e:
-        print(f"[RESCUE] Crash: {str(e)}")
-        return Response(
-            content=json.dumps({"error": str(e)}),
-            media_type="application/json",
-            status_code=500
+    b2_url = _b2_public_file_url(path)
+    print(f"[AUDIO] B2 fetch: {b2_url}")
+
+    def fetch_b2():
+        return requests.get(
+            b2_url,
+            timeout=(20, 180),
+            headers={"User-Agent": "MoisesStudio/1.0 (FastAPI serve_audio)"},
         )
+
+    try:
+        r = await asyncio.to_thread(fetch_b2)
+    except requests.Timeout as e:
+        print(f"[AUDIO] B2 timeout: {e}")
+        return Response(
+            content=json.dumps({"error": "B2 timeout", "detail": str(e), "url": b2_url}),
+            media_type="application/json",
+            status_code=504,
+        )
+    except requests.RequestException as e:
+        print(f"[AUDIO] B2 request error: {e}")
+        return Response(
+            content=json.dumps({"error": "B2 unreachable", "detail": str(e), "url": b2_url}),
+            media_type="application/json",
+            status_code=502,
+        )
+
+    print(f"[AUDIO] B2 status: {r.status_code}")
+
+    if r.status_code == 200:
+        body = r.content
+        return Response(
+            content=body,
+            media_type="audio/wav",
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Content-Length": str(len(body)),
+                "Cache-Control": "public, max-age=3600",
+            },
+        )
+
+    return Response(
+        content=json.dumps(
+            {"error": "B2 failure", "status": r.status_code, "url_tried": b2_url}
+        ),
+        media_type="application/json",
+        status_code=r.status_code if r.status_code in (403, 404, 410) else 502,
+    )
 
 
 

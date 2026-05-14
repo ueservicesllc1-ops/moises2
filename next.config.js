@@ -45,7 +45,6 @@ const nextConfig = {
         source: '/api/upload/:path*',
         destination: `${backendBase}/api/upload/:path*`,
       },
-      // /backend-audio → app/backend-audio/[...path]/route.ts (usa BACKEND_URL en runtime)
     ]
   },
 }

@@ -465,9 +465,11 @@ useEffect(() => {
 }, [currentChord, filteredChords]);
 
 return (
-  <div className="h-full flex flex-col">
+  <div
+    className={`flex w-full max-w-full shrink-0 flex-col min-h-0 ${showCoverFlow ? 'justify-end' : ''}`}
+  >
     {/* Header */}
-    <div className="flex items-center justify-between mb-4">
+    <div className="mb-1 flex shrink-0 items-center justify-between md:mb-2">
       <h3 className="text-white text-lg font-semibold">
       </h3>
       <div className="flex items-center space-x-2">
@@ -522,7 +524,7 @@ return (
 
     {/* Professional Digital Mixer Interface */}
     {showCoverFlow ? (
-        <div className="h-full bg-black rounded-lg border border-gray-800 mt-0 md:-mt-4 md:-mx-4 relative overflow-hidden flex flex-col">
+        <div className="relative z-0 mx-auto mt-0 w-full max-w-full shrink-0 overflow-hidden rounded-lg border border-gray-800 bg-black py-[10px]">
         {/* Subtle grid pattern */}
         <div className="absolute inset-0 opacity-5">
           <div className="w-full h-full" style={{
@@ -534,11 +536,11 @@ return (
           }} />
         </div>
         
-        <div className="relative z-10 flex flex-col md:flex-row items-center justify-between px-1 py-1 md:px-0 md:py-0 flex-1 md:h-full gap-2 md:gap-6 min-h-0">
+        <div className="relative z-10 flex w-full max-w-full flex-col items-stretch gap-2 px-2 md:flex-row md:items-center md:justify-between md:gap-4 md:px-3">
           {/* Left Side - LED Buttons */}
-          <div className="flex flex-row md:flex-col flex-wrap justify-center md:justify-start gap-2 w-full md:w-36 md:ml-[10px]">
+            <div className="flex w-full flex-row flex-wrap justify-center gap-1.5 md:ml-[10px] md:h-[min(280px,22vh)] md:min-h-0 md:w-36 md:flex-col md:justify-start md:gap-2 md:overflow-y-auto">
             {/* Row 1 */}
-            <div className="flex flex-row md:flex-col flex-wrap justify-center gap-1.5 mt-2 md:mt-0">
+            <div className="flex flex-row md:flex-col flex-wrap justify-center gap-1.5 md:mt-0">
               <button 
                 onClick={handleChordAnalysis}
                 className={`w-24 md:w-32 h-7 md:h-8 border rounded hover:bg-opacity-80 transition-all duration-300 flex items-center justify-center ${
@@ -606,9 +608,10 @@ return (
             </div>
           </div>
 
-          {/* LED Screen - Center */}
-          <div className="flex justify-center w-full md:flex-1">
-            <div className="w-full md:w-[85%] flex-1 min-h-0 md:h-full bg-black border-2 border-gray-600 rounded-lg relative overflow-hidden" 
+          {/* LED Screen - Center — altura fija; el marco negro exterior solo añade py-[10px] */}
+          <div className="flex w-full min-w-0 shrink-0 items-center justify-center md:w-auto md:flex-1 md:px-1">
+            <div
+              className="relative flex h-[min(220px,28svh)] w-full max-w-md shrink-0 flex-col overflow-x-hidden overflow-y-auto rounded-lg border-2 border-gray-600 bg-black md:h-[min(280px,22vh)] md:w-[78%] md:max-w-lg"
                  style={{
                    background: 'linear-gradient(135deg, #050505 0%, #111111 50%, #050505 100%)',
                    boxShadow: 'inset 0 0 20px rgba(0, 255, 0, 0.05), 0 0 10px rgba(0, 0, 0, 0.5)'
@@ -625,10 +628,10 @@ return (
               </div>
               
               {/* Screen Content */}
-              <div className="relative z-10 h-full flex flex-col items-center justify-center p-4">
+              <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center px-3 py-2 md:px-4 md:py-3">
                 {showBasicEQ ? (
                   /* EQ Básico con perillas estilo DJ */
-                  <div className="w-full h-full flex items-center justify-center">
+                  <div className="flex w-full min-h-0 items-center justify-center py-1">
                     <div className="flex flex-col items-center gap-4">
                       <div className="flex gap-6 items-center">
                       {/* Bass Knob */}
@@ -1932,20 +1935,20 @@ return (
                 ) : (
                   /* Pantalla LED Normal */
                 <>
-                  <div className="flex justify-center mb-2">
+                  <div className="mb-1 flex justify-center md:mb-2">
                     <img 
                       src="/images/logo.png" 
                       alt="Judith Logo" 
-                      className="h-12 w-auto object-contain brightness-[0.8] contrast-[1.2]"
+                      className="h-8 w-auto object-contain brightness-[0.8] contrast-[1.2] md:h-10"
                       style={{ filter: 'hue-rotate(90deg) saturate(1.5)' }}
                     />
                   </div>
-                  <div className="text-green-300 text-sm font-mono mb-4">
+                  <div className="mb-1 text-sm font-mono text-green-300 md:mb-2">
                     DIGITAL MIXER
                   </div>
                   
                   {/* Status Indicators */}
-                  <div className="flex space-x-4 mb-4">
+                  <div className="mb-2 flex space-x-3 md:space-x-4 md:mb-3">
                     <div className="flex flex-col items-center">
                       <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
                       <div className="text-green-400 text-xs font-mono mt-1">READY</div>
@@ -1979,9 +1982,9 @@ return (
           </div>
 
           {/* Right Side - LED Buttons */}
-          <div className="flex flex-row md:flex-col flex-wrap justify-center md:items-end gap-2 w-full md:w-36 md:mr-[10px]">
+          <div className="flex w-full flex-row flex-wrap justify-center gap-1.5 md:mr-[10px] md:h-[min(280px,22vh)] md:min-h-0 md:w-36 md:flex-col md:items-end md:justify-start md:gap-2 md:overflow-y-auto">
             {/* Row 1 */}
-            <div className="flex flex-row md:flex-col flex-wrap justify-center gap-2">
+            <div className="flex flex-row md:flex-col flex-wrap justify-center gap-1.5 md:gap-2">
               <button 
                 onClick={() => {
                   setDownloadFormat('mp3');
@@ -2051,7 +2054,7 @@ return (
         </div>
       </div>
     ) : (
-      <div className="flex-1">
+      <div className="min-h-0 w-full shrink-0">
         {/* Barra de progreso para análisis de acordes */}
         {isAnalyzing && activeFeature === 'chord-analysis' && (
           <div className="mb-4">

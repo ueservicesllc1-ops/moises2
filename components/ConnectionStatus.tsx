@@ -2,16 +2,36 @@
 
 import { useState, useEffect } from 'react'
 import { Cloud, Database } from 'lucide-react'
-import { getBackendUrl } from '@/lib/config'
+import { getDevRemoteAudioProxyBase } from '@/lib/audioProxy'
 
 export default function ConnectionStatus() {
   const [b2Status, setB2Status] = useState<'connected' | 'disconnected' | 'checking'>('checking')
   const [firebaseStatus, setFirebaseStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
   const [b2Error, setB2Error] = useState<string | null>(null)
 
-  // Verificar estado de B2
+  // Verificar estado de B2 / backend (en local con proxy remoto, comprobar ese origen)
   useEffect(() => {
     const checkB2Status = async () => {
+      const isBrowser = typeof window !== 'undefined'
+      const host = isBrowser ? window.location.hostname : ''
+      const isLocal = host === 'localhost' || host === '127.0.0.1'
+
+      if (isLocal) {
+        const remote = getDevRemoteAudioProxyBase()
+        if (remote) {
+          try {
+            const pr = await fetch(`${remote}/api/health`, {
+              signal: AbortSignal.timeout(5000),
+            })
+            if (!pr.ok) throw new Error('remote health not ok')
+          } catch {
+            setB2Status('disconnected')
+            setB2Error('Proxy remoto (NEXT_PUBLIC_REMOTE_AUDIO_PROXY) no responde')
+            return
+          }
+        }
+      }
+
       try {
         // En Railway, usar el proxy de Next.js para verificar el backend
         const response = await fetch('/api/health')

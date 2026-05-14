@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRouter } from 'next/navigation'
 import { 
@@ -8,6 +8,7 @@ import {
   Search,
   Plus,
   ChevronDown,
+  ChevronUp,
   User,
   Volume2,
   LogOut,
@@ -38,6 +39,7 @@ import {
   ZoomIn,
   ZoomOut,
   RefreshCw,
+  Magnet,
 } from 'lucide-react'
 import MoisesStyleUpload from '@/components/MoisesStyleUpload'
 import ConnectionStatus from '@/components/ConnectionStatus'
@@ -51,12 +53,48 @@ import VolumeEQModal from '@/components/VolumeEQModal'
 import BpmDetectorModal from '@/components/BpmDetectorModal'
 import ChordAnalysisModal from '@/components/ChordAnalysisModal'
 import { resolvePlanIdFromUserData, type PlanId } from '@/lib/pricing'
-import {
-  stemPathFromB2PublicUrl,
-  toBackendAudioProxyUrl,
-  getCachedAudioBlobUrl,
-} from '@/lib/audioProxy'
+import { stemPathFromB2PublicUrl, normalizeStemPlayUrl, resolveAudioFetchUrl, getCachedAudioBlobUrl } from '@/lib/audioProxy'
 import { isClickStemKey, computeClickSyncOffsetSecFromStems } from '@/lib/clickSync'
+import {
+  clampClipStartSec,
+  snapSecondsToGrid,
+  type TimelineSnapGrid,
+} from '@/lib/timelineSnap'
+import {
+  clampSourceInOut,
+  clipFadeGainAtProjectTime,
+  MIN_STEM_CLIP_SPAN_SEC,
+  resolveSourceOutSec,
+  slicePeaksForSourceWindow,
+  stemFileTimeFromTimelineTrimmed,
+  type StemClipEditPersisted,
+} from '@/lib/studioNonDestructiveClip'
+
+/** Duración de un compás (s) según BPM (negra) y armadura mostrada en la regla. */
+type TimelineMeter = '4/4' | '3/4' | '2/4' | '6/8'
+
+function measureDurationFromMeter(bpm: number, meter: TimelineMeter): number {
+  const b = Math.max(40, Math.min(Number(bpm) || 120, 400))
+  const beat = 60 / b
+  switch (meter) {
+    case '3/4':
+      return beat * 3
+    case '2/4':
+      return beat * 2
+    case '6/8':
+      return beat * 3
+    default:
+      return beat * 4
+  }
+}
+
+/** Altura de fila de pista en el mezclador (px): por defecto y límites al arrastrar el borde inferior. */
+const DEFAULT_TRACK_ROW_HEIGHT_PX = 62
+const MIN_TRACK_ROW_HEIGHT_PX = 28
+const MAX_TRACK_ROW_HEIGHT_PX = 220
+
+/** Duración mínima visible del clip en el timeline al trimar (s). */
+const CLIP_TRIM_MIN_TIMELINE_SEC = 0.1
 
 // import ChordAnalyzer from '@/components/ChordAnalyzer'
 import { getUserSongs, subscribeToUserSongs, deleteSong, Song } from '@/lib/firestore'
@@ -137,12 +175,63 @@ export default function Home() {
   /** Segundos: reproducción del stem click en `masterTime - offset` para alinear fase. */
   const [clickSyncOffsetSec, setClickSyncOffsetSec] = useState(0)
   const [clickSyncBusy, setClickSyncBusy] = useState(false)
+  /** Oculta el panel inferior (acordes, EQ, guardar) para ver las pistas a pantalla completa. */
+  const [mixerToolsCollapsed, setMixerToolsCollapsed] = useState(false)
   const [timeFormat, setTimeFormat] = useState<'time' | 'beats'>('time')
   const [audioElements, setAudioElements] = useState<{ [key: string]: HTMLAudioElement }>({})
   const [isLoadingAudio, setIsLoadingAudio] = useState(false)
   const [waveforms, setWaveforms] = useState<{ [key: string]: number[] }>({})
   const [trackOnsets, setTrackOnsets] = useState<{ [key: string]: number }>({}) // Onset en ms de cada track
-  
+  /** Inicio del clip en la línea de tiempo (s): t=0 del archivo alinea con este instante del proyecto. */
+  const [trackClipOffsetSec, setTrackClipOffsetSec] = useState<Record<string, number>>({})
+  const [timelineSnapGrid, setTimelineSnapGrid] = useState<TimelineSnapGrid>('1/16')
+  const [snapEnabled, setSnapEnabled] = useState(true)
+  const [timelineMeter, setTimelineMeter] = useState<TimelineMeter>('4/4')
+  const [selectedEditTrackKey, setSelectedEditTrackKey] = useState<string | null>(null)
+  /** Altura visual por pista (px); al achicar, la onda se recorta (no se borra el audio del archivo). */
+  const [trackRowHeightsPx, setTrackRowHeightsPx] = useState<Record<string, number>>({})
+  /** Trim no destructivo: inicio audible dentro del archivo (s). */
+  const [trackClipSourceInSec, setTrackClipSourceInSec] = useState<Record<string, number>>({})
+  /** Fin audible en archivo (s). Si falta clave → hasta el final del stem. */
+  const [trackClipSourceOutSec, setTrackClipSourceOutSec] = useState<Record<string, number>>({})
+  const [trackClipFadeInSec, setTrackClipFadeInSec] = useState<Record<string, number>>({})
+  const [trackClipFadeOutSec, setTrackClipFadeOutSec] = useState<Record<string, number>>({})
+  const trackRowResizeDragRef = useRef<{
+    trackKey: string
+    pointerDownY: number
+    heightAtPointerDown: number
+  } | null>(null)
+  const clipTrimDragRef = useRef<{
+    trackKey: string
+    edge: 'left' | 'right'
+    pointerDownX: number
+    timelineStart0: number
+    timelineEnd0: number
+    sourceIn0: number
+    sourceOut0: number
+    stemDur: number
+    laneWidthPx: number
+    durForClip: number
+  } | null>(null)
+  const trackClipOffsetSecRef = useRef<Record<string, number>>({})
+  const timelineSnapGridRef = useRef<TimelineSnapGrid>('1/16')
+  const snapEnabledRef = useRef(true)
+  const clipDragRef = useRef<{
+    trackKey: string
+    startClientX: number
+    startClip: number
+    width: number
+    durationSec: number
+    moved: boolean
+  } | null>(null)
+
+  const selectedSongRef = useRef<Song | null>(null)
+  useEffect(() => {
+    selectedSongRef.current = selectedSong
+  }, [selectedSong])
+
+  const stemClipPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // Estados para EQ de frecuencias altas (treble)
   const [trebleGain, setTrebleGain] = useState(0) // 0dB por defecto (-12 a +12)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -163,6 +252,17 @@ export default function Home() {
   useEffect(() => {
     clickSyncOffsetSecRef.current = clickSyncOffsetSec
   }, [clickSyncOffsetSec])
+
+  useEffect(() => {
+    trackClipOffsetSecRef.current = trackClipOffsetSec
+  }, [trackClipOffsetSec])
+
+  useEffect(() => {
+    timelineSnapGridRef.current = timelineSnapGrid
+  }, [timelineSnapGrid])
+  useEffect(() => {
+    snapEnabledRef.current = snapEnabled
+  }, [snapEnabled])
   const [pitchSemitones, setPitchSemitones] = useState(0)
 
   
@@ -186,40 +286,406 @@ export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
+  const currentTimeRef = useRef(0)
+  const isPlayingRef = useRef(false)
+  const durationRef = useRef(0)
+  /** Reloj del proyecto mientras play: origen + wall clock (no depende de ningún stem con clip corrido). */
+  const playbackWallOriginProjectSecRef = useRef(0)
+  const playbackWallOriginPerfRef = useRef(0)
   const [volume, setVolume] = useState(1)
+  useEffect(() => {
+    currentTimeRef.current = currentTime
+  }, [currentTime])
+  useEffect(() => {
+    isPlayingRef.current = isPlaying
+  }, [isPlaying])
+  useEffect(() => {
+    durationRef.current = duration
+  }, [duration])
   const [isMuted, setIsMuted] = useState(false)
   const [trackMutedStates, setTrackMutedStates] = useState<{ [key: string]: boolean }>({})
   const [trackVolumeStates, setTrackVolumeStates] = useState<{ [key: string]: number }>({})
   const [showMixerEQ, setShowMixerEQ] = useState(false) // Mostrar EQ en el mixer
   const [trackSoloStates, setTrackSoloStates] = useState<{ [key: string]: boolean }>({})
+  const volumeRef = useRef(1)
+  const trackVolumeStatesRef = useRef<{ [key: string]: number }>({})
+  const trackMutedStatesRef = useRef<{ [key: string]: boolean }>({})
+  const trackSoloStatesRef = useRef<{ [key: string]: boolean }>({})
+  const trackClipSourceInSecRef = useRef<Record<string, number>>({})
+  const trackClipSourceOutSecRef = useRef<Record<string, number>>({})
+  const trackClipFadeInSecRef = useRef<Record<string, number>>({})
+  const trackClipFadeOutSecRef = useRef<Record<string, number>>({})
   const [trackOrder, setTrackOrder] = useState<string[]>([])
+  useEffect(() => {
+    volumeRef.current = volume
+  }, [volume])
+  useEffect(() => {
+    trackVolumeStatesRef.current = trackVolumeStates
+  }, [trackVolumeStates])
+  useEffect(() => {
+    trackMutedStatesRef.current = trackMutedStates
+  }, [trackMutedStates])
+  useEffect(() => {
+    trackSoloStatesRef.current = trackSoloStates
+  }, [trackSoloStates])
+  useEffect(() => {
+    trackClipSourceInSecRef.current = trackClipSourceInSec
+  }, [trackClipSourceInSec])
+  useEffect(() => {
+    trackClipSourceOutSecRef.current = trackClipSourceOutSec
+  }, [trackClipSourceOutSec])
+  useEffect(() => {
+    trackClipFadeInSecRef.current = trackClipFadeInSec
+  }, [trackClipFadeInSec])
+  useEffect(() => {
+    trackClipFadeOutSecRef.current = trackClipFadeOutSec
+  }, [trackClipFadeOutSec])
+
+  const audioElementsRef = useRef(audioElements)
+  audioElementsRef.current = audioElements
+
+  const persistStemClipEditsToFirestore = useCallback(async () => {
+    const song = selectedSongRef.current
+    if (!song?.id || !user?.uid || !song.stems) return
+
+    const stemKeys = Object.keys(song.stems).filter((k) => k !== 'metronome')
+    const edits: Record<string, StemClipEditPersisted> = {}
+
+    for (const k of stemKeys) {
+      const timelineStartSec = trackClipOffsetSecRef.current[k] ?? 0
+      const sourceInSec = trackClipSourceInSecRef.current[k] ?? 0
+      const soStored = trackClipSourceOutSecRef.current[k]
+      const dur = Math.max(0.01, Number(audioElementsRef.current[k]?.duration) || 0.01)
+      const resolvedOut = resolveSourceOutSec(soStored, dur)
+      if (resolvedOut - sourceInSec < MIN_STEM_CLIP_SPAN_SEC) continue
+
+      const entry: StemClipEditPersisted = {
+        timelineStartSec,
+        sourceInSec,
+      }
+      if (soStored != null && Number.isFinite(Number(soStored))) {
+        entry.sourceOutSec = Number(soStored)
+      }
+      const fi = trackClipFadeInSecRef.current[k] ?? 0
+      const fo = trackClipFadeOutSecRef.current[k] ?? 0
+      if (fi > 0) entry.fadeInSec = fi
+      if (fo > 0) entry.fadeOutSec = fo
+      edits[k] = entry
+    }
+
+    if (Object.keys(edits).length === 0) return
+
+    try {
+      const { doc, updateDoc } = await import('firebase/firestore')
+      const { db } = await import('@/lib/firebase')
+      await updateDoc(doc(db, 'songs', song.id), { stemClipEdits: edits })
+    } catch (err) {
+      console.error('[studio] Error guardando stemClipEdits:', err)
+    }
+  }, [user?.uid])
+
+  const schedulePersistStemClipEdits = useCallback(() => {
+    if (!selectedSongRef.current?.id || !user?.uid) return
+    if (stemClipPersistTimerRef.current) clearTimeout(stemClipPersistTimerRef.current)
+    stemClipPersistTimerRef.current = setTimeout(() => {
+      stemClipPersistTimerRef.current = null
+      void persistStemClipEditsToFirestore()
+    }, 900)
+  }, [user?.uid, persistStemClipEditsToFirestore])
+
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
-  
+  const draggedIndexRef = useRef<number | null>(null)
+
   const [waveformStyle, setWaveformStyle] = useState<'bars' | 'smooth' | 'dots'>('bars')
   const [horizontalZoom, setHorizontalZoom] = useState(1);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  /** Regla TIME/COMPÁS: rueda = zoom (listener no pasivo). */
+  const rulerBarRef = useRef<HTMLDivElement>(null);
+  const horizontalZoomRef = useRef(1);
+  horizontalZoomRef.current = horizontalZoom;
 
-  // Handlers para reordenar tracks con Drag & Drop
+  /** Orden estable: preferir trackOrder y añadir stems que falten. */
+  const mergeTrackKeysWithStems = useCallback((prevOrder: string[]): string[] => {
+    const stemsKeys = Object.keys(selectedSong?.stems || {}).filter((k) => k !== 'metronome')
+    if (stemsKeys.length === 0) return []
+    const base = prevOrder.length > 0 ? prevOrder.filter((k) => stemsKeys.includes(k)) : []
+    return [...base, ...stemsKeys.filter((k) => !base.includes(k))]
+  }, [selectedSong?.stems])
+
+  const displayedTrackKeys = useMemo(
+    () => mergeTrackKeysWithStems(trackOrder),
+    [trackOrder, mergeTrackKeysWithStems],
+  )
+
   const handleTrackDragStart = (index: number) => {
-    setDraggedIndex(index);
-  };
+    draggedIndexRef.current = index
+    setDraggedIndex(index)
+  }
 
   const handleTrackDragOver = (e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    if (draggedIndex === null || draggedIndex === index) return;
-
-    const newOrder = [...trackOrder];
-    const draggedItem = newOrder[draggedIndex];
-    newOrder.splice(draggedIndex, 1);
-    newOrder.splice(index, 0, draggedItem);
-    
-    setDraggedIndex(index);
-    setTrackOrder(newOrder);
-  };
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const from = draggedIndexRef.current
+    if (from === null || from === index) return
+    setTrackOrder((prev) => {
+      const keys = mergeTrackKeysWithStems(prev)
+      if (from < 0 || from >= keys.length || index < 0 || index >= keys.length) return prev
+      const next = [...keys]
+      const [item] = next.splice(from, 1)
+      next.splice(index, 0, item)
+      return next
+    })
+    draggedIndexRef.current = index
+    setDraggedIndex(index)
+  }
 
   const handleTrackDragEnd = () => {
-    setDraggedIndex(null);
-  };
+    draggedIndexRef.current = null
+    setDraggedIndex(null)
+  }
+
+  const bindTrackRowResizePointer = useCallback(
+    (
+      el: HTMLDivElement,
+      trackKey: string,
+      pointerId: number,
+      clientY: number,
+      heightAtPointerDown: number,
+    ) => {
+      trackRowResizeDragRef.current = {
+        trackKey,
+        pointerDownY: clientY,
+        heightAtPointerDown,
+      }
+      const onMove = (ev: PointerEvent) => {
+        const d = trackRowResizeDragRef.current
+        if (!d || d.trackKey !== trackKey) return
+        const dy = ev.clientY - d.pointerDownY
+        const h = Math.min(
+          MAX_TRACK_ROW_HEIGHT_PX,
+          Math.max(MIN_TRACK_ROW_HEIGHT_PX, Math.round(d.heightAtPointerDown + dy)),
+        )
+        setTrackRowHeightsPx((prev) => ({ ...prev, [trackKey]: h }))
+      }
+      const onEnd = (ev: PointerEvent) => {
+        trackRowResizeDragRef.current = null
+        try {
+          el.releasePointerCapture(ev.pointerId)
+        } catch {
+          /* ignore */
+        }
+        el.removeEventListener('pointermove', onMove)
+        el.removeEventListener('pointerup', onEnd)
+        el.removeEventListener('pointercancel', onEnd)
+      }
+      try {
+        el.setPointerCapture(pointerId)
+      } catch {
+        /* ignore */
+      }
+      el.addEventListener('pointermove', onMove)
+      el.addEventListener('pointerup', onEnd)
+      el.addEventListener('pointercancel', onEnd)
+    },
+    [],
+  )
+
+  const bindClipTrimPointer = useCallback(
+    (
+      el: HTMLDivElement,
+      trackKey: string,
+      edge: 'left' | 'right',
+      pointerId: number,
+      clientX: number,
+      clipBodyEl: HTMLDivElement,
+    ) => {
+      const stemDur = Math.max(
+        CLIP_TRIM_MIN_TIMELINE_SEC * 2,
+        Number(audioElementsRef.current[trackKey]?.duration) || 1,
+      )
+      const durForClip = Math.max(
+        0.01,
+        Number(durationRef.current) || 0,
+        Number(selectedSong?.durationSeconds) || 0,
+        Number(audioElementsRef.current[trackKey]?.duration) || 0,
+      )
+
+      const rowEl = clipBodyEl.closest('[data-timeline-track-row]') as HTMLElement | null
+      const laneWidthPx = Math.max(
+        1,
+        rowEl?.getBoundingClientRect().width ??
+          clipBodyEl.parentElement?.getBoundingClientRect().width ??
+          1,
+      )
+
+      const t00 = trackClipOffsetSecRef.current[trackKey] ?? 0
+      const sIn0 = trackClipSourceInSecRef.current[trackKey] ?? 0
+      const sOut0 = resolveSourceOutSec(trackClipSourceOutSecRef.current[trackKey], stemDur)
+      const spanFile0 = Math.max(MIN_STEM_CLIP_SPAN_SEC, sOut0 - sIn0)
+      const spanTimeline0 = Math.min(spanFile0, Math.max(0, durForClip - t00))
+      const tEnd0 = t00 + spanTimeline0
+
+      clipTrimDragRef.current = {
+        trackKey,
+        edge,
+        pointerDownX: clientX,
+        timelineStart0: t00,
+        timelineEnd0: tEnd0,
+        sourceIn0: sIn0,
+        sourceOut0: sOut0,
+        stemDur,
+        laneWidthPx,
+        durForClip,
+      }
+
+      let lastLogLine: string | null = null
+
+      const onMove = (ev: PointerEvent) => {
+        const d = clipTrimDragRef.current
+        if (!d || d.trackKey !== trackKey) return
+
+        const dx = ev.clientX - d.pointerDownX
+        const dt = (dx / d.laneWidthPx) * d.durForClip
+
+        if (d.edge === 'left') {
+          // Borde derecho en timeline fijo (tEnd0); solo mueve inicio + sourceIn acoplados.
+          let newT0 = d.timelineStart0 + dt
+          const maxT0 = d.timelineEnd0 - CLIP_TRIM_MIN_TIMELINE_SEC
+          const minT0FromSource = d.timelineStart0 - d.sourceIn0
+          newT0 = Math.max(0, minT0FromSource, Math.min(newT0, maxT0))
+          const newSIn = d.sourceIn0 + (newT0 - d.timelineStart0)
+
+          const nextOff = { ...trackClipOffsetSecRef.current, [trackKey]: newT0 }
+          trackClipOffsetSecRef.current = nextOff
+          setTrackClipOffsetSec(nextOff)
+
+          const nextIn = { ...trackClipSourceInSecRef.current, [trackKey]: newSIn }
+          trackClipSourceInSecRef.current = nextIn
+          setTrackClipSourceInSec(nextIn)
+
+          lastLogLine = `[TRIM LEFT] oldStart=${d.timelineStart0.toFixed(3)}, newStart=${newT0.toFixed(3)}, fixedEnd=${d.timelineEnd0.toFixed(3)}`
+        } else {
+          // Borde izquierdo en timeline fijo (t00); solo acorta sourceOut / fin en timeline.
+          let newSOut = d.sourceOut0 + dt
+          const minSOut = d.sourceIn0 + CLIP_TRIM_MIN_TIMELINE_SEC
+          const maxSOutFromTimeline = d.sourceIn0 + (d.durForClip - d.timelineStart0)
+          const maxSOut = Math.min(d.stemDur, maxSOutFromTimeline)
+          newSOut = Math.max(minSOut, Math.min(newSOut, maxSOut))
+          const c = clampSourceInOut(d.sourceIn0, newSOut, d.stemDur)
+
+          const nextOut = { ...trackClipSourceOutSecRef.current, [trackKey]: c.sourceOut }
+          trackClipSourceOutSecRef.current = nextOut
+          setTrackClipSourceOutSec(nextOut)
+
+          if (c.sourceIn !== d.sourceIn0) {
+            const nextIn = { ...trackClipSourceInSecRef.current, [trackKey]: c.sourceIn }
+            trackClipSourceInSecRef.current = nextIn
+            setTrackClipSourceInSec(nextIn)
+          }
+
+          const newTEnd = d.timelineStart0 + Math.min(c.sourceOut - c.sourceIn, d.durForClip - d.timelineStart0)
+          lastLogLine = `[TRIM RIGHT] fixedStart=${d.timelineStart0.toFixed(3)}, oldEnd=${d.timelineEnd0.toFixed(3)}, newEnd=${newTEnd.toFixed(3)}`
+        }
+      }
+
+      const onEnd = (ev: PointerEvent) => {
+        if (lastLogLine) console.log(lastLogLine)
+        clipTrimDragRef.current = null
+        try {
+          el.releasePointerCapture(ev.pointerId)
+        } catch {
+          /* ignore */
+        }
+        el.removeEventListener('pointermove', onMove)
+        el.removeEventListener('pointerup', onEnd)
+        el.removeEventListener('pointercancel', onEnd)
+        schedulePersistStemClipEdits()
+      }
+      try {
+        el.setPointerCapture(pointerId)
+      } catch {
+        /* ignore */
+      }
+      el.addEventListener('pointermove', onMove)
+      el.addEventListener('pointerup', onEnd)
+      el.addEventListener('pointercancel', onEnd)
+    },
+    [selectedSong, schedulePersistStemClipEdits],
+  )
+
+  const bindClipFadePointer = useCallback(
+    (
+      el: HTMLDivElement,
+      trackKey: string,
+      edge: 'in' | 'out',
+      pointerId: number,
+      clientY: number,
+      spanSec: number,
+      fadeStart: number,
+    ) => {
+      const startY = clientY
+      const maxF = Math.max(0, spanSec / 2 - 0.02)
+      const onMove = (ev: PointerEvent) => {
+        const dy = startY - ev.clientY
+        const delta = dy * (spanSec / 120)
+        const next = Math.max(0, Math.min(maxF, fadeStart + delta))
+        if (edge === 'in') {
+          const m = { ...trackClipFadeInSecRef.current, [trackKey]: next }
+          trackClipFadeInSecRef.current = m
+          setTrackClipFadeInSec(m)
+        } else {
+          const m = { ...trackClipFadeOutSecRef.current, [trackKey]: next }
+          trackClipFadeOutSecRef.current = m
+          setTrackClipFadeOutSec(m)
+        }
+      }
+      const onEnd = (ev: PointerEvent) => {
+        try {
+          el.releasePointerCapture(ev.pointerId)
+        } catch {
+          /* ignore */
+        }
+        el.removeEventListener('pointermove', onMove)
+        el.removeEventListener('pointerup', onEnd)
+        el.removeEventListener('pointercancel', onEnd)
+        schedulePersistStemClipEdits()
+      }
+      try {
+        el.setPointerCapture(pointerId)
+      } catch {
+        /* ignore */
+      }
+      el.addEventListener('pointermove', onMove)
+      el.addEventListener('pointerup', onEnd)
+      el.addEventListener('pointercancel', onEnd)
+    },
+    [schedulePersistStemClipEdits],
+  )
+
+  const moveTrack = useCallback(
+    (trackKey: string, delta: number) => {
+      setTrackOrder((prev) => {
+        const keys = mergeTrackKeysWithStems(prev)
+        const i = keys.indexOf(trackKey)
+        if (i < 0) return keys
+        const j = i + delta
+        if (j < 0 || j >= keys.length) return keys
+        const next = [...keys]
+        const [item] = next.splice(i, 1)
+        next.splice(j, 0, item)
+        return next
+      })
+    },
+    [mergeTrackKeysWithStems],
+  )
+
+  /** Tiempo dentro del archivo de audio (s) para un instante del proyecto (línea de tiempo). */
+  function stemFileTimeFromTimeline(timelineSec: number, trackKey: string): number {
+    const clip = trackClipOffsetSecRef.current[trackKey] ?? 0
+    const sourceIn = trackClipSourceInSecRef.current[trackKey] ?? 0
+    const off = isClickStemKey(trackKey) ? clickSyncOffsetSecRef.current : 0
+    return stemFileTimeFromTimelineTrimmed(timelineSec, clip, sourceIn, off)
+  }
 
   // Sincronizar trackOrder si cambian los stems de la canción (ej. nueva separación)
   useEffect(() => {
@@ -238,10 +704,64 @@ export default function Home() {
         }
         return prev;
       });
+      const edits = selectedSong?.stemClipEdits
+      setTrackClipOffsetSec((prev) => {
+        const next: Record<string, number> = {}
+        for (const k of stemsKeys) {
+          if (typeof prev[k] === 'number') next[k] = prev[k]
+          else if (edits?.[k] && typeof edits[k].timelineStartSec === 'number')
+            next[k] = edits[k].timelineStartSec
+        }
+        return next
+      })
+      setTrackClipSourceInSec((prev) => {
+        const next: Record<string, number> = {}
+        for (const k of stemsKeys) {
+          if (typeof prev[k] === 'number') next[k] = prev[k]
+          else if (edits?.[k] && typeof edits[k].sourceInSec === 'number') next[k] = edits[k].sourceInSec
+        }
+        return next
+      })
+      setTrackClipSourceOutSec((prev) => {
+        const next: Record<string, number> = {}
+        for (const k of stemsKeys) {
+          if (typeof prev[k] === 'number') next[k] = prev[k]
+          else if (
+            edits?.[k]?.sourceOutSec != null &&
+            Number.isFinite(Number(edits[k].sourceOutSec))
+          ) {
+            next[k] = Number(edits[k].sourceOutSec)
+          }
+        }
+        return next
+      })
+      setTrackClipFadeInSec((prev) => {
+        const next: Record<string, number> = {}
+        for (const k of stemsKeys) {
+          if (typeof prev[k] === 'number') next[k] = prev[k]
+          else if (edits?.[k]?.fadeInSec != null && Number(edits[k].fadeInSec) > 0)
+            next[k] = Number(edits[k].fadeInSec)
+        }
+        return next
+      })
+      setTrackClipFadeOutSec((prev) => {
+        const next: Record<string, number> = {}
+        for (const k of stemsKeys) {
+          if (typeof prev[k] === 'number') next[k] = prev[k]
+          else if (edits?.[k]?.fadeOutSec != null && Number(edits[k].fadeOutSec) > 0)
+            next[k] = Number(edits[k].fadeOutSec)
+        }
+        return next
+      })
     } else {
-      setTrackOrder([]);
+      setTrackOrder([])
+      setTrackClipOffsetSec({})
+      setTrackClipSourceInSec({})
+      setTrackClipSourceOutSec({})
+      setTrackClipFadeInSec({})
+      setTrackClipFadeOutSec({})
     }
-  }, [selectedSong?.stems]);
+  }, [selectedSong?.stems, selectedSong?.stemClipEdits])
 
   useEffect(() => {
     const loadUserPlan = async () => {
@@ -265,26 +785,72 @@ export default function Home() {
     loadUserPlan()
   }, [user?.uid])
 
-  // Manejar Zoom Horizontal con Ctrl + Rueda del ratón
-  useEffect(() => {
-    const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey) {
-        e.preventDefault();
-        const delta = e.deltaY > 0 ? -0.2 : 0.2;
-        setHorizontalZoom(prev => Math.max(1, Math.min(10, prev + delta)));
-      }
-    };
+  // Zoom/scroll horizontal: listeners `wheel` con { passive: false } (React onWheel no puede hacer preventDefault).
+  useLayoutEffect(() => {
+    if (!showSongModal) return
 
-    const container = scrollContainerRef.current;
-    if (container) {
-      container.addEventListener('wheel', handleWheel, { passive: false });
+    const opts: AddEventListenerOptions = { passive: false }
+
+    const clampZoom = (z: number) => Math.max(1, Math.min(10, z))
+
+    const onRulerWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const mag = Math.min(2, (Math.abs(e.deltaY) || 1) / 100)
+      const step = 0.1 + 0.12 * mag
+      const d = e.deltaY > 0 ? -step : step
+      setHorizontalZoom((z) => clampZoom(z + d))
     }
-    return () => {
-      if (container) {
-        container.removeEventListener('wheel', handleWheel);
+
+    /** Solo la regla TIME/COMPÁS hace zoom con la rueda (listener en rulerBarRef). */
+    const onScrollWheel = (e: WheelEvent) => {
+      const el = scrollContainerRef.current
+      if (!el) return
+
+      const overflowX = el.scrollWidth - el.clientWidth
+      if (overflowX <= 1) return
+
+      if (e.shiftKey) {
+        e.preventDefault()
+        el.scrollLeft += e.deltaY
+        return
       }
-    };
-  }, [showSongModal]);
+
+      if (horizontalZoomRef.current > 1.001) {
+        e.preventDefault()
+        const dx = e.deltaX
+        const dy = e.deltaY
+        if (Math.abs(dx) > Math.abs(dy)) {
+          el.scrollLeft += dx
+        } else {
+          el.scrollLeft += dy
+        }
+      }
+    }
+
+    const detach = () => {
+      scrollContainerRef.current?.removeEventListener('wheel', onScrollWheel, opts)
+      rulerBarRef.current?.removeEventListener('wheel', onRulerWheel, opts)
+    }
+
+    const attach = () => {
+      detach()
+      scrollContainerRef.current?.addEventListener('wheel', onScrollWheel, opts)
+      rulerBarRef.current?.addEventListener('wheel', onRulerWheel, opts)
+    }
+
+    attach()
+    const raf = requestAnimationFrame(() => attach())
+    window.addEventListener('resize', attach)
+    window.addEventListener('orientationchange', attach)
+
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', attach)
+      window.removeEventListener('orientationchange', attach)
+      detach()
+    }
+  }, [showSongModal, selectedSong?.id])
 
   // Evitar scroll en el body cuando el modal del mixer está abierto
   useEffect(() => {
@@ -445,6 +1011,17 @@ export default function Home() {
     setPreloadedAudioFile(null)
     setIsPlaying(false)
     setCurrentTime(0)
+    setMixerToolsCollapsed(false)
+    setSelectedEditTrackKey(null)
+    setTrackRowHeightsPx({})
+    setTrackClipSourceInSec({})
+    setTrackClipSourceOutSec({})
+    setTrackClipFadeInSec({})
+    setTrackClipFadeOutSec({})
+    if (stemClipPersistTimerRef.current) {
+      clearTimeout(stemClipPersistTimerRef.current)
+      stemClipPersistTimerRef.current = null
+    }
     // El modal de canción no viene del menú lateral
   }
   
@@ -1005,10 +1582,11 @@ export default function Home() {
 
   // Función para generar path SVG relleno
   const generateFilledWaveformPath = (waveformData: number[]): string => {
-    if (!waveformData || waveformData.length === 0) return '';
-    
+    if (!waveformData || waveformData.length === 0) return ''
+    const denom = Math.max(1, waveformData.length - 1)
+
     const points = waveformData.map((value, index) => {
-      const x = 2 + (index / (waveformData.length - 1)) * 798;
+      const x = 2 + (index / denom) * 798
       const yTop = 30 - (value * 25);
       const yBottom = 30 + (value * 25);
       return { x, yTop, yBottom };
@@ -1085,8 +1663,99 @@ export default function Home() {
 
 
   // Sistema de sincronización simplificado
-  const audioElementsRef = useRef(audioElements);
-  audioElementsRef.current = audioElements;
+  function getTransportProjectTimeFromWallClock(): number {
+    return (
+      playbackWallOriginProjectSecRef.current +
+      (performance.now() - playbackWallOriginPerfRef.current) / 1000
+    )
+  }
+
+  function getProjectTimelineFromRefs(): number {
+    const els = audioElementsRef.current
+    if (Object.keys(els).length === 0) return currentTimeRef.current
+    if (!isPlayingRef.current) return currentTimeRef.current
+    const cap = Math.max(0.01, durationRef.current || 3600)
+    const raw = getTransportProjectTimeFromWallClock()
+    return Math.max(0, Math.min(raw, cap))
+  }
+
+  /**
+   * Alinea cada stem al tiempo del proyecto.
+   * Si el clip empieza después del instante actual (tiempo en archivo negativo),
+   * HTMLAudio no admite currentTime negativo: se pausa el stem en 0 hasta que el timeline avance.
+   * Aplica a todos los stems (no solo el click).
+   */
+  function resyncStemAudioFilePositions(
+    projectTimelineSec: number,
+    transportPlayingOverride?: boolean,
+  ) {
+    const els = audioElementsRef.current
+    const transportPlaying =
+      transportPlayingOverride !== undefined ? transportPlayingOverride : isPlayingRef.current
+
+    for (const [k, audio] of Object.entries(els)) {
+      if (!audio) continue
+      const d = audio.duration || 0
+      const safe = Math.max(0, d - 0.02)
+      const sourceIn = trackClipSourceInSecRef.current[k] ?? 0
+      const sourceOut = resolveSourceOutSec(trackClipSourceOutSecRef.current[k], Math.max(0.01, d))
+      const clipOff = trackClipOffsetSecRef.current[k] ?? 0
+      const span = Math.max(MIN_STEM_CLIP_SPAN_SEC, sourceOut - sourceIn)
+      const fi = trackClipFadeInSecRef.current[k] ?? 0
+      const fo = trackClipFadeOutSecRef.current[k] ?? 0
+      const fadeEnv = clipFadeGainAtProjectTime(projectTimelineSec, clipOff, span, fi, fo)
+
+      const applyStemVolume = () => {
+        const hasSolo = Object.values(trackSoloStatesRef.current).some(Boolean)
+        if (hasSolo) {
+          if (trackSoloStatesRef.current[k]) {
+            audio.muted = false
+            audio.volume = Math.max(0, Math.min(1, volumeRef.current * fadeEnv))
+          } else {
+            audio.muted = true
+            audio.volume = 0
+          }
+        } else {
+          audio.muted = !!trackMutedStatesRef.current[k]
+          const base = trackVolumeStatesRef.current[k] ?? 1
+          audio.volume = audio.muted ? 0 : Math.max(0, Math.min(1, base * fadeEnv))
+        }
+      }
+
+      const ft = stemFileTimeFromTimeline(projectTimelineSec, k)
+
+      if (ft < sourceIn) {
+        audio.currentTime = sourceIn
+        applyStemVolume()
+        if (transportPlaying) audio.pause()
+        continue
+      }
+
+      if (ft >= sourceOut) {
+        audio.currentTime = Math.min(sourceOut, safe)
+        applyStemVolume()
+        if (transportPlaying) audio.pause()
+        continue
+      }
+
+      const clamped = Math.max(sourceIn, Math.min(ft, sourceOut, safe))
+      audio.currentTime = clamped
+      applyStemVolume()
+      if (transportPlaying && audio.paused) {
+        void audio.play().catch(() => {})
+      }
+    }
+  }
+
+  useEffect(() => {
+    resyncStemAudioFilePositions(getProjectTimelineFromRefs(), isPlayingRef.current)
+  }, [
+    trackClipOffsetSec,
+    trackClipSourceInSec,
+    trackClipSourceOutSec,
+    trackClipFadeInSec,
+    trackClipFadeOutSec,
+  ])
 
   // Funciones para controles de audio
   const togglePlayPause = () => {
@@ -1104,28 +1773,44 @@ export default function Home() {
     } else {
       // Reproducir todos los audios sincronizados
       console.log('Playing all tracks')
-      const off = clickSyncOffsetSecRef.current
-      
+
+      const tLine = currentTimeRef.current
+      playbackWallOriginProjectSecRef.current = tLine
+      playbackWallOriginPerfRef.current = performance.now()
+      resyncStemAudioFilePositions(tLine, true)
       Object.entries(audioElements).forEach(([trackKey, audio]) => {
-        const d = audio.duration || 0
-        const safe = Math.max(0, d - 0.02)
-        const t = isClickStemKey(trackKey)
-          ? Math.max(0, Math.min(currentTime - off, safe))
-          : Math.max(0, Math.min(currentTime, safe))
-        audio.currentTime = t
         console.log(`PLAY ${trackKey}: empezando en ${audio.currentTime.toFixed(3)}s`)
-        
-        audio.play().catch(error => {
-          console.error(`Error playing ${trackKey}:`, error)
-        });
-      });
-      
+      })
+
       setIsPlaying(true);
       
       // Metrónomo deshabilitado temporalmente
       // startMetronome();
     }
   };
+
+  useEffect(() => {
+    if (!showSongModal || !selectedSong) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      if (el?.closest('input, textarea, select, [contenteditable="true"]')) return
+      const k = e.key.toLowerCase()
+      if (e.code === 'Space') {
+        e.preventDefault()
+        togglePlayPause()
+        return
+      }
+      if (k === 'escape') {
+        setSelectedEditTrackKey(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [
+    showSongModal,
+    selectedSong,
+    togglePlayPause,
+  ])
 
   const handleVolumeChange = (newVolume: number) => {
     setVolume(newVolume);
@@ -1344,26 +2029,28 @@ export default function Home() {
     }
   };
 
-  // Cambiar posición de la barra
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const seekTime = Number(e.target.value);
-    
-    // Marcar timestamp del seek manual
-    lastSeekTimeRef.current = Date.now();
-    const off = clickSyncOffsetSecRef.current
-    
-    Object.entries(audioElements).forEach(([trackKey, audio]) => {
+  /** Ir a un instante del timeline del proyecto (transporte, regla TIME/COMPÁS, etc.) */
+  const seekMixerToProjectSec = (rawSec: number) => {
+    const dur = Math.max(0.01, Number(duration || selectedSong?.duration || 1))
+    const seekTime = Math.max(0, Math.min(dur, rawSec))
+    lastSeekTimeRef.current = Date.now()
+    resyncStemAudioFilePositions(seekTime, isPlayingRef.current)
+    if (isPlayingRef.current) {
+      playbackWallOriginProjectSecRef.current = seekTime
+      playbackWallOriginPerfRef.current = performance.now()
+    }
+    Object.values(originalAudioElements).forEach((audio) => {
       const d = audio.duration || 0
       const safe = Math.max(0, d - 0.02)
-      if (isClickStemKey(trackKey)) {
-        audio.currentTime = Math.max(0, Math.min(seekTime - off, safe))
-      } else {
-        audio.currentTime = Math.max(0, Math.min(seekTime, safe))
-      }
-    });
-    
-    setCurrentTime(seekTime);
-  };
+      audio.currentTime = Math.max(0, Math.min(seekTime, safe))
+    })
+    setCurrentTime(seekTime)
+  }
+
+  // Cambiar posición de la barra
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    seekMixerToProjectSec(Number(e.target.value))
+  }
 
   // Funciones para controlar el metronome - REMOVED
 
@@ -1398,41 +2085,6 @@ export default function Home() {
     return 0; // Si no se detecta, retornar 0
   };
 
-  // Helper para proxyar URLs de audio a través del backend local (evitar CORS y corregir IPs viejas)
-  const getProxyUrl = (url: string | undefined) => {
-    if (!url) return '';
-    
-    // Si ya es una ruta relativa local, dejarla
-    if (url.startsWith('/')) return url;
-
-    // URLs locales legacy del backend (/audio/...) -> proxy interno estable de Next.
-    // Esto evita depender del puerto Python visible desde el navegador.
-    if (
-      url.startsWith('http://localhost:8000/audio/') ||
-      url.startsWith('http://127.0.0.1:8000/audio/')
-    ) {
-      return url
-        .replace('http://localhost:8000/audio/', '/backend-audio/')
-        .replace('http://127.0.0.1:8000/audio/', '/backend-audio/');
-    }
-    
-    // Si contiene el IP viejo, redirigir al proxy inverso
-    const oldIp = '104.197.145.173';
-    if (url.includes(oldIp)) {
-      return url.replace(`http://${oldIp}:8000/audio`, '/backend-audio');
-    }
-    
-    // B2 → /backend-audio (Next puede reenviar a FastAPI o a B2 público si Python no está)
-    const stem = stemPathFromB2PublicUrl(url);
-    if (stem) {
-      const proxyUrl = toBackendAudioProxyUrl(stem);
-      console.log(`[PROXY] B2 URL → backend proxy: ${proxyUrl}`);
-      return proxyUrl;
-    }
-    
-    return url;
-  };
-
   const handleSyncClick = async () => {
     const stems = selectedSong?.stems as Record<string, string> | undefined;
     if (!stems) {
@@ -1441,7 +2093,9 @@ export default function Home() {
     }
     const clickKey = Object.keys(stems).find(isClickStemKey);
     if (!clickKey || !stems[clickKey]) {
-      alert('No hay pista de click en esta canción.');
+      alert(
+        'Esta canción no tiene stem de click (click_…). Separa de nuevo el tema con la versión actual del servidor, o abre una pista que sí incluya click.'
+      );
       return;
     }
     const bpm = Number(selectedSong?.bpm);
@@ -1454,7 +2108,7 @@ export default function Home() {
     for (const k of refOrder) {
       const raw = stems[k];
       if (raw && !isClickStemKey(k)) {
-        const u = getProxyUrl(raw);
+        const u = resolveAudioFetchUrl(raw);
         if (u) refUrls.push(u);
       }
     }
@@ -1466,22 +2120,13 @@ export default function Home() {
     try {
       const off = await computeClickSyncOffsetSecFromStems({
         refUrls,
-        clickUrl: getProxyUrl(stems[clickKey])!,
+        clickUrl: resolveAudioFetchUrl(stems[clickKey])!,
         bpm,
         anchorSec: currentTime,
       });
       setClickSyncOffsetSec(off);
       clickSyncOffsetSecRef.current = off;
-      if (isPlaying) {
-        const clickEl = audioElements[clickKey];
-        const masterKey = Object.keys(audioElements).find((k) => !isClickStemKey(k));
-        const masterEl = masterKey ? audioElements[masterKey] : null;
-        if (clickEl && masterEl) {
-          const d = clickEl.duration || 0;
-          const safe = Math.max(0, d - 0.02);
-          clickEl.currentTime = Math.max(0, Math.min(masterEl.currentTime - off, safe));
-        }
-      }
+      resyncStemAudioFilePositions(getProjectTimelineFromRefs(), isPlayingRef.current);
     } catch (err) {
       console.error('[SYNC CLICK]', err);
       alert(`No se pudo sincronizar el click: ${err instanceof Error ? err.message : 'error'}`);
@@ -1491,7 +2136,7 @@ export default function Home() {
   };
 
   // ==========================================
-  // SUPER CACHE: ver lib/audioProxy.ts (fallback B2 si el proxy devuelve error)
+  // SUPER CACHE: ver lib/audioProxy.ts (B2 vía proxy; opción NEXT_PUBLIC_REMOTE_AUDIO_PROXY en local)
   // ==========================================
 
   const loadAudioFiles = async (song: Song) => {
@@ -1516,10 +2161,36 @@ export default function Home() {
     if (Object.keys(audioElements).length === 0) {
       setIsPlaying(false);
       setCurrentTime(0);
+      playbackWallOriginProjectSecRef.current = 0
+      playbackWallOriginPerfRef.current = performance.now()
       console.log(' Primera carga de canción - reseteando estado')
     }
-    setTrackOnsets({});
-    setClickSyncOffsetSec(0);
+    setTrackOnsets({})
+    setClickSyncOffsetSec(0)
+
+    const edits = song.stemClipEdits
+    const stemKeys = Object.keys(song.stems).filter((k) => k !== 'metronome')
+    const nextClip: Record<string, number> = {}
+    const nextIn: Record<string, number> = {}
+    const nextOut: Record<string, number> = {}
+    const nextFi: Record<string, number> = {}
+    const nextFo: Record<string, number> = {}
+    if (edits) {
+      for (const k of stemKeys) {
+        const e = edits[k]
+        if (!e) continue
+        if (typeof e.timelineStartSec === 'number') nextClip[k] = e.timelineStartSec
+        if (typeof e.sourceInSec === 'number') nextIn[k] = e.sourceInSec
+        if (e.sourceOutSec != null && Number.isFinite(Number(e.sourceOutSec))) nextOut[k] = Number(e.sourceOutSec)
+        if (typeof e.fadeInSec === 'number' && e.fadeInSec > 0) nextFi[k] = e.fadeInSec
+        if (typeof e.fadeOutSec === 'number' && e.fadeOutSec > 0) nextFo[k] = e.fadeOutSec
+      }
+    }
+    setTrackClipOffsetSec(nextClip)
+    setTrackClipSourceInSec(nextIn)
+    setTrackClipSourceOutSec(nextOut)
+    setTrackClipFadeInSec(nextFi)
+    setTrackClipFadeOutSec(nextFo)
 
     // Limpiar audio anterior
     Object.values(audioElements).forEach(audio => {
@@ -1542,21 +2213,20 @@ export default function Home() {
     try {
       console.log(' Loading song tracks:', song.stems)
       for (let [trackKey, originalTrackUrl] of Object.entries(song.stems)) {
-        const cacheKeyUrl = getProxyUrl(originalTrackUrl);
-        const stemSrc =
-          typeof originalTrackUrl === 'string' ? originalTrackUrl : ''
+        const stemSrc = typeof originalTrackUrl === 'string' ? originalTrackUrl : ''
+        const cacheKeyStable = normalizeStemPlayUrl(stemSrc) || stemSrc
         const b2Fallback = stemSrc && stemPathFromB2PublicUrl(stemSrc) ? stemSrc : undefined
-        if (cacheKeyUrl) {
-          console.log(` Loading audio for ${trackKey}: ${cacheKeyUrl}`)
-          
+        if (cacheKeyStable) {
+          console.log(` Loading audio for ${trackKey}:`, stemSrc)
+
           // Magia de Disco: Descargar o recuperar del disco local y convertir en Blob Instantáneo
-          const trackUrl = await getCachedAudioBlobUrl(cacheKeyUrl, b2Fallback);
-          
+          const trackUrl = await getCachedAudioBlobUrl(stemSrc, b2Fallback)
+
           // 1. PRIMERO: Buscar en cache localStorage
-          if (waveformCache[cacheKeyUrl]) {
+          if (waveformCache[cacheKeyStable]) {
             console.log(` CACHE HIT para ${trackKey}`)
             newLoadingStates[trackKey] = 'cached'
-            newWaveforms[trackKey] = waveformCache[cacheKeyUrl]
+            newWaveforms[trackKey] = waveformCache[cacheKeyStable]
             
             // Crear elemento audio desde cache
             const audio = createConfiguredStemAudio(trackUrl)
@@ -1572,6 +2242,8 @@ export default function Home() {
               });
               setIsPlaying(false);
               setCurrentTime(0);
+              playbackWallOriginProjectSecRef.current = 0
+              playbackWallOriginPerfRef.current = performance.now()
             })
             
             newAudioElements[trackKey] = audio
@@ -1636,8 +2308,10 @@ export default function Home() {
             });
             setIsPlaying(false);
             setCurrentTime(0);
+            playbackWallOriginProjectSecRef.current = 0
+            playbackWallOriginPerfRef.current = performance.now()
           })
-          
+
           // Esperar a que el audio esté listo (sin audio.load(): ya se dispara al asignar src; load() duplicado provoca errores espurios)
           await new Promise((resolve, reject) => {
             const onCanPlay = () => {
@@ -1721,7 +2395,7 @@ export default function Home() {
             
             
             // 3. GUARDAR en cache persistente para próximas veces
-            const newPersistentCache = { ...waveformCache, [cacheKeyUrl]: waveformData }
+            const newPersistentCache = { ...waveformCache, [cacheKeyStable]: waveformData }
             setWaveformCache(newPersistentCache)
             try {
               localStorage.setItem('waveform-cache', JSON.stringify(newPersistentCache))
@@ -1731,7 +2405,7 @@ export default function Home() {
               console.warn('Cache lleno, limpiando cache viejo...')
               localStorage.removeItem('waveform-cache')
               try {
-                localStorage.setItem('waveform-cache', JSON.stringify({ [cacheKeyUrl]: waveformData }))
+                localStorage.setItem('waveform-cache', JSON.stringify({ [cacheKeyStable]: waveformData }))
                 console.log(` GUARDADO en cache (después de limpiar) para ${trackKey}`)
               } catch (e2) {
                 console.error('No se pudo guardar en cache:', e2)
@@ -1755,6 +2429,18 @@ export default function Home() {
       setAudioElements(newAudioElements)
       setWaveforms(newWaveforms)
       setTrackLoadingStates(newLoadingStates)
+
+      let maxAudioDur = 0
+      for (const a of Object.values(newAudioElements)) {
+        maxAudioDur = Math.max(maxAudioDur, Number(a.duration) || 0)
+      }
+      const songSec =
+        typeof song.durationSeconds === 'number' && Number.isFinite(song.durationSeconds)
+          ? song.durationSeconds
+          : 0
+      if (maxAudioDur > 0 || songSec > 0) {
+        setDuration((d) => Math.max(d, maxAudioDur, songSec))
+      }
       
       // NO resetear el tiempo si ya había audios cargados
       // Esto previene que se reinicie cuando se recarga por cambios de color u otras actualizaciones
@@ -1777,20 +2463,25 @@ export default function Home() {
 
     const updateTime = () => {
       // NO actualizar si acabamos de hacer un seek manual (últimos 1500ms)
-      const timeSinceLastSeek = Date.now() - lastSeekTimeRef.current;
+      const timeSinceLastSeek = Date.now() - lastSeekTimeRef.current
       if (timeSinceLastSeek < 1500) {
-        return;
+        return
       }
-      
-      // Referencia de tiempo: un stem musical (no el click, que puede llevar offset de fase).
-      const masterAudio =
-        Object.entries(audioElements).find(([k]) => !isClickStemKey(k))?.[1] ??
-        Object.values(audioElements)[0];
-      if (masterAudio) {
-        setCurrentTime(masterAudio.currentTime);
-        setDuration(masterAudio.duration || 0);
+
+      const dCap = Math.max(0.01, durationRef.current || 3600)
+      const projectT = Math.max(0, Math.min(getTransportProjectTimeFromWallClock(), dCap))
+      setCurrentTime(projectT)
+
+      let maxDur = 0
+      for (const a of Object.values(audioElements)) {
+        maxDur = Math.max(maxDur, Number(a?.duration) || 0)
       }
-    };
+      if (maxDur > 0) {
+        setDuration(maxDur)
+      }
+
+      resyncStemAudioFilePositions(projectT, true)
+    }
 
     // Actualizar tiempo cada 100ms
     const interval = setInterval(updateTime, 100);
@@ -2534,7 +3225,7 @@ export default function Home() {
 
       {/* Song Modal */}
       {showSongModal && selectedSong && (
-        <div className="fixed inset-0 bg-black bg-opacity-95 flex items-center justify-center z-50 overflow-hidden py-0 px-0 md:p-0">
+        <div className="fixed inset-0 z-50 flex flex-col items-stretch overflow-hidden bg-black bg-opacity-95 py-0 px-0 md:p-0">
           
           {/* Mobile Orientation Overlay - Only shows in portrait on mobile */}
           <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#050505] p-6 text-center md:hidden portrait:flex landscape:hidden">
@@ -2568,7 +3259,7 @@ export default function Home() {
             </button>
           </div>
 
-          <div className="hidden landscape:flex md:flex h-auto min-h-screen md:h-screen w-full max-w-none flex-col border-none bg-[#0c0c0c] relative shadow-2xl overflow-hidden md:rounded-none">
+          <div className="relative hidden min-h-0 w-full max-w-none flex-1 flex-col overflow-hidden border-none bg-[#0c0c0c] shadow-2xl landscape:flex md:flex md:min-h-0 md:h-dvh md:max-h-dvh md:rounded-none">
             {/* Botón de cerrar Absoluto para móvil */}
             <button
               onClick={() => {
@@ -2590,49 +3281,45 @@ export default function Home() {
                 setCurrentPlayingSong(null)
                 closeSongModal()
               }}
-              className="absolute top-2 right-2 z-[60] flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-md transition-all hover:bg-black/80 md:hidden"
+              className="absolute right-2 top-1 z-[60] flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-md transition-all hover:bg-black/80 md:hidden"
               aria-label="Cerrar mixer"
             >
               <X className="h-6 w-6" />
             </button>
 
-            {/* Header - 10% de la pantalla */}
-            <div className="bg-black min-h-[64px] flex items-center justify-between gap-2 px-2 py-1 md:h-[10vh] md:px-6">
-              {/* Controles de audio en el lado izquierdo */}
-              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+            {/* Header - transporte + BPM + sync (compacto: menos banda negra arriba) */}
+            <div className="shrink-0 bg-black px-2 py-1 md:px-4 md:py-1.5 flex min-h-0 flex-wrap items-center gap-x-1.5 gap-y-1 md:gap-x-2 md:gap-y-1">
+              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto no-scrollbar md:gap-1.5">
                 {/* Botón Play/Pause */}
                 <button
                   onClick={togglePlayPause}
-                  className="mobile-touch-target bg-black/40 backdrop-blur-md hover:bg-black/60 h-10 w-10 md:h-16 md:w-16 flex items-center justify-center transition-all duration-300 shadow-lg shrink-0"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center bg-black/40 shadow-lg backdrop-blur-md transition-all duration-300 hover:bg-black/60 md:h-11 md:w-11 md:min-h-0 md:min-w-0"
                 >
                   <img 
                     src={isPlaying ? "/images/pausa.png" : "/images/play.png"} 
                     alt={isPlaying ? "Pause" : "Play"}
-                    className="w-8 h-8 md:w-10 md:h-10"
+                    className="h-7 w-7 md:h-8 md:w-8"
                   />
                 </button>
                 
                 {/* Botón Stop */}
                 <button
                   onClick={() => {
-                    const off = clickSyncOffsetSecRef.current
-                    Object.entries(audioElements).forEach(([trackKey, audio]) => {
+                    Object.entries(audioElements).forEach(([, audio]) => {
                       audio.pause();
-                      if (isClickStemKey(trackKey)) {
-                        audio.currentTime = Math.max(0, -off);
-                      } else {
-                        audio.currentTime = 0;
-                      }
                     });
+                    resyncStemAudioFilePositions(0, false);
+                    playbackWallOriginProjectSecRef.current = 0
+                    playbackWallOriginPerfRef.current = performance.now()
                     setIsPlaying(false);
                     setCurrentTime(0);
                   }}
-                  className="mobile-touch-target bg-black/40 backdrop-blur-md hover:bg-black/60 h-10 w-10 md:h-16 md:w-16 flex items-center justify-center transition-all duration-300 shadow-lg shrink-0"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center bg-black/40 shadow-lg backdrop-blur-md transition-all duration-300 hover:bg-black/60 md:h-11 md:w-11 md:min-h-0 md:min-w-0"
                 >
                   <img 
                     src="/images/stop.png" 
                     alt="Stop"
-                    className="w-8 h-8 md:w-10 md:h-10"
+                    className="h-7 w-7 md:h-8 md:w-8"
                   />
                 </button>
                 
@@ -2664,12 +3351,12 @@ export default function Home() {
                 <div className="flex items-center gap-1 md:gap-3 shrink-0">
                   <button
                     onClick={toggleMute}
-                    className="mobile-touch-target bg-black/40 backdrop-blur-md hover:bg-black/60 h-10 w-10 md:h-16 md:w-16 flex items-center justify-center transition-all duration-300 shadow-lg"
+                    className="flex h-10 w-10 items-center justify-center bg-black/40 shadow-lg backdrop-blur-md transition-all duration-300 hover:bg-black/60 md:h-11 md:w-11 md:min-h-0 md:min-w-0"
                   >
                     <img 
                       src={isMuted ? "/images/unmute.png" : "/images/mute.png"} 
                       alt={isMuted ? "Unmute" : "Mute"}
-                      className="w-8 h-8 md:w-10 md:h-10"
+                      className="h-7 w-7 md:h-8 md:w-8"
                     />
                   </button>
                   
@@ -2691,37 +3378,32 @@ export default function Home() {
                   </div>
                 </div>
               </div>
-              
 
+              <div className="flex w-full shrink-0 items-center justify-between gap-2 sm:w-auto sm:justify-end md:flex-initial">
               {/* BPM and Key Display */}
               <BpmDisplay 
                 songId={selectedSong?.id}
                 originalUrl={selectedSong?.fileUrl}
                 headerBpm={selectedSong?.bpm}
                 headerKey={selectedSong?.key}
+                compact
               />
 
               <button
                 type="button"
                 onClick={() => void handleSyncClick()}
-                disabled={
-                  clickSyncBusy ||
-                  !selectedSong?.stems ||
-                  !Object.keys(selectedSong.stems).some(isClickStemKey)
-                }
-                className="ml-2 shrink-0 flex items-center gap-1.5 rounded-md border border-amber-600/80 bg-amber-950/80 px-2.5 py-1.5 text-[11px] font-bold text-amber-100 shadow-md transition hover:bg-amber-900/90 disabled:cursor-not-allowed disabled:opacity-40 md:px-3 md:text-xs"
-                title="Analiza batería/mezcla alrededor del punto de reproducción y alinea la fase del click al BPM de la canción."
+                disabled={clickSyncBusy}
+                className="flex shrink-0 items-center gap-1.5 rounded-md border-2 border-amber-500 bg-amber-600/90 px-2.5 py-2 text-[11px] font-bold uppercase tracking-wide text-white shadow-lg shadow-amber-900/30 transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:border-gray-600 disabled:bg-gray-800 disabled:text-gray-400 disabled:shadow-none md:px-3 md:text-xs"
+                title="Alinea la fase del click con la batería/mezcla (necesita stem click_* y BPM de la canción)."
               >
                 {clickSyncBusy ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
                 ) : (
-                  <RefreshCw className="h-3.5 w-3.5" />
+                  <RefreshCw className="h-4 w-4 shrink-0" />
                 )}
-                Sincronizar click
+                Sync click
               </button>
 
-              {/* Botón Metronome - REMOVED */}
-              
               {/* Botón de cerrar en el lado derecho - Oculto en móvil ya que usamos el absoluto */}
               <button
                 onClick={() => {
@@ -2742,64 +3424,130 @@ export default function Home() {
                   setCurrentPlayingSong(null)
                   closeSongModal()
                 }}
-                className="hidden md:block text-gray-400 hover:text-white"
+                className="hidden shrink-0 text-gray-400 hover:text-white md:block"
               >
                 <X className="w-6 h-6" />
               </button>
+              </div>
             </div>
-            
-            
-            <div className="flex-none md:flex-1 flex flex-col md:flex-row h-[121px] md:h-[60vh] min-h-[121px] md:min-h-0 overflow-y-auto overflow-x-hidden relative border-b border-gray-800">
+
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              {/* Barra edición timeline: ancho completo para que cabecera izquierda y ondas sigan alineadas */}
+              <div className="flex w-full shrink-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 border-b border-gray-800 bg-[#0c0c0c] px-2 py-0.5 md:gap-2 md:px-2.5 md:py-1">
+                <div className="flex flex-wrap items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setSnapEnabled((v) => !v)}
+                    className={`flex h-7 items-center gap-0.5 rounded border px-1.5 text-[10px] font-semibold uppercase tracking-wide transition md:h-8 md:px-2 md:text-[11px] ${
+                      snapEnabled
+                        ? 'border-teal-600 bg-teal-900/50 text-teal-100'
+                        : 'border-gray-700 bg-black/40 text-gray-500'
+                    }`}
+                    title={snapEnabled ? 'Snap al grid activado' : 'Snap desactivado (arrastre libre)'}
+                  >
+                    <Magnet className="h-3.5 w-3.5 shrink-0 md:h-4 md:w-4" aria-hidden />
+                    Snap
+                  </button>
+                  <label className="flex items-center gap-1 text-[9px] text-gray-400 md:text-[10px]">
+                    <span className="hidden sm:inline">Grid</span>
+                    <select
+                      aria-label="Resolución del snap"
+                      value={timelineSnapGrid}
+                      onChange={(e) => setTimelineSnapGrid(e.target.value as TimelineSnapGrid)}
+                      className="max-w-[5.5rem] cursor-pointer rounded border border-gray-600 bg-black px-1 py-0.5 text-[9px] text-gray-200 md:max-w-[6.5rem] md:text-[10px]"
+                    >
+                      <option value="off">Off</option>
+                      <option value="1/16">1/16</option>
+                      <option value="1/8">1/8</option>
+                      <option value="beat">Pulso</option>
+                      <option value="bar">Compás</option>
+                    </select>
+                  </label>
+                </div>
+                <label className="flex items-center gap-1 border-l border-gray-700 pl-2 text-[9px] text-gray-400 md:text-[10px]">
+                  <span className="hidden sm:inline whitespace-nowrap">Compás regla</span>
+                  <select
+                    aria-label="Armadura para la regla en modo compases"
+                    value={timelineMeter}
+                    onChange={(e) => setTimelineMeter(e.target.value as TimelineMeter)}
+                    className="cursor-pointer rounded border border-gray-600 bg-black px-1 py-0.5 text-[9px] text-gray-200 md:text-[10px]"
+                  >
+                    <option value="4/4">4/4</option>
+                    <option value="3/4">3/4</option>
+                    <option value="2/4">2/4</option>
+                    <option value="6/8">6/8</option>
+                  </select>
+                </label>
+                <div className="ml-auto flex min-w-0 flex-wrap items-center gap-1 border-l border-gray-700 pl-2 md:gap-1.5">
+                  <span className="hidden shrink-0 text-[9px] font-medium uppercase tracking-wide text-gray-500 sm:inline md:text-[10px]">
+                    Zoom
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setHorizontalZoom((z) => Math.max(1, Math.round((z - 0.25) * 20) / 20))}
+                    className="flex h-7 shrink-0 items-center justify-center rounded border border-gray-600 bg-black/50 p-1 text-gray-300 hover:bg-gray-800 hover:text-white md:h-8"
+                    title="Alejar timeline"
+                    aria-label="Alejar zoom horizontal"
+                  >
+                    <ZoomOut className="h-3.5 w-3.5 md:h-4 md:w-4" aria-hidden />
+                  </button>
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    step={0.1}
+                    value={horizontalZoom}
+                    onChange={(e) => setHorizontalZoom(parseFloat(e.target.value))}
+                    className="h-1 w-20 min-w-[4.5rem] flex-1 cursor-pointer appearance-none rounded-lg bg-gray-700 accent-amber-400 sm:w-28 md:w-36"
+                    aria-label="Zoom horizontal del timeline"
+                    title="Ancho del timeline (1×–10×). Zoom con la rueda solo sobre la regla TIME/COMPÁS. Con zoom mayor que 1×: rueda sobre las ondas desplaza; Shift+rueda también."
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setHorizontalZoom((z) => Math.min(10, Math.round((z + 0.25) * 20) / 20))}
+                    className="flex h-7 shrink-0 items-center justify-center rounded border border-gray-600 bg-black/50 p-1 text-gray-300 hover:bg-gray-800 hover:text-white md:h-8"
+                    title="Acercar timeline"
+                    aria-label="Acercar zoom horizontal"
+                  >
+                    <ZoomIn className="h-3.5 w-3.5 md:h-4 md:w-4" aria-hidden />
+                  </button>
+                  <span className="shrink-0 font-mono text-[9px] text-amber-400/90 tabular-nums md:text-[10px]" title="Nivel de zoom">
+                    {horizontalZoom < 10
+                      ? `${Math.round(horizontalZoom * 10) / 10}×`
+                      : `${Math.round(horizontalZoom)}×`}
+                  </span>
+                </div>
+              </div>
+            <div
+              className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden border-b border-gray-800 md:flex-row ${
+                mixerToolsCollapsed
+                  ? 'min-h-0 flex-1 overflow-y-auto'
+                  : 'flex flex-1 min-h-[121px] overflow-y-auto overflow-x-hidden md:min-h-0'
+              }`}
+            >
               {/* Área fija de controles a la izquierda */}
-              <div className="w-[130px] md:w-52 border-r border-gray-600 flex flex-col h-auto flex-shrink-0">
+              <div className="w-[130px] md:w-52 flex-shrink-0 flex flex-col h-auto border-r border-gray-600">
                 {/* Cabecera del Timeline (Espacio vacío para alineación) */}
-                <div className="h-8 w-full border-b border-gray-700 bg-black/40 flex items-center justify-between px-2 md:px-4 shrink-0">
-                   <div className="flex items-center gap-1 bg-[#1a1a1a] p-0.5 rounded border border-gray-700">
+                <div className="flex h-10 w-full shrink-0 items-center justify-between border-b border-gray-700 bg-black/40 px-2 md:h-11 md:px-3">
+                   <div className="flex items-center gap-1.5 bg-[#1a1a1a] p-1 rounded border border-gray-700">
                      <button
                        onClick={() => setTimeFormat('time')}
-                       className={`text-[9px] font-bold px-2 py-0.5 rounded transition-all ${timeFormat === 'time' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
+                       className={`text-[9px] md:text-[10px] font-bold px-2 py-1 md:px-2.5 md:py-1.5 rounded transition-all ${timeFormat === 'time' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
                        title="Formato de Tiempo (Minutos:Segundos)"
                      >
                        ⏱️ TIME
                      </button>
                      <button
                        onClick={() => setTimeFormat('beats')}
-                       className={`text-[9px] font-bold px-2 py-0.5 rounded transition-all ${timeFormat === 'beats' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
+                       className={`text-[9px] md:text-[10px] font-bold px-2 py-1 md:px-2.5 md:py-1.5 rounded transition-all ${timeFormat === 'beats' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
                        title="Formato de Compases (Measures/Beats)"
                      >
                        🎵 COMPÁS
                      </button>
                    </div>
-                   
-                   {/* Zoom Controls */}
-                   <div className="hidden md:flex items-center gap-1.5 ml-2">
-                     <button 
-                       onClick={() => setHorizontalZoom(prev => Math.max(1, prev - 0.5))}
-                       className="text-gray-600 hover:text-white transition-colors"
-                       title="Zoom Out (Ctrl + Scroll)"
-                     >
-                        <ZoomOut size={10} />
-                     </button>
-                     <input 
-                       type="range"
-                       min="1"
-                       max="10"
-                       step="0.1"
-                       value={horizontalZoom}
-                       onChange={(e) => setHorizontalZoom(parseFloat(e.target.value))}
-                       className="w-12 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500"
-                     />
-                     <button 
-                       onClick={() => setHorizontalZoom(prev => Math.min(10, prev + 0.5))}
-                       className="text-gray-600 hover:text-white transition-colors"
-                       title="Zoom In (Ctrl + Scroll)"
-                     >
-                        <ZoomIn size={10} />
-                     </button>
-                   </div>
                 </div>
 
-                {(trackOrder.length > 0 ? trackOrder : Object.keys(selectedSong?.stems || {}).filter(k => k !== 'metronome')).map((trackKey, index) => {
+                {displayedTrackKeys.map((trackKey, index) => {
                   const trackUrl = (selectedSong?.stems as any)?.[trackKey];
                   const onsetValue = trackOnsets[trackKey];
                   // Colores grises escalados para cada track (fallback)
@@ -2834,25 +3582,73 @@ export default function Home() {
                           name: trackKey,
                         };
                     
+                    const rowH = trackRowHeightsPx[trackKey] ?? DEFAULT_TRACK_ROW_HEIGHT_PX
+                    
                     // Si es el track del metronome, renderizar componente especial - REMOVED
                     
                     return (
                       <div 
                         key={trackKey} 
-                        draggable
-                        onDragStart={() => handleTrackDragStart(index)}
+                        onPointerDown={(e) => {
+                          if ((e.target as HTMLElement).closest('button, input, textarea, select, a, [data-track-resize-handle]'))
+                            return
+                          setSelectedEditTrackKey(trackKey)
+                        }}
                         onDragOver={(e) => handleTrackDragOver(e, index)}
-                        onDragEnd={handleTrackDragEnd}
-                        className={`h-[60px] min-h-[60px] bg-gray-700/50 border-b border-gray-600/50 flex flex-col items-start justify-between p-1.5 pl-2.5 shrink-0 transition-all duration-200 ${draggedIndex === index ? 'opacity-40 scale-[0.98]' : 'opacity-100'}`}
-                        style={{ cursor: 'grab' }}
+                        className={`relative shrink-0 overflow-hidden bg-gray-700/50 border-b border-gray-600/50 flex flex-col items-start justify-between p-1.5 pl-2.5 transition-all duration-200 ${
+                          selectedEditTrackKey === trackKey ? 'ring-2 ring-teal-400/80 ring-inset' : ''
+                        } ${draggedIndex === index ? 'opacity-40 scale-[0.98]' : 'opacity-100'}`}
+                        style={{
+                          height: rowH,
+                          minHeight: MIN_TRACK_ROW_HEIGHT_PX,
+                        }}
                       >
                         {/* Parte superior con nombre y color */}
                         <div className="flex items-start justify-between w-full">
                           <div className="flex flex-col min-w-0">
-                            <div className="flex items-center gap-2">
-                              {/* Grab Handle - Estilo DAW */}
-                              <div className="text-gray-500 opacity-60 hover:opacity-100 transition-opacity cursor-grab shrink-0">
-                                <GripVertical size={12} strokeWidth={2.5} />
+                            <div className="flex items-center gap-1 md:gap-1.5">
+                              <div className="flex shrink-0 items-center gap-0.5">
+                                <button
+                                  type="button"
+                                  title="Subir pista"
+                                  aria-label="Subir pista"
+                                  disabled={index <= 0}
+                                  onClick={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    moveTrack(trackKey, -1)
+                                  }}
+                                  className="rounded p-0.5 text-gray-500 hover:bg-gray-600 hover:text-white disabled:opacity-25 disabled:hover:bg-transparent"
+                                >
+                                  <ChevronUp className="h-3.5 w-3.5" strokeWidth={2.5} />
+                                </button>
+                                <div
+                                  draggable
+                                  onDragStart={(e) => {
+                                    e.dataTransfer.effectAllowed = 'move'
+                                    e.dataTransfer.setData('text/plain', trackKey)
+                                    handleTrackDragStart(index)
+                                  }}
+                                  onDragEnd={handleTrackDragEnd}
+                                  className="cursor-grab touch-none rounded p-0.5 text-gray-500 opacity-80 hover:bg-gray-600/80 hover:opacity-100 active:cursor-grabbing"
+                                  title="Arrastrar para reordenar"
+                                >
+                                  <GripVertical className="h-3.5 w-3.5" strokeWidth={2.5} />
+                                </div>
+                                <button
+                                  type="button"
+                                  title="Bajar pista"
+                                  aria-label="Bajar pista"
+                                  disabled={index >= displayedTrackKeys.length - 1}
+                                  onClick={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    moveTrack(trackKey, 1)
+                                  }}
+                                  className="rounded p-0.5 text-gray-500 hover:bg-gray-600 hover:text-white disabled:opacity-25 disabled:hover:bg-transparent"
+                                >
+                                  <ChevronDown className="h-3.5 w-3.5" strokeWidth={2.5} />
+                                </button>
                               </div>
                               <span className="text-white text-[9px] md:text-xs font-bold truncate leading-none tracking-tight">{config.name}</span>
                               {trackUrl === undefined ? (
@@ -2959,30 +3755,82 @@ export default function Home() {
                             </div>
                           </div>
                         )}
+                        <div
+                          data-track-resize-handle
+                          role="separator"
+                          aria-orientation="horizontal"
+                          title="Arrastra: cambiar altura de la fila (la onda se recorta al achicar)."
+                          className="absolute bottom-0 left-0 right-0 z-30 h-2.5 shrink-0 cursor-ns-resize border-t border-transparent hover:border-teal-500/40 hover:bg-black/30"
+                          onPointerDown={(e) => {
+                            if (e.button !== 0) return
+                            e.preventDefault()
+                            e.stopPropagation()
+                            bindTrackRowResizePointer(
+                              e.currentTarget as HTMLDivElement,
+                              trackKey,
+                              e.pointerId,
+                              e.clientY,
+                              trackRowHeightsPx[trackKey] ?? DEFAULT_TRACK_ROW_HEIGHT_PX,
+                            )
+                          }}
+                        />
                       </div>
                     );
                   })}
               </div>
-              
+
               {/* Área de tracks (sin controles) - Asegurar scroll horizontal en móvil */}
-              <div 
+              <div
                 ref={scrollContainerRef}
-                className="flex-1 overflow-x-auto overflow-y-hidden no-scrollbar bg-gray-900 border-l border-gray-800 md:border-none"
+                className="track-timeline-scroll block min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden bg-gray-900 border-l border-gray-800 md:border-none"
               >
-                <div 
-                  className="h-auto flex flex-col"
-                  style={{ width: `${horizontalZoom * 100}%`, minWidth: '100%' }}
+                <div
+                  className="flex h-auto min-h-0 w-full flex-col"
+                  style={{
+                    width: `${horizontalZoom * 100}%`,
+                    minWidth: '100%',
+                  }}
                 >
-                  {/* Timeline Ruler - Estilo DAW Profesional */}
-                  <div className="h-8 w-full border-b border-gray-600 bg-[#151515] relative shrink-0 z-30">
+                  {/* Timeline Ruler - Estilo DAW Profesional (rueda aquí = zoom horizontal) */}
+                  <div
+                    ref={rulerBarRef}
+                    className="flex h-10 w-full cursor-pointer touch-none select-none border-b border-gray-600 bg-[#151515] relative shrink-0 z-30 md:h-11"
+                    title="Clic o arrastre: ir a ese instante. Rueda: zoom horizontal."
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return
+                      e.preventDefault()
+                      const el = e.currentTarget as HTMLDivElement
+                      const dur = Math.max(0.01, Number(duration || selectedSong?.duration || 1))
+                      const applyFromClientX = (clientX: number) => {
+                        const rect = el.getBoundingClientRect()
+                        const frac = (clientX - rect.left) / Math.max(1, rect.width)
+                        seekMixerToProjectSec(frac * dur)
+                      }
+                      applyFromClientX(e.clientX)
+                      el.setPointerCapture(e.pointerId)
+                      const onMove = (ev: PointerEvent) => applyFromClientX(ev.clientX)
+                      const onEnd = (ev: PointerEvent) => {
+                        try {
+                          el.releasePointerCapture(ev.pointerId)
+                        } catch {
+                          /* ignore */
+                        }
+                        el.removeEventListener('pointermove', onMove)
+                        el.removeEventListener('pointerup', onEnd)
+                        el.removeEventListener('pointercancel', onEnd)
+                      }
+                      el.addEventListener('pointermove', onMove)
+                      el.addEventListener('pointerup', onEnd)
+                      el.addEventListener('pointercancel', onEnd)
+                    }}
+                  >
                     {(() => {
                       const markers = [];
                       const songDuration = Number(duration || selectedSong?.duration || 0);
                       const currentBpm = Number(selectedSong?.bpm || 120);
                       
-                      // 1 compás (measure) en 4/4 = 4 beats
-                      const beatDuration = 60 / currentBpm;
-                      const measureDuration = beatDuration * 4;
+                      // Duración de compás según BPM y armadura elegida (regla en modo compases)
+                      const measureDuration = measureDurationFromMeter(currentBpm, timelineMeter);
                       
                       if (songDuration > 0) {
                         if (timeFormat === 'time') {
@@ -3025,7 +3873,7 @@ export default function Home() {
                       return markers.map((m, i) => (
                         <div 
                           key={i} 
-                          className={`absolute top-0 h-full border-l transition-colors duration-300 ${m.is30s ? 'border-white/30' : m.is15s ? 'border-white/10' : 'border-white/5'}`}
+                          className={`pointer-events-none absolute top-0 h-full border-l transition-colors duration-300 ${m.is30s ? 'border-white/30' : m.is15s ? 'border-white/10' : 'border-white/5'}`}
                           style={{ left: `${m.pos}%` }}
                         >
                           {/* Marca vertical con altura jerárquica */}
@@ -3049,7 +3897,7 @@ export default function Home() {
                     
                     {/* Indicador de Tiempo Actual (Línea de Tiempo) con efecto de luz DAW */}
                     <div 
-                      className="absolute top-0 bottom-0 w-[1.5px] bg-yellow-400 z-40"
+                      className="pointer-events-none absolute top-0 bottom-0 z-40 w-[1.5px] bg-yellow-400"
                       style={{ 
                         left: `${(currentTime / Math.max(Number(duration || selectedSong?.duration || 1), 0.1)) * 100}%`,
                         boxShadow: '0 0 12px 2px rgba(234,179,8,0.7)'
@@ -3057,7 +3905,7 @@ export default function Home() {
                     />
                   </div>
 
-                  {(trackOrder.length > 0 ? trackOrder : Object.keys(selectedSong?.stems || {}).filter(k => k !== 'metronome')).map((trackKey, index) => {
+                  {displayedTrackKeys.map((trackKey, index) => {
                     const trackUrl = (selectedSong?.stems as any)?.[trackKey];
                     // Colores grises escalados para cada track (fallback)
                     const grayColors = [
@@ -3090,68 +3938,146 @@ export default function Home() {
                           name: trackKey,
                         };
                     
+                    const durForClip = Math.max(
+                      0.01,
+                      Number(duration || 0),
+                      Number(selectedSong?.durationSeconds || 0),
+                      Number(audioElements[trackKey]?.duration || 0),
+                    )
+                    const showWaveGestures =
+                      trackUrl !== null &&
+                      ((waveforms[trackKey]?.length ?? 0) > 0 || !!audioElements[trackKey])
+                    const clipOffSec = trackClipOffsetSec[trackKey] ?? 0
+                    const stemDurSec = Math.max(
+                      0.01,
+                      Number(audioElements[trackKey]?.duration || 0) || durForClip,
+                    )
+                    const sourceInSec = trackClipSourceInSec[trackKey] ?? 0
+                    const sourceOutSec = resolveSourceOutSec(
+                      trackClipSourceOutSec[trackKey],
+                      stemDurSec,
+                    )
+                    const audibleSpanSec = Math.max(
+                      MIN_STEM_CLIP_SPAN_SEC,
+                      sourceOutSec - sourceInSec,
+                    )
+                    /** Timeline del proyecto (misma base que la regla): inicio del clip + duración visible. */
+                    const clipStartFrac = Math.min(
+                      1,
+                      Math.max(0, clipOffSec / durForClip),
+                    )
+                    const spanSeconds = Math.min(
+                      audibleSpanSec,
+                      Math.max(0, durForClip - clipOffSec),
+                    )
+                    const clipWidthFracRaw = spanSeconds / durForClip
+                    const clipWidthFrac = Math.max(
+                      0.004,
+                      Math.min(clipWidthFracRaw, 1 - clipStartFrac + 1e-9),
+                    )
+
+                    const peaksTrim = slicePeaksForSourceWindow(
+                      waveforms[trackKey],
+                      sourceInSec,
+                      sourceOutSec,
+                      stemDurSec,
+                    )
+
+                    const rowH = trackRowHeightsPx[trackKey] ?? DEFAULT_TRACK_ROW_HEIGHT_PX
+
                     return (
                       <div 
+                        data-timeline-track-row={trackKey}
                         key={trackKey} 
-                        draggable
-                        onDragStart={() => handleTrackDragStart(index)}
+                        onPointerDown={(e) => {
+                          if (
+                            (e.target as HTMLElement).closest(
+                              'button, input, textarea, select, a, [data-track-resize-handle], [data-clip-trim-edge], [data-clip-fade-handle]',
+                            )
+                          )
+                            return
+                          setSelectedEditTrackKey(trackKey)
+                        }}
                         onDragOver={(e) => handleTrackDragOver(e, index)}
-                        onDragEnd={handleTrackDragEnd}
-                        className={`h-[60px] min-h-[60px] w-full shrink-0 transition-opacity duration-200 ${draggedIndex === index ? 'opacity-40' : 'opacity-100'}`}
-                        style={{ cursor: 'grab' }}
+                        className={`group/row relative w-full shrink-0 overflow-hidden transition-opacity duration-200 ${
+                          selectedEditTrackKey === trackKey ? 'ring-2 ring-teal-400/70 ring-inset' : ''
+                        } ${draggedIndex === index ? 'opacity-40' : 'opacity-100'}`}
+                        style={{
+                          height: rowH,
+                          minHeight: MIN_TRACK_ROW_HEIGHT_PX,
+                        }}
                       >
                         {/* Track independiente */}
-                        <div className={`h-full ${trackBackgroundColor} border-b border-gray-700 min-w-0 relative overflow-visible`}>
-                          {/* Waveform Container - Sin restricciones */}
-                          <div className="w-full h-full relative flex items-center justify-center px-0 overflow-visible">
-                            {/* Mostrar mensaje especial para track temporal de generación */}
-                            {trackUrl === null ? (
-                              <div className="flex items-center justify-center w-full h-full">
-                                <div className="text-center">
-                                  <div className="text-gray-300 text-sm font-bold animate-pulse">
-                                    Generando Track...
-                                  </div>
-                                  <div className="text-gray-500 text-xs mt-1">
-                                    Detectando onsets y calculando sincronización
-                                  </div>
-                                </div>
-                              </div>
-                            ) : waveforms[trackKey] && waveforms[trackKey].length > 0 ? (
-                              <div className="w-full h-full relative flex items-center justify-center">
+                        {/* Lane estilo DAW: fondo oscuro fijo; el clip coloreado es solo el bloque inicio→fin */}
+                        <div className="relative h-full min-w-0 overflow-hidden border-b border-gray-800 bg-[#0a0a0a]">
+                          {trackUrl !== null &&
+                          waveforms[trackKey] &&
+                          waveforms[trackKey].length > 0 ? (
+                            <div
+                              data-clip-body
+                              className={`absolute inset-y-0 z-[1] flex overflow-hidden rounded-md border border-black/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] ring-1 ring-black/30 transition-shadow group-hover/row:ring-teal-500/40 ${trackBackgroundColor}`}
+                              style={{
+                                left: `${clipStartFrac * 100}%`,
+                                width: `${clipWidthFrac * 100}%`,
+                                minWidth: '6px',
+                              }}
+                              title="Clip: arrastra bordes para trim no destructivo; arrastra el centro para mover."
+                            >
+                              <div className="flex h-full w-full min-w-0 items-center justify-center">
                                 {waveformStyle === 'bars' && (
-                                  // Waveform profesional estilo DAW
-                                  <div className="flex items-center justify-center h-full w-full relative">
-                                    <svg 
-                                      width="100%" 
-                                      height="100%" 
+                                  <div className="relative flex h-full w-full min-w-0 items-center justify-center">
+                                    <svg
+                                      width="100%"
+                                      height="100%"
                                       viewBox="0 0 800 60"
                                       className="absolute inset-0"
                                       preserveAspectRatio="none"
                                     >
                                       <defs>
-                                        <linearGradient id={`waveGradient-${trackKey}`} x1="0%" y1="0%" x2="0%" y2="100%">
-                                          <stop offset="0%" style={{stopColor: '#FFFFFF', stopOpacity: 0.9}} />
-                                          <stop offset="100%" style={{stopColor: '#FFFFFF', stopOpacity: 0.9}} />
+                                        <linearGradient
+                                          id={`waveGradient-${trackKey}`}
+                                          x1="0%"
+                                          y1="0%"
+                                          x2="0%"
+                                          y2="100%"
+                                        >
+                                          <stop
+                                            offset="0%"
+                                            style={{ stopColor: '#FFFFFF', stopOpacity: 0.9 }}
+                                          />
+                                          <stop
+                                            offset="100%"
+                                            style={{ stopColor: '#FFFFFF', stopOpacity: 0.9 }}
+                                          />
                                         </linearGradient>
                                       </defs>
-                                      
-                                      {/* Línea central */}
-                                      <line x1="2" y1="30" x2="800" y2="30" stroke="#374151" strokeWidth="0.5" opacity="0.3"/>
-                                      
-                                      {/* Waveform rellena profesional */}
+
+                                      <line
+                                        x1="2"
+                                        y1="30"
+                                        x2="800"
+                                        y2="30"
+                                        stroke="#374151"
+                                        strokeWidth="0.5"
+                                        opacity="0.3"
+                                      />
+
                                       <path
-                                        d={generateFilledWaveformPath(waveforms[trackKey])}
+                                        d={generateFilledWaveformPath(peaksTrim)}
                                         fill={`url(#waveGradient-${trackKey})`}
                                         stroke="none"
                                       />
-                                      
-                                      {/* Contorno de la waveform */}
+
                                       <path
-                                        d={waveforms[trackKey].map((value, index) => {
-                                          const x = 2 + (index / (waveforms[trackKey].length - 1)) * 798;
-                                          const y = 30 - (value * 25);
-                                          return index === 0 ? `M ${x},${y}` : `L ${x},${y}`;
-                                        }).join(' ')}
+                                        d={peaksTrim
+                                          .map((value, index) => {
+                                            const x =
+                                              2 +
+                                              (index / Math.max(1, peaksTrim.length - 1)) * 798
+                                            const y = 30 - value * 25
+                                            return index === 0 ? `M ${x},${y}` : `L ${x},${y}`
+                                          })
+                                          .join(' ')}
                                         fill="none"
                                         stroke="#FFFFFF"
                                         strokeWidth="1"
@@ -3159,13 +4085,17 @@ export default function Home() {
                                         strokeLinejoin="round"
                                         opacity="0.8"
                                       />
-                                      
+
                                       <path
-                                        d={waveforms[trackKey].map((value, index) => {
-                                          const x = 2 + (index / (waveforms[trackKey].length - 1)) * 798;
-                                          const y = 30 + (value * 25);
-                                          return index === 0 ? `M ${x},${y}` : `L ${x},${y}`;
-                                        }).join(' ')}
+                                        d={peaksTrim
+                                          .map((value, index) => {
+                                            const x =
+                                              2 +
+                                              (index / Math.max(1, peaksTrim.length - 1)) * 798
+                                            const y = 30 + value * 25
+                                            return index === 0 ? `M ${x},${y}` : `L ${x},${y}`
+                                          })
+                                          .join(' ')}
                                         fill="none"
                                         stroke="#FFFFFF"
                                         strokeWidth="1"
@@ -3177,45 +4107,155 @@ export default function Home() {
                                   </div>
                                 )}
                               </div>
-                            ) : (
-                              <div className="text-gray-500 text-xs text-center">
-                                {isLoadingAudio ? 'Loading...' : 
-                                 audioElements[trackKey] ? 'Ready' : 
-                                 trackUrl ? 'Available' : 'Not available'}
+                              {/* Fades visuales (triángulos) */}
+                              {(() => {
+                                const fi = trackClipFadeInSec[trackKey] ?? 0
+                                const fo = trackClipFadeOutSec[trackKey] ?? 0
+                                const wIn = Math.min(48, (fi / audibleSpanSec) * 100)
+                                const wOut = Math.min(48, (fo / audibleSpanSec) * 100)
+                                return (
+                                  <>
+                                    {fi > 0.001 && (
+                                      <div
+                                        className="pointer-events-none absolute left-0 top-0 z-[5] h-3 bg-black/35"
+                                        style={{
+                                          width: `${wIn}%`,
+                                          clipPath: 'polygon(0 0, 100% 0, 0 100%)',
+                                        }}
+                                        aria-hidden
+                                      />
+                                    )}
+                                    {fo > 0.001 && (
+                                      <div
+                                        className="pointer-events-none absolute right-0 top-0 z-[5] h-3 bg-black/35"
+                                        style={{
+                                          width: `${wOut}%`,
+                                          clipPath: 'polygon(100% 0, 100% 100%, 0 0)',
+                                        }}
+                                        aria-hidden
+                                      />
+                                    )}
+                                  </>
+                                )
+                              })()}
+                            </div>
+                          ) : null}
+
+                          {trackUrl === null ? (
+                            <div className="relative z-[2] flex h-full w-full items-center justify-center">
+                              <div className="text-center">
+                                <div className="text-gray-300 text-sm font-bold animate-pulse">
+                                  Generando Track...
+                                </div>
+                                <div className="text-gray-500 text-xs mt-1">
+                                  Detectando onsets y calculando sincronización
+                                </div>
                               </div>
-                            )}
-                          </div>
+                            </div>
+                          ) : !waveforms[trackKey] || waveforms[trackKey].length === 0 ? (
+                            <div className="relative z-[2] flex h-full w-full items-center justify-center">
+                              <div className="text-gray-500 text-xs text-center">
+                                {isLoadingAudio
+                                  ? 'Loading...'
+                                  : audioElements[trackKey]
+                                    ? 'Ready'
+                                    : trackUrl
+                                      ? 'Available'
+                                      : 'Not available'}
+                              </div>
+                            </div>
+                          ) : null}
                           
                           {/* Línea de reproducción profesional sincronizada - CLICKEABLE */}
-                          {audioElements[trackKey] && duration > 0 && (
-                            <div 
-                              className="absolute inset-0 z-20 cursor-pointer"
-                              onClick={(e) => {
+                          {showWaveGestures && (
+                            <div
+                              className="absolute inset-0 z-[25] touch-none cursor-grab bg-transparent hover:bg-white/[0.03] active:cursor-grabbing"
+                              title="Selecciona la pista. Arrastra para mover el clip (respeta snap si está activo). Clic sin mover = ir a ese instante."
+                              onPointerDown={(e) => {
+                                if (e.button !== 0) return
+                                if ((e.target as HTMLElement).closest('[data-clip-trim-edge], [data-clip-fade-handle]')) return
+                                e.preventDefault()
+                                setSelectedEditTrackKey(trackKey)
                                 const rect = e.currentTarget.getBoundingClientRect()
-                                const x = e.clientX - rect.left
-                                const percentage = x / rect.width
-                                const newTime = percentage * duration
-                                
-                                // Marcar timestamp del seek manual
-                                lastSeekTimeRef.current = Date.now();
-                                const off = clickSyncOffsetSecRef.current
-                                
-                                Object.entries(audioElements).forEach(([trackKey, audio]) => {
-                                  const d = audio.duration || 0
-                                  const safe = Math.max(0, d - 0.02)
-                                  if (isClickStemKey(trackKey)) {
-                                    audio.currentTime = Math.max(0, Math.min(newTime - off, safe))
-                                  } else {
-                                    audio.currentTime = Math.max(0, Math.min(newTime, safe))
-                                  }
+                                const dur = Math.max(0.01, Number(duration || selectedSong?.duration || 1))
+                                clipDragRef.current = {
+                                  trackKey,
+                                  startClientX: e.clientX,
+                                  startClip: trackClipOffsetSecRef.current[trackKey] ?? 0,
+                                  width: Math.max(1, rect.width),
+                                  durationSec: dur,
+                                  moved: false,
+                                }
+                                ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
+                              }}
+                              onPointerMove={(e) => {
+                                const d = clipDragRef.current
+                                if (!d || d.trackKey !== trackKey) return
+                                const dx = e.clientX - d.startClientX
+                                if (Math.abs(dx) > 4) d.moved = true
+                                if (!d.moved) return
+                                const deltaSec = (dx / d.width) * d.durationSec
+                                const raw = d.startClip + deltaSec
+                                const bpm = Number(selectedSong?.bpm || 120)
+                                const grid = snapEnabledRef.current
+                                  ? timelineSnapGridRef.current
+                                  : 'off'
+                                const snapped =
+                                  grid === 'off' ? raw : snapSecondsToGrid(raw, bpm, grid)
+                                const next = clampClipStartSec(snapped, d.durationSec)
+                                setTrackClipOffsetSec((prev) => {
+                                  const nextMap = { ...prev, [trackKey]: next }
+                                  trackClipOffsetSecRef.current = nextMap
+                                  resyncStemAudioFilePositions(
+                                    getProjectTimelineFromRefs(),
+                                    isPlayingRef.current,
+                                  )
+                                  return nextMap
                                 })
-                                Object.values(originalAudioElements).forEach(audio => {
-                                  const d = audio.duration || 0
-                                  const safe = Math.max(0, d - 0.02)
+                              }}
+                              onPointerUp={(e) => {
+                                const el = e.currentTarget as HTMLDivElement
+                                const d = clipDragRef.current
+                                clipDragRef.current = null
+                                try {
+                                  el.releasePointerCapture(e.pointerId)
+                                } catch {
+                                  /* ignore */
+                                }
+                                if (!d || d.trackKey !== trackKey) return
+                                if (d.moved) {
+                                  lastSeekTimeRef.current = Date.now()
+                                  resyncStemAudioFilePositions(
+                                    getProjectTimelineFromRefs(),
+                                    isPlayingRef.current,
+                                  )
+                                  schedulePersistStemClipEdits()
+                                  return
+                                }
+                                const rect = el.getBoundingClientRect()
+                                const x = e.clientX - rect.left
+                                const newTime =
+                                  (x / Math.max(1, rect.width)) * d.durationSec
+                                lastSeekTimeRef.current = Date.now()
+                                resyncStemAudioFilePositions(newTime, isPlaying)
+                                Object.values(originalAudioElements).forEach((audio) => {
+                                  const df = audio.duration || 0
+                                  const safe = Math.max(0, df - 0.02)
                                   audio.currentTime = Math.max(0, Math.min(newTime, safe))
                                 })
                                 setCurrentTime(newTime)
-                                console.log('⏩ Seek a:', newTime.toFixed(2), 's')
+                                if (isPlaying) {
+                                  playbackWallOriginProjectSecRef.current = newTime
+                                  playbackWallOriginPerfRef.current = performance.now()
+                                }
+                              }}
+                              onPointerCancel={(e) => {
+                                clipDragRef.current = null
+                                try {
+                                  ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
+                                } catch {
+                                  /* ignore */
+                                }
                               }}
                             >
                               {/* Línea de reproducción principal */}
@@ -3245,6 +4285,133 @@ export default function Home() {
                               />
                             </div>
                           )}
+                          {showWaveGestures && (waveforms[trackKey]?.length ?? 0) > 0 && (
+                            <>
+                              <div
+                                data-clip-trim-edge="left"
+                                role="separator"
+                                aria-orientation="vertical"
+                                title="Trim inicio (no destructivo)"
+                                className={`pointer-events-auto absolute top-0 bottom-0 z-[42] w-2 cursor-ew-resize rounded-l-md bg-gradient-to-r from-black/80 to-transparent opacity-0 transition-opacity hover:opacity-100 ${
+                                  selectedEditTrackKey === trackKey ? 'opacity-90' : 'group-hover/row:opacity-70'
+                                }`}
+                                style={{
+                                  left: `${clipStartFrac * 100}%`,
+                                  transform: 'translateX(-50%)',
+                                }}
+                                onPointerDown={(e) => {
+                                  if (e.button !== 0) return
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  const clipBody = (e.currentTarget as HTMLElement).closest(
+                                    '[data-timeline-track-row]',
+                                  )?.querySelector('[data-clip-body]') as HTMLDivElement | null
+                                  if (!clipBody) return
+                                  bindClipTrimPointer(
+                                    e.currentTarget as HTMLDivElement,
+                                    trackKey,
+                                    'left',
+                                    e.pointerId,
+                                    e.clientX,
+                                    clipBody,
+                                  )
+                                }}
+                              />
+                              <div
+                                data-clip-trim-edge="right"
+                                role="separator"
+                                aria-orientation="vertical"
+                                title="Trim final (no destructivo)"
+                                className={`pointer-events-auto absolute top-0 bottom-0 z-[42] w-2 cursor-ew-resize rounded-r-md bg-gradient-to-l from-black/80 to-transparent opacity-0 transition-opacity hover:opacity-100 ${
+                                  selectedEditTrackKey === trackKey ? 'opacity-90' : 'group-hover/row:opacity-70'
+                                }`}
+                                style={{
+                                  left: `${(clipStartFrac + clipWidthFrac) * 100}%`,
+                                  transform: 'translateX(-50%)',
+                                }}
+                                onPointerDown={(e) => {
+                                  if (e.button !== 0) return
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  const clipBody = (e.currentTarget as HTMLElement).closest(
+                                    '[data-timeline-track-row]',
+                                  )?.querySelector('[data-clip-body]') as HTMLDivElement | null
+                                  if (!clipBody) return
+                                  bindClipTrimPointer(
+                                    e.currentTarget as HTMLDivElement,
+                                    trackKey,
+                                    'right',
+                                    e.pointerId,
+                                    e.clientX,
+                                    clipBody,
+                                  )
+                                }}
+                              />
+                              <div
+                                data-clip-fade-handle
+                                className="pointer-events-auto absolute top-0 z-[43] h-4 w-10 cursor-ns-resize hover:bg-white/15"
+                                title="Fade in: arrastra vertical"
+                                style={{
+                                  left: `calc(${clipStartFrac * 100}% + 2px)`,
+                                }}
+                                onPointerDown={(e) => {
+                                  if (e.button !== 0) return
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  bindClipFadePointer(
+                                    e.currentTarget as HTMLDivElement,
+                                    trackKey,
+                                    'in',
+                                    e.pointerId,
+                                    e.clientY,
+                                    audibleSpanSec,
+                                    trackClipFadeInSec[trackKey] ?? 0,
+                                  )
+                                }}
+                              />
+                              <div
+                                data-clip-fade-handle
+                                className="pointer-events-auto absolute top-0 z-[43] h-4 w-10 cursor-ns-resize hover:bg-white/15"
+                                title="Fade out: arrastra vertical"
+                                style={{
+                                  left: `calc(${(clipStartFrac + clipWidthFrac) * 100}% - 42px)`,
+                                }}
+                                onPointerDown={(e) => {
+                                  if (e.button !== 0) return
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  bindClipFadePointer(
+                                    e.currentTarget as HTMLDivElement,
+                                    trackKey,
+                                    'out',
+                                    e.pointerId,
+                                    e.clientY,
+                                    audibleSpanSec,
+                                    trackClipFadeOutSec[trackKey] ?? 0,
+                                  )
+                                }}
+                              />
+                            </>
+                          )}
+                          <div
+                            data-track-resize-handle
+                            role="separator"
+                            aria-orientation="horizontal"
+                            title="Arrastra: cambiar altura de la fila (la onda se recorta al achicar)."
+                            className="absolute bottom-0 left-0 right-0 z-[35] h-2.5 cursor-ns-resize hover:bg-teal-400/20"
+                            onPointerDown={(e) => {
+                              if (e.button !== 0) return
+                              e.preventDefault()
+                              e.stopPropagation()
+                              bindTrackRowResizePointer(
+                                e.currentTarget as HTMLDivElement,
+                                trackKey,
+                                e.pointerId,
+                                e.clientY,
+                                trackRowHeightsPx[trackKey] ?? DEFAULT_TRACK_ROW_HEIGHT_PX,
+                              )
+                            }}
+                          />
                         </div>
                       </div>
                     );
@@ -3252,9 +4419,48 @@ export default function Home() {
                 </div>
               </div>
             </div>
-            
-            <div className="flex-1 bg-black px-1 md:px-6 md:pr-[20px] pt-1 md:pt-2 pb-2 md:pb-4 overflow-hidden">
-              <div className="h-full flex flex-col">
+            </div>
+
+            <div className="relative z-30 flex h-11 w-full shrink-0 border-y border-amber-900/50 bg-gradient-to-b from-[#1f1f1f] to-[#141414] shadow-[0_-6px_16px_rgba(0,0,0,0.5)]">
+              <button
+                type="button"
+                onClick={() => void handleSyncClick()}
+                disabled={clickSyncBusy}
+                className="flex shrink-0 items-center gap-1.5 border-r border-gray-600 px-2.5 text-[10px] font-bold uppercase tracking-wide text-amber-300 transition hover:bg-black/25 hover:text-amber-200 disabled:cursor-wait disabled:opacity-60 sm:px-3 sm:text-[11px]"
+                title="Alinea la fase del click con batería/mezcla (usa BPM de la canción)."
+              >
+                {clickSyncBusy ? (
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+                )}
+                Sync click
+              </button>
+              <button
+                type="button"
+                onClick={() => setMixerToolsCollapsed((c) => !c)}
+                aria-expanded={!mixerToolsCollapsed}
+                className="flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 border-l border-white/5 bg-black/20 px-2 text-gray-200 transition hover:bg-black/40 hover:text-white"
+                title={
+                  mixerToolsCollapsed
+                    ? 'Mostrar acordes, EQ y guardar'
+                    : 'Ocultar panel inferior (más espacio para las pistas)'
+                }
+              >
+                {mixerToolsCollapsed ? (
+                  <ChevronUp className="h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+                ) : (
+                  <ChevronDown className="h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+                )}
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-200 sm:text-xs">
+                  {mixerToolsCollapsed ? 'Mostrar panel' : 'Ocultar panel'}
+                </span>
+              </button>
+            </div>
+
+            {!mixerToolsCollapsed && (
+            <div className="flex shrink-0 flex-col overflow-x-hidden overflow-y-auto bg-black px-1 pt-0 pb-0 md:px-4 md:pb-1">
+              <div className="flex w-full max-w-full shrink-0 flex-col">
                 {showEQInMixer ? (
                   <VolumeEQModal
                     isOpen={true}
@@ -3268,16 +4474,11 @@ export default function Home() {
                     isPlaying={isPlaying}
                     onSeekTo={(time) => {
                       lastSeekTimeRef.current = Date.now()
-                      const off = clickSyncOffsetSecRef.current
-                      Object.entries(audioElements).forEach(([trackKey, audio]) => {
-                        const d = audio.duration || 0
-                        const safe = Math.max(0, d - 0.02)
-                        if (isClickStemKey(trackKey)) {
-                          audio.currentTime = Math.max(0, Math.min(time - off, safe))
-                        } else {
-                          audio.currentTime = Math.max(0, Math.min(time, safe))
-                        }
-                      })
+                      resyncStemAudioFilePositions(time, isPlaying)
+                      if (isPlaying) {
+                        playbackWallOriginProjectSecRef.current = time
+                        playbackWallOriginPerfRef.current = performance.now()
+                      }
                       Object.values(originalAudioElements).forEach((audio) => {
                         const d = audio.duration || 0
                         const safe = Math.max(0, d - 0.02)
@@ -3311,6 +4512,8 @@ export default function Home() {
                 )}
               </div>
             </div>
+            )}
+
           </div>
         </div>
       )}

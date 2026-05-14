@@ -14,7 +14,6 @@ import { getBackendUrl } from '../lib/config';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { PLAN_LIMITS, resolvePlanIdFromUserData } from '@/lib/pricing';
-import { stemPathFromB2PublicUrl, toBackendAudioProxyUrl } from '@/lib/audioProxy';
 import SuccessWavePopup from './SuccessWavePopup';
 
 interface MoisesStyleUploadProps {
@@ -601,25 +600,15 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
             // Loop para descargar e inyectar al disco
             const prefetchPromises = stemUrls.map(async (url: any) => {
               if (typeof url !== 'string') return;
-              
-              // Proxy Next → FastAPI o B2; si el proxy falla (p. ej. Python caído en Railway), B2 directo
-              let proxyUrl = url;
-              const stem = stemPathFromB2PublicUrl(url);
-              if (stem) {
-                proxyUrl = toBackendAudioProxyUrl(stem);
-              }
-              
-              // Revisar si ya está en caché
-              const cachedResponse = await cache.match(proxyUrl);
+
+              const fetchUrl = url;
+              const cachedResponse = await cache.match(fetchUrl);
               if (!cachedResponse) {
-                 console.log(`[PREFETCH] 👻 Descargando stem al disco: ${proxyUrl.split('/').pop()}`);
-                 let response = await fetch(proxyUrl);
-                 if (!response.ok && stem) {
-                   response = await fetch(url);
-                 }
-                 if (response.ok) {
-                    await cache.put(proxyUrl, response.clone());
-                 }
+                console.log(`[PREFETCH] 👻 Descargando stem al disco: ${fetchUrl.split('/').pop()}`);
+                const response = await fetch(fetchUrl);
+                if (response.ok) {
+                  await cache.put(fetchUrl, response.clone());
+                }
               }
             });
             

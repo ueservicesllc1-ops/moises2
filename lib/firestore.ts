@@ -12,6 +12,7 @@ import {
   onSnapshot 
 } from 'firebase/firestore'
 import { db } from './firebase'
+import type { StemClipEditPersisted } from '@/lib/studioNonDestructiveClip'
 
 export interface Song {
   id?: string
@@ -46,6 +47,8 @@ export interface Song {
   trackColors?: {
     [key: string]: string
   }
+  /** Edición no destructiva por stem (trim, fades, posición en timeline). */
+  stemClipEdits?: Record<string, StemClipEditPersisted>
   originalUrl?: string
   chords?: Array<{
     chord: string

@@ -3,9 +3,11 @@
   "version": "1.1.0",
   "private": true,
   "scripts": {
-    "dev": "node scripts/ensure-dev-port.mjs && next dev -p 3000",
+    "dev": "concurrently -n next,b2 -c cyan,magenta \"next dev -p 3000\" \"node b2-proxy.mjs\"",
+    "dev:port": "node scripts/ensure-dev-port.mjs && concurrently -n next,b2 -c cyan,magenta \"next dev -p 3000\" \"node b2-proxy.mjs\"",
+    "proxy": "node b2-proxy.mjs",
     "dev:any": "next dev",
-    "dev:clean": "node scripts/clean-next.mjs && node scripts/ensure-dev-port.mjs && next dev -p 3000",
+    "dev:clean": "node scripts/clean-next.mjs && concurrently -n next,b2 -c cyan,magenta \"next dev -p 3000\" \"node b2-proxy.mjs\"",
     "lint": "next lint",
     "build": "next build",
     "start": "next start",

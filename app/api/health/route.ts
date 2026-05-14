@@ -1,10 +1,20 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getServerBackendUrl } from '@/lib/backendUrl'
+import { applyLocalDevBrowserCors } from '@/lib/devBrowserCors'
 
 export const dynamic = 'force-dynamic'
 
+export async function OPTIONS(request: NextRequest) {
+  const headers = new Headers()
+  applyLocalDevBrowserCors(request, headers)
+  headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS')
+  headers.set('Access-Control-Allow-Headers', 'Content-Type')
+  headers.set('Access-Control-Max-Age', '86400')
+  return new NextResponse(null, { status: 204, headers })
+}
+
 /** Siempre HTTP 200: el propio Next responde; el backend Python es opcional en local. */
-export async function GET() {
+export async function GET(request: NextRequest) {
   const backendUrl = getServerBackendUrl()
   const base = {
     status: 'ok' as const,
@@ -19,28 +29,34 @@ export async function GET() {
     })
 
     if (!response.ok) {
-      return NextResponse.json({
+      const res = NextResponse.json({
         ...base,
         backend: 'down' as const,
         backendUrl,
         detail: `HTTP ${response.status}`,
       })
+      applyLocalDevBrowserCors(request, res.headers)
+      return res
     }
 
     const backendHealth = await response.json().catch(() => ({}))
-    return NextResponse.json({
+    const res = NextResponse.json({
       ...base,
       backend: 'up' as const,
       backendHealth: backendHealth?.status ?? 'ok',
       backendUrl,
       dependencies: backendHealth?.dependencies ?? null,
     })
+    applyLocalDevBrowserCors(request, res.headers)
+    return res
   } catch {
-    return NextResponse.json({
+    const res = NextResponse.json({
       ...base,
       backend: 'down' as const,
       backendUrl,
       detail: 'Backend no alcanzable (¿Python en :8000?)',
     })
+    applyLocalDevBrowserCors(request, res.headers)
+    return res
   }
 }
