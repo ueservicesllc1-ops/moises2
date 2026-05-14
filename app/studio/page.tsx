@@ -680,12 +680,12 @@ export default function Home() {
   )
 
   /** Tiempo dentro del archivo de audio (s) para un instante del proyecto (línea de tiempo). */
-  function stemFileTimeFromTimeline(timelineSec: number, trackKey: string): number {
+  const stemFileTimeFromTimeline = useCallback((timelineSec: number, trackKey: string): number => {
     const clip = trackClipOffsetSecRef.current[trackKey] ?? 0
     const sourceIn = trackClipSourceInSecRef.current[trackKey] ?? 0
     const off = isClickStemKey(trackKey) ? clickSyncOffsetSecRef.current : 0
     return stemFileTimeFromTimelineTrimmed(timelineSec, clip, sourceIn, off)
-  }
+  }, [])
 
   // Sincronizar trackOrder si cambian los stems de la canción (ej. nueva separación)
   useEffect(() => {
@@ -1685,10 +1685,10 @@ export default function Home() {
    * HTMLAudio no admite currentTime negativo: se pausa el stem en 0 hasta que el timeline avance.
    * Aplica a todos los stems (no solo el click).
    */
-  function resyncStemAudioFilePositions(
+  const resyncStemAudioFilePositions = useCallback((
     projectTimelineSec: number,
     transportPlayingOverride?: boolean,
-  ) {
+  ) => {
     const els = audioElementsRef.current
     const transportPlaying =
       transportPlayingOverride !== undefined ? transportPlayingOverride : isPlayingRef.current
@@ -1724,28 +1724,49 @@ export default function Home() {
 
       const ft = stemFileTimeFromTimeline(projectTimelineSec, k)
 
+      // 1. Caso: Fuera del clip (antes)
       if (ft < sourceIn) {
-        audio.currentTime = sourceIn
+        if (Math.abs(audio.currentTime - sourceIn) > 0.05) {
+          audio.currentTime = sourceIn
+        }
         applyStemVolume()
-        if (transportPlaying) audio.pause()
+        if (transportPlaying && !audio.paused) audio.pause()
         continue
       }
 
+      // 2. Caso: Fuera del clip (después)
       if (ft >= sourceOut) {
-        audio.currentTime = Math.min(sourceOut, safe)
+        const tEnd = Math.min(sourceOut, safe)
+        if (Math.abs(audio.currentTime - tEnd) > 0.05) {
+          audio.currentTime = tEnd
+        }
         applyStemVolume()
-        if (transportPlaying) audio.pause()
+        if (transportPlaying && !audio.paused) audio.pause()
         continue
       }
 
+      // 3. Caso: Dentro del clip (reproducción normal)
       const clamped = Math.max(sourceIn, Math.min(ft, sourceOut, safe))
-      audio.currentTime = clamped
+      
+      // SOLO actualizamos currentTime si el desfase es significativo (> 50ms)
+      // Esto evita el sonido entrecortado (jitter)
+      if (Math.abs(audio.currentTime - clamped) > 0.05) {
+        audio.currentTime = clamped
+      }
+      
       applyStemVolume()
-      if (transportPlaying && audio.paused) {
-        void audio.play().catch(() => {})
+      
+      if (transportPlaying) {
+        if (audio.paused) {
+          void audio.play().catch(() => {})
+        }
+      } else {
+        if (!audio.paused) {
+          audio.pause()
+        }
       }
     }
-  }
+  }, [resolveSourceOutSec, stemFileTimeFromTimeline]) // Dependencias necesarias
 
   useEffect(() => {
     resyncStemAudioFilePositions(getProjectTimelineFromRefs(), isPlayingRef.current)
