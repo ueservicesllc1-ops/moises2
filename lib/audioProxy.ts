@@ -74,16 +74,15 @@ function b2DownloadProxyBaseCandidates(): string[] {
 
   const fb = readLocalFallbackProxyOrigin()
   
-  // En local, priorizamos el fallback remoto (Railway) si está disponible,
-  // porque suele tener mejor conectividad con B2 que la red doméstica.
-  const candidates: string[] = []
+  // Candidatos en orden: 
+  // 1. Next local (:3000) - Ahora incluye un túnel automático a Railway si falla B2
+  // 2. Proxy dedicado (:3001)
+  const candidates = [origin, 'http://localhost:3001']
   
-  if (fb && fb !== origin) {
-    candidates.push(fb) // Prioridad 1: Railway (Garantiza conexión)
+  const fb = readLocalFallbackProxyOrigin()
+  if (fb && fb !== origin && !candidates.includes(fb)) {
+    candidates.push(fb)
   }
-  
-  candidates.push(origin) // Prioridad 2: Next local (:3000)
-  candidates.push('http://localhost:3001') // Prioridad 3: Proxy dedicado (:3001)
 
   return candidates
 }

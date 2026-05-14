@@ -73,7 +73,32 @@ export async function GET(request: NextRequest) {
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error(`[api/download] Error al conectar con B2: ${msg}`, { url: decoded })
+    console.warn(`[api/download] Fallo local al conectar con B2: ${msg}. Reintentando vía túnel Railway...`)
+    
+    try {
+      // TÚNEL: Si el local no llega a B2, le pedimos al servidor de producción que lo baje por nosotros.
+      // Esto evita problemas de CORS en el navegador porque el navegador solo ve a localhost.
+      const railwayProxyUrl = `https://moises2-production.up.railway.app/api/download?url=${encodeURIComponent(decoded)}`
+      const tunnelRes = await fetch(railwayProxyUrl, {
+        headers: range ? { Range: range } : {},
+        signal: AbortSignal.timeout(60_000)
+      })
+      
+      if (tunnelRes.ok) {
+        console.log(`[api/download] ✅ Túnel Railway exitoso para: ${decoded}`)
+        const out = new Headers()
+        const pass = ['content-type', 'content-length', 'accept-ranges', 'content-range']
+        for (const k of pass) {
+          const v = tunnelRes.headers.get(k)
+          if (v) out.set(k, v)
+        }
+        applyLocalDevBrowserCors(request, out)
+        return new NextResponse(tunnelRes.body, { status: tunnelRes.status, headers: out })
+      }
+    } catch (tunnelErr) {
+      console.error(`[api/download] Fallo crítico: ni B2 ni el túnel Railway funcionan.`, tunnelErr)
+    }
+
     const res = new NextResponse(`fetch B2 failed: ${msg}`, {
       status: 502,
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
