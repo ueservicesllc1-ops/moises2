@@ -2147,6 +2147,10 @@ export default function Home() {
       });
       setClickSyncOffsetSec(off);
       clickSyncOffsetSecRef.current = off;
+      
+      // Unmute the click track now that it's synced!
+      setTrackMutedStates(prev => ({ ...prev, [clickKey]: false }));
+      
       resyncStemAudioFilePositions(getProjectTimelineFromRefs(), isPlayingRef.current);
     } catch (err) {
       console.error('[SYNC CLICK]', err);
@@ -2219,6 +2223,15 @@ export default function Home() {
     // Inicializar el orden de las pistas
     const initialOrder = Object.keys(song.stems).filter(k => k !== 'metronome');
     setTrackOrder(initialOrder);
+
+    // Mute click track by default
+    const initialMuted: Record<string, boolean> = {};
+    for (const k of Object.keys(song.stems)) {
+      if (isClickStemKey(k)) {
+        initialMuted[k] = true;
+      }
+    }
+    setTrackMutedStates(initialMuted);
 
     setIsLoadingAudio(true)
     const newAudioElements: { [key: string]: HTMLAudioElement } = {}
@@ -3642,8 +3655,26 @@ export default function Home() {
                             }}
                             title="Cambiar color del track"
                           />
-                          
-                          {/* Botón de debug temporal para click track */}
+                          {/* Botón de Sincronización Mágica para click track */}
+                          {isClickStemKey(trackKey) && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleSyncClick();
+                              }}
+                              disabled={clickSyncBusy}
+                              className={`ml-1 px-1.5 py-0.5 rounded text-[8px] md:text-[9px] font-bold shadow-md transition-all ${
+                                clickSyncBusy 
+                                  ? 'bg-gray-700 text-gray-400 cursor-not-allowed animate-pulse' 
+                                  : 'bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 text-white border border-teal-400/30'
+                              }`}
+                              title="Calcular offset y sincronizar mágicamente con la batería"
+                            >
+                              {clickSyncBusy ? '...' : '✨ Sync'}
+                            </button>
+                          )}
                         </div>
                         
                         {/* Slider de Volumen + Botones M y S - Solo mostrar si no se está generando */}
