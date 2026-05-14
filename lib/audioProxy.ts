@@ -49,7 +49,7 @@ function isLikelyB2PublicFileUrl(url: string): boolean {
 const LOCAL_B2_PROXY_FALLBACK = 'http://localhost:3001'
 
 /** Mismo stack desplegado (Railway suele poder salir a B2 aunque tu Windows no). */
-const DEFAULT_LOCAL_AUDIO_PROXY_FALLBACK = 'https://moises2-production.up.railway.app'
+const DEFAULT_LOCAL_AUDIO_PROXY_FALLBACK = 'https://judith.life'
 
 function readLocalFallbackProxyOrigin(): string {
   const raw = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_AUDIO_PROXY_FALLBACK?.trim() : ''

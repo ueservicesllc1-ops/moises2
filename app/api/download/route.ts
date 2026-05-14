@@ -75,14 +75,17 @@ export async function GET(request: NextRequest) {
     const msg = err instanceof Error ? err.message : String(err)
     console.warn(`[api/download] Fallo local al conectar con B2: ${msg}. Reintentando vía túnel Railway...`)
     
-    try {
-      // TÚNEL: Si el local no llega a B2, le pedimos al servidor de producción que lo baje por nosotros.
-      // Esto evita problemas de CORS en el navegador porque el navegador solo ve a localhost.
-      const railwayProxyUrl = `https://moises2-production.up.railway.app/api/download?url=${encodeURIComponent(decoded)}`
-      const tunnelRes = await fetch(railwayProxyUrl, {
-        headers: range ? { Range: range } : {},
-        signal: AbortSignal.timeout(60_000)
-      })
+    // Solo intentamos el túnel si estamos en desarrollo local. 
+    // ¡NUNCA en producción, o Railway se llamará a sí mismo en un bucle infinito!
+    if (process.env.NODE_ENV === 'development') {
+      try {
+        // TÚNEL: Si el local no llega a B2, le pedimos al servidor de producción que lo baje por nosotros.
+        // Esto evita problemas de CORS en el navegador porque el navegador solo ve a localhost.
+        const railwayProxyUrl = `https://judith.life/api/download?url=${encodeURIComponent(decoded)}`
+        const tunnelRes = await fetch(railwayProxyUrl, {
+          headers: range ? { Range: range } : {},
+          signal: AbortSignal.timeout(60_000)
+        })
       
       if (tunnelRes.ok) {
         console.log(`[api/download] ✅ Túnel Railway exitoso para: ${decoded}`)
@@ -94,10 +97,14 @@ export async function GET(request: NextRequest) {
         }
         applyLocalDevBrowserCors(request, out)
         return new NextResponse(tunnelRes.body, { status: tunnelRes.status, headers: out })
+      } else {
+        const errText = await tunnelRes.text().catch(() => '')
+        console.error(`[api/download] ❌ Túnel Railway devolvió error: ${tunnelRes.status} ${tunnelRes.statusText} - ${errText}`)
       }
     } catch (tunnelErr) {
       console.error(`[api/download] Fallo crítico: ni B2 ni el túnel Railway funcionan.`, tunnelErr)
     }
+    } // <-- Cierre del if de NODE_ENV
 
     const res = new NextResponse(`fetch B2 failed: ${msg}`, {
       status: 502,
