@@ -2142,13 +2142,7 @@ export default function Home() {
   const loadAudioFiles = async (song: Song) => {
     if (!song.stems) return
     
-    // Esperar a que el cache esté cargado
-    if (!cacheLoaded) {
-      console.log('Esperando a que el cache se cargue...')
-      return
-    }
-    
-    console.log(' Cache cargado, iniciando carga de audio...')
+    console.log(' Iniciando carga de audio...')
     console.log(' Cache actual:', Object.keys(waveformCache).length, 'entradas')
 
     // Cargar colores guardados de Firestore
@@ -2211,245 +2205,187 @@ export default function Home() {
     const newLoadingStates: { [key: string]: 'idle' | 'loading' | 'cached' | 'ready' } = {}
 
     try {
-      console.log(' Loading song tracks:', song.stems)
-      for (let [trackKey, originalTrackUrl] of Object.entries(song.stems)) {
-        const stemSrc = typeof originalTrackUrl === 'string' ? originalTrackUrl : ''
-        const cacheKeyStable = normalizeStemPlayUrl(stemSrc) || stemSrc
-        const b2Fallback = stemSrc && stemPathFromB2PublicUrl(stemSrc) ? stemSrc : undefined
-        if (cacheKeyStable) {
-          console.log(` Loading audio for ${trackKey}:`, stemSrc)
+    console.log(' Loading song tracks:', song.stems)
+    for (const [trackKey, originalTrackUrl] of Object.entries(song.stems)) {
+      const stemSrc = typeof originalTrackUrl === 'string' ? originalTrackUrl : ''
+      const cacheKeyStable = normalizeStemPlayUrl(stemSrc) || stemSrc
+      const b2Fallback = stemSrc && stemPathFromB2PublicUrl(stemSrc) ? stemSrc : undefined
+      if (!cacheKeyStable) continue
 
-          // Magia de Disco: Descargar o recuperar del disco local y convertir en Blob Instantáneo
-          const trackUrl = await getCachedAudioBlobUrl(stemSrc, b2Fallback)
+      console.log(` Loading audio for ${trackKey}:`, stemSrc)
 
-          // 1. PRIMERO: Buscar en cache localStorage
-          if (waveformCache[cacheKeyStable]) {
-            console.log(` CACHE HIT para ${trackKey}`)
-            newLoadingStates[trackKey] = 'cached'
-            newWaveforms[trackKey] = waveformCache[cacheKeyStable]
-            
-            // Crear elemento audio desde cache
-            const audio = createConfiguredStemAudio(trackUrl)
-            
-            
-            // Event listener para cuando termine la canción
-            audio.addEventListener('ended', () => {
-              console.log(`🏁 ${trackKey} ended - stopping all tracks`)
-              // Pausar todos los audios y volver al inicio
-              Object.values(newAudioElements).forEach(audio => {
-                audio.pause();
-                audio.currentTime = 0;
-              });
-              setIsPlaying(false);
-              setCurrentTime(0);
-              playbackWallOriginProjectSecRef.current = 0
-              playbackWallOriginPerfRef.current = performance.now()
-            })
-            
-            newAudioElements[trackKey] = audio
-            
-            // Detectar onset también para archivos en cache
-            try {
-              console.log(`[ONSET] Detectando onset para ${trackKey} (desde cache)...`)
-              const response = await fetch(trackUrl)
-              const arrayBuffer = await response.arrayBuffer()
-              const tempContext = new AudioContext()
-              const audioBuffer = await tempContext.decodeAudioData(arrayBuffer)
-              tempContext.close()
-              
-              const onsetTimeMs = detectOnset(audioBuffer)
-              console.log(`[ONSET] ${trackKey}: Primer ataque en ${onsetTimeMs}ms`)
-              setTrackOnsets(prev => {
-                const updated = { ...prev, [trackKey]: onsetTimeMs }
-                console.log(`[ONSET] trackOnsets actualizado:`, updated)
-                return updated
-              })
-            } catch (error) {
-              console.error(`[ONSET] Error detectando onset para ${trackKey}:`, error)
-            }
-            
-            continue
-          }
-          
-          // 2. SEGUNDO: Si no está en cache, descargar de B2
-          console.log(` CACHE MISS para ${trackKey} - descargando de B2`)
-          
-          // Marcar como cargando desde B2
-          newLoadingStates[trackKey] = 'loading'
-          setTrackLoadingStates(prev => ({ ...prev, [trackKey]: 'loading' }))
-          
+      // Cada stem se carga de forma independiente: un fallo no detiene los demás
+      try {
+        // Descargar o recuperar del caché de la Cache API y convertir en Blob URL
+        const trackUrl = await getCachedAudioBlobUrl(stemSrc, b2Fallback)
+
+        // 1. PRIMERO: Buscar waveform en cache localStorage
+        if (waveformCache[cacheKeyStable]) {
+          console.log(` CACHE HIT para ${trackKey}`)
+          newLoadingStates[trackKey] = 'cached'
+          newWaveforms[trackKey] = waveformCache[cacheKeyStable]
+
           const audio = createConfiguredStemAudio(trackUrl)
-          
-          // Agregar logging para diagnóstico
-          audio.addEventListener('loadedmetadata', () => {
-            console.log(` ${trackKey} metadata loaded:`, {
-              duration: audio.duration,
-              readyState: audio.readyState,
-              src: audio.src
-            })
-            
-          })
-          
-          audio.addEventListener('canplaythrough', () => {
-            console.log(` ${trackKey} can play through:`, {
-              duration: audio.duration,
-              readyState: audio.readyState
-            })
-            
-          })
-          
-          // Event listener para cuando termine la canción
           audio.addEventListener('ended', () => {
-            console.log(`🏁 ${trackKey} ended - stopping all tracks`)
-            // Pausar todos los audios y volver al inicio
-            Object.values(newAudioElements).forEach(audio => {
-              audio.pause();
-              audio.currentTime = 0;
-            });
-            setIsPlaying(false);
-            setCurrentTime(0);
+            Object.values(newAudioElements).forEach(a => { a.pause(); a.currentTime = 0 })
+            setIsPlaying(false)
+            setCurrentTime(0)
             playbackWallOriginProjectSecRef.current = 0
             playbackWallOriginPerfRef.current = performance.now()
           })
-
-          // Esperar a que el audio esté listo (sin audio.load(): ya se dispara al asignar src; load() duplicado provoca errores espurios)
-          await new Promise((resolve, reject) => {
-            const onCanPlay = () => {
-              audio.removeEventListener('canplaythrough', onCanPlay)
-              audio.removeEventListener('error', onError)
-              console.log(` ${trackKey} audio ready to play`)
-              resolve(true)
-            }
-            const onError = () => {
-              audio.removeEventListener('canplaythrough', onCanPlay)
-              audio.removeEventListener('error', onError)
-              const code = audio.error?.code
-              const msg = audio.error?.message
-              console.error(` ${trackKey} audio failed to load`, { code, msg, src: audio.src?.slice(0, 80) })
-              reject(new Error(`${trackKey}: audio error ${code ?? '?'}`))
-            }
-            audio.addEventListener('canplaythrough', onCanPlay)
-            audio.addEventListener('error', onError)
-          })
-          
           newAudioElements[trackKey] = audio
-          
-          // Generar waveform real del audio
-          try {
-            console.log(` Generating waveform for ${trackKey}`)
-            
-            
-            const response = await fetch(trackUrl)
-            const arrayBuffer = await response.arrayBuffer()
-            
-            // Verificar si el archivo tiene contenido
-            console.log(`${trackKey} file size: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`)
-            
-            
-            const tempContext = new AudioContext()
-            const audioBuffer = await tempContext.decodeAudioData(arrayBuffer)
-            tempContext.close()
-            
-            
-            // Detectar onset (primer ataque de audio) de este track
-            console.log(`[ONSET] Detectando onset para ${trackKey}...`)
-            const onsetTimeMs = detectOnset(audioBuffer)
-            console.log(`[ONSET] ${trackKey}: Primer ataque en ${onsetTimeMs}ms`)
-            setTrackOnsets(prev => {
-              const updated = { ...prev, [trackKey]: onsetTimeMs }
-              console.log(`[ONSET] trackOnsets actualizado:`, updated)
-              return updated
-            })
-            
-            // Verificar el contenido del audio de forma eficiente
-            const channelData = audioBuffer.getChannelData(0)
-            
-            // Calcular maxAmplitude de forma eficiente sin desbordamiento de pila
-            let maxAmplitude = 0
-            for (let i = 0; i < channelData.length; i++) {
-              const abs = Math.abs(channelData[i])
-              if (abs > maxAmplitude) {
-                maxAmplitude = abs
-              }
-            }
-            
-            // Calcular rmsAmplitude de forma eficiente
-            let sumSquares = 0
-            for (let i = 0; i < channelData.length; i++) {
-              sumSquares += channelData[i] * channelData[i]
-            }
-            const rmsAmplitude = Math.sqrt(sumSquares / channelData.length)
-            
-            console.log(` ${trackKey} audio analysis:`, {
-              samples: channelData.length,
-              maxAmplitude: maxAmplitude,
-              rmsAmplitude: rmsAmplitude,
-              duration: audioBuffer.duration,
-              sampleRate: audioBuffer.sampleRate,
-              hasAudio: maxAmplitude > 0.001
-            })
-            
-            // Generar waveform profesional de alta precisión
-            const waveformData = generateProfessionalWaveform(channelData, 800) // Más puntos para mayor precisión
-            newWaveforms[trackKey] = waveformData
-            
-            
-            // 3. GUARDAR en cache persistente para próximas veces
-            const newPersistentCache = { ...waveformCache, [cacheKeyStable]: waveformData }
-            setWaveformCache(newPersistentCache)
-            try {
-              localStorage.setItem('waveform-cache', JSON.stringify(newPersistentCache))
-              console.log(` GUARDADO en cache para ${trackKey}`)
-            } catch (e) {
-              // Si localStorage está lleno, limpiar cache viejo y reintentar
-              console.warn('Cache lleno, limpiando cache viejo...')
-              localStorage.removeItem('waveform-cache')
-              try {
-                localStorage.setItem('waveform-cache', JSON.stringify({ [cacheKeyStable]: waveformData }))
-                console.log(` GUARDADO en cache (después de limpiar) para ${trackKey}`)
-              } catch (e2) {
-                console.error('No se pudo guardar en cache:', e2)
-              }
-            }
-            
-            newLoadingStates[trackKey] = 'ready'
-            console.log(` Waveform generado para ${trackKey}: ${waveformData.length} puntos`)
-            
-          } catch (error) {
-            console.error(`Error generating waveform for ${trackKey}:`, error)
-            newLoadingStates[trackKey] = 'idle'
-          }
-          
-          console.log(`Audio loaded successfully for ${trackKey}`)
-        }
-      }
-      
-      // Cache ya se actualizó durante el loop
-      
-      setAudioElements(newAudioElements)
-      setWaveforms(newWaveforms)
-      setTrackLoadingStates(newLoadingStates)
 
-      let maxAudioDur = 0
-      for (const a of Object.values(newAudioElements)) {
-        maxAudioDur = Math.max(maxAudioDur, Number(a.duration) || 0)
+          // Detectar onset (no bloquea si falla)
+          try {
+            const res = await fetch(trackUrl)
+            const ab = await res.arrayBuffer()
+            const ctx = new AudioContext()
+            const buf = await ctx.decodeAudioData(ab)
+            ctx.close()
+            const onsetTimeMs = detectOnset(buf)
+            console.log(`[ONSET] ${trackKey}: ${onsetTimeMs}ms`)
+            setTrackOnsets(prev => ({ ...prev, [trackKey]: onsetTimeMs }))
+          } catch (onsetErr) {
+            console.warn(`[ONSET] No se pudo detectar onset para ${trackKey}:`, onsetErr)
+          }
+          continue
+        }
+
+        // 2. SEGUNDO: Si no está en cache, cargar desde la URL (blob de B2)
+        console.log(` CACHE MISS para ${trackKey} - cargando audio`)
+        newLoadingStates[trackKey] = 'loading'
+        setTrackLoadingStates(prev => ({ ...prev, [trackKey]: 'loading' }))
+
+        const audio = createConfiguredStemAudio(trackUrl)
+
+        audio.addEventListener('loadedmetadata', () => {
+          console.log(` ${trackKey} metadata loaded: dur=${audio.duration?.toFixed(2)}s`)
+        })
+
+        audio.addEventListener('ended', () => {
+          Object.values(newAudioElements).forEach(a => { a.pause(); a.currentTime = 0 })
+          setIsPlaying(false)
+          setCurrentTime(0)
+          playbackWallOriginProjectSecRef.current = 0
+          playbackWallOriginPerfRef.current = performance.now()
+        })
+
+        // Esperar canplaythrough (sin llamar load() extra — asignar src ya lo dispara)
+        await new Promise<void>((resolve, reject) => {
+          const onCanPlay = () => {
+            audio.removeEventListener('canplaythrough', onCanPlay)
+            audio.removeEventListener('error', onError)
+            console.log(` ${trackKey} audio ready to play`)
+            resolve()
+          }
+          const onError = () => {
+            audio.removeEventListener('canplaythrough', onCanPlay)
+            audio.removeEventListener('error', onError)
+            const code = audio.error?.code
+            const msg = audio.error?.message
+            console.error(` ${trackKey} audio failed to load`, { code, msg, src: audio.src?.slice(0, 80) })
+            reject(new Error(`${trackKey}: audio error ${code ?? '?'}`))
+          }
+          audio.addEventListener('canplaythrough', onCanPlay)
+          audio.addEventListener('error', onError)
+        })
+
+        newAudioElements[trackKey] = audio
+
+        // Generar waveform + detectar onset
+        try {
+          console.log(` Generating waveform for ${trackKey}`)
+          const response = await fetch(trackUrl)
+          const arrayBuffer = await response.arrayBuffer()
+          console.log(`${trackKey} file size: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`)
+
+          const tempContext = new AudioContext()
+          const audioBuffer = await tempContext.decodeAudioData(arrayBuffer)
+          tempContext.close()
+
+          // Detectar onset
+          const onsetTimeMs = detectOnset(audioBuffer)
+          console.log(`[ONSET] ${trackKey}: ${onsetTimeMs}ms`)
+          setTrackOnsets(prev => ({ ...prev, [trackKey]: onsetTimeMs }))
+
+          const channelData = audioBuffer.getChannelData(0)
+
+          let maxAmplitude = 0
+          for (let i = 0; i < channelData.length; i++) {
+            const abs = Math.abs(channelData[i])
+            if (abs > maxAmplitude) maxAmplitude = abs
+          }
+
+          let sumSquares = 0
+          for (let i = 0; i < channelData.length; i++) sumSquares += channelData[i] * channelData[i]
+          const rmsAmplitude = Math.sqrt(sumSquares / channelData.length)
+
+          console.log(` ${trackKey} audio analysis:`, {
+            samples: channelData.length,
+            maxAmplitude,
+            rmsAmplitude,
+            duration: audioBuffer.duration,
+            sampleRate: audioBuffer.sampleRate,
+            hasAudio: maxAmplitude > 0.001,
+          })
+
+          const waveformData = generateProfessionalWaveform(channelData, 800)
+          newWaveforms[trackKey] = waveformData
+
+          // Guardar en cache persistente
+          const newPersistentCache = { ...waveformCache, [cacheKeyStable]: waveformData }
+          setWaveformCache(newPersistentCache)
+          try {
+            localStorage.setItem('waveform-cache', JSON.stringify(newPersistentCache))
+            console.log(` GUARDADO en cache para ${trackKey}`)
+          } catch {
+            localStorage.removeItem('waveform-cache')
+            try {
+              localStorage.setItem('waveform-cache', JSON.stringify({ [cacheKeyStable]: waveformData }))
+            } catch {
+              console.warn('No se pudo guardar waveform en localStorage para', trackKey)
+            }
+          }
+
+          newLoadingStates[trackKey] = 'ready'
+          console.log(` Waveform generado para ${trackKey}: ${waveformData.length} puntos`)
+        } catch (waveErr) {
+          console.error(`Error generating waveform for ${trackKey}:`, waveErr)
+          newLoadingStates[trackKey] = 'idle'
+        }
+
+        console.log(`Audio loaded successfully for ${trackKey}`)
+      } catch (stemError) {
+        // Un stem fallido NO detiene los demás tracks
+        console.error(`[loadAudioFiles] Falló el stem "${trackKey}" — continuando con el resto:`, stemError)
+        newLoadingStates[trackKey] = 'idle'
       }
-      const songSec =
-        typeof song.durationSeconds === 'number' && Number.isFinite(song.durationSeconds)
-          ? song.durationSeconds
-          : 0
-      if (maxAudioDur > 0 || songSec > 0) {
-        setDuration((d) => Math.max(d, maxAudioDur, songSec))
-      }
-      
-      // NO resetear el tiempo si ya había audios cargados
-      // Esto previene que se reinicie cuando se recarga por cambios de color u otras actualizaciones
-      console.log(' Carga completada - manteniendo estado de reproducción actual')
-      
-      console.log('All audio files loaded:', Object.keys(newAudioElements))
-      console.log('All waveforms generated:', Object.keys(newWaveforms))
-    } catch (error) {
-      console.error('Error loading audio files:', error)
+    }
+
+    setAudioElements(newAudioElements)
+    setWaveforms(newWaveforms)
+    setTrackLoadingStates(newLoadingStates)
+
+    let maxAudioDur = 0
+    for (const a of Object.values(newAudioElements)) {
+      maxAudioDur = Math.max(maxAudioDur, Number(a.duration) || 0)
+    }
+    const songSec =
+      typeof song.durationSeconds === 'number' && Number.isFinite(song.durationSeconds)
+        ? song.durationSeconds
+        : 0
+    if (maxAudioDur > 0 || songSec > 0) {
+      setDuration((d) => Math.max(d, maxAudioDur, songSec))
+    }
+    
+    // NO resetear el tiempo si ya había audios cargados
+    // Esto previene que se reinicie cuando se recarga por cambios de color u otras actualizaciones
+    console.log(' Carga completada - manteniendo estado de reproducción actual')
+    
+    console.log('All audio files loaded:', Object.keys(newAudioElements))
+    console.log('All waveforms generated:', Object.keys(newWaveforms))
+    } catch (outerError) {
+      console.error('[loadAudioFiles] Error inesperado:', outerError)
     } finally {
       setIsLoadingAudio(false)
     }

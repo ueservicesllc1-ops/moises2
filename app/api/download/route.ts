@@ -73,6 +73,7 @@ export async function GET(request: NextRequest) {
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[api/download] Error al conectar con B2: ${msg}`, { url: decoded })
     const res = new NextResponse(`fetch B2 failed: ${msg}`, {
       status: 502,
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },

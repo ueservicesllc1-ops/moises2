@@ -14,10 +14,13 @@ export function isLocalDevBrowserOrigin(origin: string | null): boolean {
   }
 }
 
-export function applyLocalDevBrowserCors(request: NextRequest, headers: Headers): void {
-  const o = request.headers.get('origin')
-  if (o && isLocalDevBrowserOrigin(o)) {
-    headers.set('Access-Control-Allow-Origin', o)
+export function applyLocalDevBrowserCors(request: Request | NextRequest, headers: Headers): void {
+  const origin = (request instanceof Request ? request.headers.get('origin') : request.headers.get('origin'))
+  
+  // Si el origen es localhost, siempre permitimos CORS (útil para usar Railway como proxy desde local)
+  if (origin && (origin.includes('localhost:') || origin.includes('127.0.0.1:'))) {
+    headers.set('Access-Control-Allow-Origin', origin)
+    headers.set('Access-Control-Allow-Credentials', 'true')
     headers.append('Vary', 'Origin')
   }
 }
