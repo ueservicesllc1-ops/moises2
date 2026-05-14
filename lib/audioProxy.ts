@@ -79,7 +79,6 @@ function b2DownloadProxyBaseCandidates(): string[] {
   // 2. Proxy dedicado (:3001)
   const candidates = [origin, 'http://localhost:3001']
   
-  const fb = readLocalFallbackProxyOrigin()
   if (fb && fb !== origin && !candidates.includes(fb)) {
     candidates.push(fb)
   }
