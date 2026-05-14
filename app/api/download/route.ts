@@ -60,6 +60,45 @@ export async function GET(request: NextRequest) {
   }
 
   const range = request.headers.get('range')
+  
+  // En desarrollo (localhost), vamos directamente al túnel de Railway para evitar
+  // bloqueos de red local y tiempos de espera (timeouts) innecesarios.
+  if (process.env.NODE_ENV === 'development') {
+    try {
+      const railwayProxyUrl = `https://judith.life/api/download?url=${encodeURIComponent(decoded)}`
+      const tunnelRes = await fetch(railwayProxyUrl, {
+        headers: range ? { Range: range } : {},
+        signal: AbortSignal.timeout(60_000)
+      })
+      
+      if (tunnelRes.ok) {
+        console.log(`[api/download] ✅ Túnel directo a judith.life para: ${decoded}`)
+        const out = new Headers()
+        const pass = ['content-type', 'content-length', 'accept-ranges', 'content-range']
+        for (const k of pass) {
+          const v = tunnelRes.headers.get(k)
+          if (v) out.set(k, v)
+        }
+        applyLocalDevBrowserCors(request, out)
+        return new NextResponse(tunnelRes.body, { status: tunnelRes.status, headers: out })
+      } else {
+        const errText = await tunnelRes.text().catch(() => '')
+        console.error(`[api/download] ❌ Túnel Railway devolvió error: ${tunnelRes.status} - ${errText}`)
+      }
+    } catch (tunnelErr) {
+      console.error(`[api/download] Fallo crítico en el túnel Railway.`, tunnelErr)
+    }
+    
+    // Si falla el túnel en desarrollo, devolvemos 502
+    const res = new NextResponse(`Túnel a judith.life falló para B2.`, {
+      status: 502,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    })
+    applyLocalDevBrowserCors(request, res.headers)
+    return res
+  }
+
+  // Comportamiento normal en PRODUCCIÓN: intentar B2 directamente
   let upstream: Response
   try {
     upstream = await fetch(decoded, {
@@ -73,39 +112,7 @@ export async function GET(request: NextRequest) {
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.warn(`[api/download] Fallo local al conectar con B2: ${msg}. Reintentando vía túnel Railway...`)
-    
-    // Solo intentamos el túnel si estamos en desarrollo local. 
-    // ¡NUNCA en producción, o Railway se llamará a sí mismo en un bucle infinito!
-    if (process.env.NODE_ENV === 'development') {
-      try {
-        // TÚNEL: Si el local no llega a B2, le pedimos al servidor de producción que lo baje por nosotros.
-        // Esto evita problemas de CORS en el navegador porque el navegador solo ve a localhost.
-        const railwayProxyUrl = `https://judith.life/api/download?url=${encodeURIComponent(decoded)}`
-        const tunnelRes = await fetch(railwayProxyUrl, {
-          headers: range ? { Range: range } : {},
-          signal: AbortSignal.timeout(60_000)
-        })
-      
-      if (tunnelRes.ok) {
-        console.log(`[api/download] ✅ Túnel Railway exitoso para: ${decoded}`)
-        const out = new Headers()
-        const pass = ['content-type', 'content-length', 'accept-ranges', 'content-range']
-        for (const k of pass) {
-          const v = tunnelRes.headers.get(k)
-          if (v) out.set(k, v)
-        }
-        applyLocalDevBrowserCors(request, out)
-        return new NextResponse(tunnelRes.body, { status: tunnelRes.status, headers: out })
-      } else {
-        const errText = await tunnelRes.text().catch(() => '')
-        console.error(`[api/download] ❌ Túnel Railway devolvió error: ${tunnelRes.status} ${tunnelRes.statusText} - ${errText}`)
-      }
-    } catch (tunnelErr) {
-      console.error(`[api/download] Fallo crítico: ni B2 ni el túnel Railway funcionan.`, tunnelErr)
-    }
-    } // <-- Cierre del if de NODE_ENV
-
+    console.error(`[api/download] Fallo al conectar con B2 en producción: ${msg}`)
     const res = new NextResponse(`fetch B2 failed: ${msg}`, {
       status: 502,
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },

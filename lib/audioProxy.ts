@@ -74,16 +74,10 @@ function b2DownloadProxyBaseCandidates(): string[] {
 
   const fb = readLocalFallbackProxyOrigin()
   
-  // Candidatos en orden: 
-  // 1. Next local (:3000) - Ahora incluye un túnel automático a Railway si falla B2
-  // 2. Proxy dedicado (:3001)
-  const candidates = [origin, 'http://localhost:3001']
-  
-  if (fb && fb !== origin && !candidates.includes(fb)) {
-    candidates.push(fb)
-  }
-
-  return candidates
+  // Candidatos: solo necesitamos el origen actual.
+  // Si estamos en localhost y B2 está bloqueado, el propio servidor 
+  // (app/api/download/route.ts) se encargará de hacer el túnel hacia judith.life
+  return [origin]
 }
 
 function buildApiDownloadUrl(proxyOrigin: string, b2HttpsUrl: string): string {
