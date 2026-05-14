@@ -74,14 +74,16 @@ function b2DownloadProxyBaseCandidates(): string[] {
 
   const fb = readLocalFallbackProxyOrigin()
   
-  // Candidatos en orden: 
-  // 1. Next local (:3000)
-  // 2. Proxy dedicado (:3001) - Muy importante para evitar 502 en Windows
-  // 3. Fallback remoto (Railway)
-  const candidates = [origin, 'http://localhost:3001']
-  if (fb && fb !== origin && !candidates.includes(fb)) {
-    candidates.push(fb)
+  // En local, priorizamos el fallback remoto (Railway) si está disponible,
+  // porque suele tener mejor conectividad con B2 que la red doméstica.
+  const candidates: string[] = []
+  
+  if (fb && fb !== origin) {
+    candidates.push(fb) // Prioridad 1: Railway (Garantiza conexión)
   }
+  
+  candidates.push(origin) // Prioridad 2: Next local (:3000)
+  candidates.push('http://localhost:3001') // Prioridad 3: Proxy dedicado (:3001)
 
   return candidates
 }
