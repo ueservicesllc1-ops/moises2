@@ -82,6 +82,7 @@ function b2DownloadProxyBaseCandidates(): string[] {
   if (fb && fb !== origin && !candidates.includes(fb)) {
     candidates.push(fb)
   }
+
   return candidates
 }
 
