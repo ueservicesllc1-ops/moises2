@@ -739,6 +739,26 @@ async def process_audio(
         with open(task.file_path, "rb") as f:
             audio_bytes = f.read()
 
+        # 1b. BPM canónico del mix original (autocorrelación scipy) antes de Modal:
+        #     guía el click en el worker y reduce errores de doble tempo.
+        canonical_bpm: Optional[float] = None
+        try:
+            canonical_bpm = float(
+                _normalize_bpm_octave(
+                    float(await asyncio.to_thread(estimate_bpm_scipy_path, str(task.file_path)))
+                )
+            )
+            print(f"[BPM] BPM canónico pre-Modal (original): {canonical_bpm:.2f}")
+        except Exception as bpm_pre_e:
+            print(f"[BPM] scipy AC no disponible ({bpm_pre_e}), probando librosa…")
+            try:
+                bpm_ld, _dur = await asyncio.to_thread(detect_bpm_and_duration, str(task.file_path))
+                canonical_bpm = float(_normalize_bpm_octave(float(bpm_ld)))
+                print(f"[BPM] BPM canónico pre-Modal (librosa): {canonical_bpm:.2f}")
+            except Exception as bpm_pre2:
+                print(f"[BPM] Sin BPM previo para Modal: {bpm_pre2}")
+                canonical_bpm = None
+
         # 2. Conectar e Invocar el Cerebro en Modal
         import modal
         print("[MODAL] Starting remote GPU separation...")
@@ -761,7 +781,8 @@ async def process_audio(
                         audio_bytes,
                         requested_tracks,
                         hi_fi,
-                        quality_profile
+                        quality_profile,
+                        canonical_bpm,
                     ),
                     timeout=REMOTE_SEPARATION_TIMEOUT_SECONDS
                 )

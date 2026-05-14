@@ -46,6 +46,7 @@ def separate_audio(
     requested_tracks: list,
     is_hi_fi: bool,
     quality_profile: str = "pro_balanced",
+    canonical_bpm: float | None = None,
 ):
     import torch
     import numpy as np
@@ -102,8 +103,17 @@ def separate_audio(
                 progress=True
             )[0]
 
-    def build_click_track_bytes(source_audio: np.ndarray, sr: int, output_subtype: str) -> tuple[bytes, int]:
-        """Generate click track bytes from source audio with beat fallback."""
+    def build_click_track_bytes(
+        source_audio: np.ndarray,
+        sr: int,
+        output_subtype: str,
+        bpm_hint: float | None = None,
+    ) -> tuple[bytes, int]:
+        """
+        Click alineado a onsets del stem fuente. Si bpm_hint (BPM del mix original,
+        estimado en el API antes de Modal) es válido, se usa como semilla fuerte para
+        beat_track y para resolver ambigüedades de doble tempo.
+        """
         if source_audio.ndim == 2:
             mono = source_audio.mean(axis=1)
         else:
@@ -121,21 +131,48 @@ def separate_audio(
 
         click_kwargs = {"sr": sr, "length": len(mono), "click": custom_click}
         bpm_used = 120
+        start_bpm = 120.0
+        if bpm_hint is not None and np.isfinite(float(bpm_hint)):
+            bh = float(bpm_hint)
+            if 40.0 <= bh <= 240.0:
+                start_bpm = bh
         try:
             onset_env = librosa.onset.onset_strength(y=mono, sr=sr)
-            tempo, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
+            tempo, beat_frames = librosa.beat.beat_track(
+                onset_envelope=onset_env,
+                sr=sr,
+                start_bpm=start_bpm,
+                std_bpm=1.0,
+                tightness=110,
+            )
             tempo_arr = np.asarray(tempo).reshape(-1)
-            if tempo_arr.size > 0:
-                bpm_used = int(round(float(tempo_arr[0])))
+            detected = (
+                int(round(float(tempo_arr[0])))
+                if tempo_arr.size > 0
+                else int(round(start_bpm))
+            )
             beat_frames = np.asarray(beat_frames, dtype=int).reshape(-1)
             if beat_frames.size == 0:
                 raise RuntimeError("No beat frames detected")
+
+            if bpm_hint is not None and np.isfinite(float(bpm_hint)):
+                bh = float(max(40.0, min(240.0, float(bpm_hint))))
+                if abs(float(detected) - bh) > 20:
+                    bpm_used = int(round(bh))
+                else:
+                    bpm_used = int(round(0.58 * bh + 0.42 * float(detected)))
+            else:
+                bpm_used = detected
+
             clicks = librosa.clicks(frames=beat_frames, **click_kwargs)
         except Exception as beat_error:
-            print(f"[MODAL GPU] Click fallback 120 BPM: {beat_error}")
-            times = np.arange(0.0, max((len(mono) / sr), 0.5), 0.5, dtype=float)
+            print(f"[MODAL GPU] Click fallback rejilla fija: {beat_error}")
+            steady = float(start_bpm)
+            bpm_used = int(round(max(40.0, min(240.0, steady))))
+            period = 60.0 / max(float(bpm_used), 1e-6)
+            dur_sec = float(len(mono)) / float(sr)
+            times = np.arange(0.0, max(dur_sec, period * 2), period, dtype=float)
             clicks = librosa.clicks(times=times, **click_kwargs)
-            bpm_used = 120
 
         buf = io.BytesIO()
         sf.write(buf, clicks, sr, format='WAV', subtype=output_subtype)
@@ -335,7 +372,12 @@ def separate_audio(
 
         try:
             click_source = instrumental_audio if "instrumental_audio" in locals() else wav_numpy
-            click_bytes, click_bpm = build_click_track_bytes(click_source, model.samplerate, output_subtype)
+            click_bytes, click_bpm = build_click_track_bytes(
+                click_source,
+                model.samplerate,
+                output_subtype,
+                bpm_hint=canonical_bpm,
+            )
             click_key = f"click_{click_bpm}"
             stems_bytes[click_key] = click_bytes
             print(f"[MODAL GPU]   OK {click_key} -> {len(stems_bytes[click_key]) // 1024}KB ({output_subtype})")

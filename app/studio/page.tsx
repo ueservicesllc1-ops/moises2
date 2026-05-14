@@ -37,6 +37,7 @@ import {
   GripVertical,
   ZoomIn,
   ZoomOut,
+  RefreshCw,
 } from 'lucide-react'
 import MoisesStyleUpload from '@/components/MoisesStyleUpload'
 import ConnectionStatus from '@/components/ConnectionStatus'
@@ -55,6 +56,7 @@ import {
   toBackendAudioProxyUrl,
   getCachedAudioBlobUrl,
 } from '@/lib/audioProxy'
+import { isClickStemKey, computeClickSyncOffsetSecFromStems } from '@/lib/clickSync'
 
 // import ChordAnalyzer from '@/components/ChordAnalyzer'
 import { getUserSongs, subscribeToUserSongs, deleteSong, Song } from '@/lib/firestore'
@@ -132,6 +134,9 @@ export default function Home() {
   const [youtubeExtractError, setYoutubeExtractError] = useState('')
 
   const [songDelay, setSongDelay] = useState<number>(0)
+  /** Segundos: reproducción del stem click en `masterTime - offset` para alinear fase. */
+  const [clickSyncOffsetSec, setClickSyncOffsetSec] = useState(0)
+  const [clickSyncBusy, setClickSyncBusy] = useState(false)
   const [timeFormat, setTimeFormat] = useState<'time' | 'beats'>('time')
   const [audioElements, setAudioElements] = useState<{ [key: string]: HTMLAudioElement }>({})
   const [isLoadingAudio, setIsLoadingAudio] = useState(false)
@@ -154,6 +159,10 @@ export default function Home() {
   
   // Timestamp del último seek manual
   const lastSeekTimeRef = useRef<number>(0)
+  const clickSyncOffsetSecRef = useRef(0)
+  useEffect(() => {
+    clickSyncOffsetSecRef.current = clickSyncOffsetSec
+  }, [clickSyncOffsetSec])
   const [pitchSemitones, setPitchSemitones] = useState(0)
 
   
@@ -1095,11 +1104,16 @@ export default function Home() {
     } else {
       // Reproducir todos los audios sincronizados
       console.log('Playing all tracks')
+      const off = clickSyncOffsetSecRef.current
       
       Object.entries(audioElements).forEach(([trackKey, audio]) => {
-        // Todos los tracks empiezan en el mismo tiempo
-        audio.currentTime = Math.max(0, currentTime);
-        console.log(`PLAY ${trackKey}: empezando en ${audio.currentTime.toFixed(3)}s`);
+        const d = audio.duration || 0
+        const safe = Math.max(0, d - 0.02)
+        const t = isClickStemKey(trackKey)
+          ? Math.max(0, Math.min(currentTime - off, safe))
+          : Math.max(0, Math.min(currentTime, safe))
+        audio.currentTime = t
+        console.log(`PLAY ${trackKey}: empezando en ${audio.currentTime.toFixed(3)}s`)
         
         audio.play().catch(error => {
           console.error(`Error playing ${trackKey}:`, error)
@@ -1336,10 +1350,16 @@ export default function Home() {
     
     // Marcar timestamp del seek manual
     lastSeekTimeRef.current = Date.now();
+    const off = clickSyncOffsetSecRef.current
     
     Object.entries(audioElements).forEach(([trackKey, audio]) => {
-      // Todos los tracks se mueven al mismo tiempo
-      audio.currentTime = Math.max(0, seekTime);
+      const d = audio.duration || 0
+      const safe = Math.max(0, d - 0.02)
+      if (isClickStemKey(trackKey)) {
+        audio.currentTime = Math.max(0, Math.min(seekTime - off, safe))
+      } else {
+        audio.currentTime = Math.max(0, Math.min(seekTime, safe))
+      }
     });
     
     setCurrentTime(seekTime);
@@ -1413,6 +1433,63 @@ export default function Home() {
     return url;
   };
 
+  const handleSyncClick = async () => {
+    const stems = selectedSong?.stems as Record<string, string> | undefined;
+    if (!stems) {
+      alert('No hay stems cargados.');
+      return;
+    }
+    const clickKey = Object.keys(stems).find(isClickStemKey);
+    if (!clickKey || !stems[clickKey]) {
+      alert('No hay pista de click en esta canción.');
+      return;
+    }
+    const bpm = Number(selectedSong?.bpm);
+    if (!Number.isFinite(bpm) || bpm < 40 || bpm > 240) {
+      alert('Necesitamos un BPM válido de la canción. Usa el detector de BPM o reimporta el tema.');
+      return;
+    }
+    const refOrder = ['drums', 'instrumental', 'other', 'bass', 'vocals'] as const;
+    const refUrls: string[] = [];
+    for (const k of refOrder) {
+      const raw = stems[k];
+      if (raw && !isClickStemKey(k)) {
+        const u = getProxyUrl(raw);
+        if (u) refUrls.push(u);
+      }
+    }
+    if (refUrls.length === 0) {
+      alert('No hay stems suficientes como referencia rítmica.');
+      return;
+    }
+    setClickSyncBusy(true);
+    try {
+      const off = await computeClickSyncOffsetSecFromStems({
+        refUrls,
+        clickUrl: getProxyUrl(stems[clickKey])!,
+        bpm,
+        anchorSec: currentTime,
+      });
+      setClickSyncOffsetSec(off);
+      clickSyncOffsetSecRef.current = off;
+      if (isPlaying) {
+        const clickEl = audioElements[clickKey];
+        const masterKey = Object.keys(audioElements).find((k) => !isClickStemKey(k));
+        const masterEl = masterKey ? audioElements[masterKey] : null;
+        if (clickEl && masterEl) {
+          const d = clickEl.duration || 0;
+          const safe = Math.max(0, d - 0.02);
+          clickEl.currentTime = Math.max(0, Math.min(masterEl.currentTime - off, safe));
+        }
+      }
+    } catch (err) {
+      console.error('[SYNC CLICK]', err);
+      alert(`No se pudo sincronizar el click: ${err instanceof Error ? err.message : 'error'}`);
+    } finally {
+      setClickSyncBusy(false);
+    }
+  };
+
   // ==========================================
   // SUPER CACHE: ver lib/audioProxy.ts (fallback B2 si el proxy devuelve error)
   // ==========================================
@@ -1442,7 +1519,8 @@ export default function Home() {
       console.log(' Primera carga de canción - reseteando estado')
     }
     setTrackOnsets({});
-    
+    setClickSyncOffsetSec(0);
+
     // Limpiar audio anterior
     Object.values(audioElements).forEach(audio => {
       audio.pause();
@@ -1704,11 +1782,13 @@ export default function Home() {
         return;
       }
       
-      // Usar el primer elemento de audio como referencia para el tiempo
-      const firstAudio = Object.values(audioElements)[0];
-      if (firstAudio) {
-        setCurrentTime(firstAudio.currentTime);
-        setDuration(firstAudio.duration || 0);
+      // Referencia de tiempo: un stem musical (no el click, que puede llevar offset de fase).
+      const masterAudio =
+        Object.entries(audioElements).find(([k]) => !isClickStemKey(k))?.[1] ??
+        Object.values(audioElements)[0];
+      if (masterAudio) {
+        setCurrentTime(masterAudio.currentTime);
+        setDuration(masterAudio.duration || 0);
       }
     };
 
@@ -2535,9 +2615,14 @@ export default function Home() {
                 {/* Botón Stop */}
                 <button
                   onClick={() => {
+                    const off = clickSyncOffsetSecRef.current
                     Object.entries(audioElements).forEach(([trackKey, audio]) => {
                       audio.pause();
-                      audio.currentTime = 0;
+                      if (isClickStemKey(trackKey)) {
+                        audio.currentTime = Math.max(0, -off);
+                      } else {
+                        audio.currentTime = 0;
+                      }
                     });
                     setIsPlaying(false);
                     setCurrentTime(0);
@@ -2615,6 +2700,25 @@ export default function Home() {
                 headerBpm={selectedSong?.bpm}
                 headerKey={selectedSong?.key}
               />
+
+              <button
+                type="button"
+                onClick={() => void handleSyncClick()}
+                disabled={
+                  clickSyncBusy ||
+                  !selectedSong?.stems ||
+                  !Object.keys(selectedSong.stems).some(isClickStemKey)
+                }
+                className="ml-2 shrink-0 flex items-center gap-1.5 rounded-md border border-amber-600/80 bg-amber-950/80 px-2.5 py-1.5 text-[11px] font-bold text-amber-100 shadow-md transition hover:bg-amber-900/90 disabled:cursor-not-allowed disabled:opacity-40 md:px-3 md:text-xs"
+                title="Analiza batería/mezcla alrededor del punto de reproducción y alinea la fase del click al BPM de la canción."
+              >
+                {clickSyncBusy ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+                Sincronizar click
+              </button>
 
               {/* Botón Metronome - REMOVED */}
               
@@ -2721,11 +2825,14 @@ export default function Home() {
                       guitar: { color: 'bg-teal-500', letter: 'G', name: 'Guitar' },
                     };
                     
-                    const config = trackConfig[trackKey as keyof typeof trackConfig] || { 
-                      color: 'bg-gray-500', 
-                      letter: trackKey.charAt(0).toUpperCase(), 
-                      name: trackKey 
-                    };
+                    const clickLike = trackKey.toLowerCase().startsWith('click')
+                    const config = clickLike
+                      ? { color: 'bg-amber-500', letter: '●', name: 'Click' }
+                      : trackConfig[trackKey as keyof typeof trackConfig] || {
+                          color: 'bg-gray-500',
+                          letter: trackKey.charAt(0).toUpperCase(),
+                          name: trackKey,
+                        };
                     
                     // Si es el track del metronome, renderizar componente especial - REMOVED
                     
@@ -2974,11 +3081,14 @@ export default function Home() {
                       guitar: { color: 'bg-teal-500', letter: 'G', name: 'Guitar' },
                     };
                     
-                    const config = trackConfig[trackKey as keyof typeof trackConfig] || { 
-                      color: 'bg-gray-500', 
-                      letter: trackKey.charAt(0).toUpperCase(), 
-                      name: trackKey 
-                    };
+                    const clickLike = trackKey.toLowerCase().startsWith('click')
+                    const config = clickLike
+                      ? { color: 'bg-amber-500', letter: '●', name: 'Click' }
+                      : trackConfig[trackKey as keyof typeof trackConfig] || {
+                          color: 'bg-gray-500',
+                          letter: trackKey.charAt(0).toUpperCase(),
+                          name: trackKey,
+                        };
                     
                     return (
                       <div 
@@ -3088,13 +3198,21 @@ export default function Home() {
                                 
                                 // Marcar timestamp del seek manual
                                 lastSeekTimeRef.current = Date.now();
+                                const off = clickSyncOffsetSecRef.current
                                 
-                                // Actualizar tiempo en todos los tracks
-                                Object.values(audioElements).forEach(audio => {
-                                  audio.currentTime = newTime
+                                Object.entries(audioElements).forEach(([trackKey, audio]) => {
+                                  const d = audio.duration || 0
+                                  const safe = Math.max(0, d - 0.02)
+                                  if (isClickStemKey(trackKey)) {
+                                    audio.currentTime = Math.max(0, Math.min(newTime - off, safe))
+                                  } else {
+                                    audio.currentTime = Math.max(0, Math.min(newTime, safe))
+                                  }
                                 })
                                 Object.values(originalAudioElements).forEach(audio => {
-                                  audio.currentTime = newTime
+                                  const d = audio.duration || 0
+                                  const safe = Math.max(0, d - 0.02)
+                                  audio.currentTime = Math.max(0, Math.min(newTime, safe))
                                 })
                                 setCurrentTime(newTime)
                                 console.log('⏩ Seek a:', newTime.toFixed(2), 's')
@@ -3149,13 +3267,22 @@ export default function Home() {
                     duration={duration || 0}
                     isPlaying={isPlaying}
                     onSeekTo={(time) => {
-                      // Implementar búsqueda en el audio
+                      lastSeekTimeRef.current = Date.now()
+                      const off = clickSyncOffsetSecRef.current
                       Object.entries(audioElements).forEach(([trackKey, audio]) => {
-                        audio.currentTime = time;
-                      });
-                      Object.entries(originalAudioElements).forEach(([trackKey, audio]) => {
-                        audio.currentTime = time;
-                      });
+                        const d = audio.duration || 0
+                        const safe = Math.max(0, d - 0.02)
+                        if (isClickStemKey(trackKey)) {
+                          audio.currentTime = Math.max(0, Math.min(time - off, safe))
+                        } else {
+                          audio.currentTime = Math.max(0, Math.min(time, safe))
+                        }
+                      })
+                      Object.values(originalAudioElements).forEach((audio) => {
+                        const d = audio.duration || 0
+                        const safe = Math.max(0, d - 0.02)
+                        audio.currentTime = Math.max(0, Math.min(time, safe))
+                      })
                       setCurrentTime(time);
                     }}
                     songChords={selectedSong?.chords}
