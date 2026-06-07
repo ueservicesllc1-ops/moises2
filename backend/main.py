@@ -70,8 +70,8 @@ def _get_user_token_state(uid: str) -> Optional[Dict]:
         return None
 
 
-def _deduct_tokens(uid: str, duration_seconds: float) -> int:
-    """Deduct tokens from user balance. Returns tokens_deducted."""
+def _deduct_tokens(uid: str, duration_seconds: float, description: str = "Separación de audio") -> int:
+    """Deduct tokens from user balance and write to history. Returns tokens_deducted."""
     fs = _get_firestore()
     if not fs or not uid:
         return 0
@@ -79,7 +79,19 @@ def _deduct_tokens(uid: str, duration_seconds: float) -> int:
     try:
         ref = fs.collection("users").document(uid)
         ref.update({"tokenBalance": fb_firestore.Increment(-tokens)})
-        print(f"[TOKENS] Deducted {tokens} tokens from user {uid} for {duration_seconds:.1f}s audio")
+        
+        # Log to token_history subcollection
+        try:
+            ref.collection("token_history").add({
+                "amount": -tokens,
+                "type": "separation",
+                "description": description,
+                "timestamp": fb_firestore.SERVER_TIMESTAMP
+            })
+        except Exception as history_e:
+            print(f"[TOKENS] Error writing history log: {history_e}")
+            
+        print(f"[TOKENS] Deducted {tokens} tokens from user {uid} for {duration_seconds:.1f}s audio - {description}")
     except Exception as e:
         print(f"[TOKENS] Error deducting tokens for user {uid}: {e}")
     return tokens
@@ -763,7 +775,7 @@ async def separate_audio_handler(
                             if is_free_cache:
                                 _mark_free_separation_used(uid)
                             else:
-                                _deduct_tokens(uid, float(task.duration or 0))
+                                _deduct_tokens(uid, float(task.duration or 0), f"Separación (Cache) de {file.filename}")
                     except Exception as tok_cache_e:
                         print(f"[TOKENS] Error during cache-hit token update: {tok_cache_e}")
                 # ─────────────────────────────────────────────────────────────
@@ -1261,7 +1273,7 @@ async def process_audio(
                     if is_free:
                         _mark_free_separation_used(uid_for_deduct)
                     else:
-                        _deduct_tokens(uid_for_deduct, float(duration or 0))
+                        _deduct_tokens(uid_for_deduct, float(duration or 0), f"Separación de {getattr(task, 'original_filename', 'audio')}")
             except Exception as tok_e:
                 print(f"[TOKENS] Error during post-completion token update: {tok_e}")
         # ──────────────────────────────────────────────────────────────────

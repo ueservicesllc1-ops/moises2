@@ -27,6 +27,10 @@ import com.juditht.ai.ui.auth.AuthViewModel
 import com.juditht.ai.ui.components.*
 import com.juditht.ai.ui.theme.*
 
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
 @Composable
 fun ProfileScreen(
     onLibraryClick: () -> Unit,
@@ -261,6 +265,59 @@ fun ProfileScreen(
                             onClick = onNavigateToPaywall,
                             modifier = Modifier.fillMaxWidth()
                         )
+                    }
+                }
+            }
+
+            if (state.transactions.isNotEmpty()) {
+                Spacer(Modifier.height(20.dp))
+                SectionLabel(
+                    text = "Historial de Tokens",
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                )
+
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    cornerRadius = 16.dp
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        state.transactions.forEach { tx ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = tx.description,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = SonicOnSurface
+                                    )
+                                    val sdf = SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault())
+                                    Text(
+                                        text = sdf.format(Date(tx.timestamp)),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = SonicOutline
+                                    )
+                                }
+
+                                val amountText = if (tx.amount > 0) "+${tx.amount}" else "${tx.amount}"
+                                val amountColor = if (tx.amount > 0) SonicTertiary else SonicError
+
+                                Text(
+                                    text = amountText,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = amountColor,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            if (tx != state.transactions.last()) {
+                                HorizontalDivider(color = GlassWhite10, modifier = Modifier.padding(vertical = 4.dp))
+                            }
+                        }
                     }
                 }
             }

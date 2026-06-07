@@ -3,7 +3,11 @@ package com.juditht.ai.ui.profile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.ListenerRegistration
 import com.juditht.ai.data.model.TokenStatus
+import com.juditht.ai.data.model.TokenTransaction
 import com.juditht.ai.data.repository.ApiResult
 import com.juditht.ai.data.repository.TokenRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,6 +21,7 @@ import javax.inject.Inject
 data class ProfileState(
     val isLoading: Boolean = false,
     val tokenStatus: TokenStatus? = null,
+    val transactions: List<TokenTransaction> = emptyList(),
     val error: String? = null
 )
 
@@ -28,6 +33,7 @@ class ProfileViewModel @Inject constructor(
     private val auth = FirebaseAuth.getInstance()
     private val _state = MutableStateFlow(ProfileState())
     val state: StateFlow<ProfileState> = _state.asStateFlow()
+    private var historyListener: ListenerRegistration? = null
 
     init {
         refresh()
@@ -37,6 +43,33 @@ class ProfileViewModel @Inject constructor(
         val uid = auth.currentUser?.uid ?: return
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
+
+            // Listen to transaction history in real-time
+            historyListener?.remove()
+            historyListener = FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(uid)
+                .collection("token_history")
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .addSnapshotListener { snapshot, e ->
+                    if (snapshot != null) {
+                        val txs = snapshot.documents.mapNotNull { doc ->
+                            val amount = doc.getLong("amount")?.toInt() ?: 0
+                            val type = doc.getString("type") ?: ""
+                            val description = doc.getString("description") ?: ""
+                            val timestamp = doc.getTimestamp("timestamp")?.seconds?.times(1000) ?: 0L
+                            TokenTransaction(
+                                id = doc.id,
+                                amount = amount,
+                                type = type,
+                                description = description,
+                                timestamp = timestamp
+                            )
+                        }
+                        _state.update { it.copy(transactions = txs) }
+                    }
+                }
+
             when (val result = tokenRepository.getTokenStatus(uid)) {
                 is ApiResult.Success -> {
                     _state.update { it.copy(isLoading = false, tokenStatus = result.data) }
@@ -47,5 +80,10 @@ class ProfileViewModel @Inject constructor(
                 else -> {}
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        historyListener?.remove()
     }
 }

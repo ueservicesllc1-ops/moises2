@@ -84,3 +84,11 @@ object TokenCost {
     fun costForDuration(durationSeconds: Double): Int =
         maxOf(1, ((durationSeconds / 60.0) * TOKENS_PER_MINUTE).toInt())
 }
+
+data class TokenTransaction(
+    val id: String = "",
+    val amount: Int = 0,
+    val type: String = "",
+    val description: String = "",
+    val timestamp: Long = 0L
+)

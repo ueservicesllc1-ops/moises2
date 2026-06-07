@@ -318,9 +318,20 @@ class ResultsViewModel @Inject constructor(
             if (uid != null) {
                 try {
                     val db = FirebaseFirestore.getInstance()
-                    db.collection("users").document(uid)
-                        .update("tokenBalance", FieldValue.increment(-DOWNLOAD_TOKEN_COST.toLong()))
-                        .await()
+                    val batch = db.batch()
+                    val userRef = db.collection("users").document(uid)
+                    batch.update(userRef, "tokenBalance", FieldValue.increment(-DOWNLOAD_TOKEN_COST.toLong()))
+                    
+                    val historyRef = userRef.collection("token_history").document()
+                    val historyData = hashMapOf(
+                        "amount" to -DOWNLOAD_TOKEN_COST,
+                        "type" to "download",
+                        "description" to "Descarga de pista $stemName ($format)",
+                        "timestamp" to FieldValue.serverTimestamp()
+                    )
+                    batch.set(historyRef, historyData)
+                    batch.commit().await()
+                    
                     // Reflect new balance in state
                     _state.update { it.copy(tokenBalance = it.tokenBalance - DOWNLOAD_TOKEN_COST) }
                 } catch (e: Exception) {
