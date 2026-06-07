@@ -61,21 +61,42 @@ class AuthViewModel @Inject constructor() : ViewModel() {
             return
         }
 
-        tokenListener = firestore.collection("users").document(uid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) return@addSnapshotListener
-                if (snapshot != null && snapshot.exists()) {
-                    val planId = snapshot.getString("planId") ?: "free"
-                    
-                    if (lastKnownPlanId != null && 
-                        (lastKnownPlanId == "free" || lastKnownPlanId == "starter") && 
-                        (planId != "free" && planId != "starter")) {
-                        // User just upgraded to premium!
-                        _state.value = _state.value.copy(isNewPremium = true)
-                    }
-                    lastKnownPlanId = planId
-                }
+        val docRef = firestore.collection("users").document(uid)
+        
+        // Ensure user is tagged as android
+        docRef.get().addOnSuccessListener { snapshot ->
+            if (!snapshot.exists()) {
+                val email = auth.currentUser?.email ?: ""
+                val displayName = auth.currentUser?.displayName ?: email.substringBefore("@")
+                docRef.set(hashMapOf(
+                    "email" to email,
+                    "displayName" to displayName,
+                    "planId" to "free",
+                    "isPremium" to false,
+                    "tokenBalance" to 0,
+                    "freeSeparationUsed" to false,
+                    "platform" to "android",
+                    "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                ))
+            } else if (snapshot.getString("platform") == null || snapshot.getString("platform") != "android") {
+                docRef.update("platform", "android")
             }
+        }
+
+        tokenListener = docRef.addSnapshotListener { snapshot, error ->
+            if (error != null) return@addSnapshotListener
+            if (snapshot != null && snapshot.exists()) {
+                val planId = snapshot.getString("planId") ?: "free"
+                
+                if (lastKnownPlanId != null && 
+                    (lastKnownPlanId == "free" || lastKnownPlanId == "starter") && 
+                    (planId != "free" && planId != "starter")) {
+                    // User just upgraded to premium!
+                    _state.value = _state.value.copy(isNewPremium = true)
+                }
+                lastKnownPlanId = planId
+            }
+        }
     }
 
     fun clearNewPremiumStatus() {

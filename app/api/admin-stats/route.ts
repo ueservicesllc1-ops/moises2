@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
         planId: data.planId || 'free',
         tokenBalance: data.tokenBalance || 0,
         freeSeparationUsed: data.freeSeparationUsed || false,
+        platform: data.platform || 'web',
         createdAt: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate().toISOString() : data.createdAt) : null,
       }
     })

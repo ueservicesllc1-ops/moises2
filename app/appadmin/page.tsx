@@ -15,6 +15,7 @@ interface User {
   tokenBalance: number
   freeSeparationUsed: boolean
   createdAt: string | null
+  platform?: string
 }
 
 interface VisitStats {
@@ -73,7 +74,10 @@ export default function AppAdminPage() {
       if (!res.ok) throw new Error('Error al cargar estadísticas')
       const data = await res.json()
       
-      setUsers(data.users || [])
+      const allUsers: User[] = data.users || []
+      const appUsers = allUsers.filter(u => u.platform === 'android' || (u.email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase())
+      
+      setUsers(appUsers)
       setVisitStats(data.visitsStats || { total_visits: 0, unique_visitors: 0, today_visits: 0 })
       setSeparationStats(data.separationStats || { total_songs: 0, android_songs: 0, web_songs: 0 })
       setAndroidInstalls(data.androidInstalls || 0)
