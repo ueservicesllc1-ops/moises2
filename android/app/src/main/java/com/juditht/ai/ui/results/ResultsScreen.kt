@@ -78,6 +78,44 @@ fun ResultsScreen(
         )
     }
 
+    if (state.showTokensLow) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissTokensLow() },
+            title = {
+                Text(
+                    text = "⚡ Tokens Insuficientes",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = SonicOnSurface
+                )
+            },
+            text = {
+                Text(
+                    text = "Necesitas al menos 20 tokens para descargar una pista. Tu balance actual es de ${state.tokenBalance} tokens. Actualiza tu plan para obtener más tokens.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = SonicOnSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.dismissTokensLow()
+                        onNavigateToPaywall()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = SonicPrimary)
+                ) {
+                    Text("Mejorar Plan", color = SonicOnPrimary)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissTokensLow() }) {
+                    Text("Cerrar", color = SonicOutline)
+                }
+            },
+            containerColor = SonicSurfaceContainerHigh,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
     // Initialize ExoPlayer and start polling
     LaunchedEffect(taskId) {
         viewModel.initPlayer()

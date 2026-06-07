@@ -10,6 +10,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
 import com.juditht.ai.data.model.StemItem
 import com.juditht.ai.data.model.stemEmoji
 import com.juditht.ai.data.repository.ApiResult
@@ -19,6 +22,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -42,7 +46,9 @@ data class ResultsState(
     val currentlyPlayingUrl: String? = null,
     val downloadStatuses: Map<String, DownloadStatus> = emptyMap(),
     val planId: String = "free",
+    val tokenBalance: Int = 0,
     val showPreviewLock: Boolean = false,
+    val showTokensLow: Boolean = false,    // dialog when tokens insufficient for download
     // Mixer states
     val volumes: Map<String, Float> = emptyMap(), // stemName -> volume (0f to 1f)
     val mutes: Map<String, Boolean> = emptyMap(),   // stemName -> isMuted
@@ -164,7 +170,10 @@ class ResultsViewModel @Inject constructor(
             viewModelScope.launch {
                 val tokenRes = tokenRepository.getTokenStatus(uid)
                 if (tokenRes is ApiResult.Success) {
-                    _state.update { it.copy(planId = tokenRes.data.planId) }
+                    _state.update { it.copy(
+                        planId = tokenRes.data.planId,
+                        tokenBalance = tokenRes.data.tokenBalance
+                    ) }
                 }
             }
         }
@@ -282,12 +291,44 @@ class ResultsViewModel @Inject constructor(
         _state.update { it.copy(showPreviewLock = false) }
     }
 
+    fun dismissTokensLow() {
+        _state.update { it.copy(showTokensLow = false) }
+    }
+
+    companion object {
+        const val DOWNLOAD_TOKEN_COST = 20
+    }
+
     fun downloadStem(stemName: String, stemUrl: String, format: String) {
-        if (_state.value.planId == "free") {
+        val currentPlan = _state.value.planId
+        if (currentPlan == "free" || currentPlan == "starter") {
             _state.update { it.copy(downloadStatuses = it.downloadStatuses + (stemName to DownloadStatus.Failed("Las descargas están limitadas a planes Premium"))) }
             return
         }
+
+        val currentBalance = _state.value.tokenBalance
+        if (currentBalance < DOWNLOAD_TOKEN_COST) {
+            _state.update { it.copy(showTokensLow = true) }
+            return
+        }
+
         viewModelScope.launch {
+            // Deduct 20 tokens in Firestore before downloading
+            val uid = FirebaseAuth.getInstance().currentUser?.uid
+            if (uid != null) {
+                try {
+                    val db = FirebaseFirestore.getInstance()
+                    db.collection("users").document(uid)
+                        .update("tokenBalance", FieldValue.increment(-DOWNLOAD_TOKEN_COST.toLong()))
+                        .await()
+                    // Reflect new balance in state
+                    _state.update { it.copy(tokenBalance = it.tokenBalance - DOWNLOAD_TOKEN_COST) }
+                } catch (e: Exception) {
+                    // If deduction fails, block the download
+                    _state.update { it.copy(downloadStatuses = it.downloadStatuses + (stemName to DownloadStatus.Failed("Error al descontar tokens"))) }
+                    return@launch
+                }
+            }
             _state.update { it.copy(downloadStatuses = it.downloadStatuses + (stemName to DownloadStatus.InProgress(0))) }
             try {
                 withContext(Dispatchers.IO) {
