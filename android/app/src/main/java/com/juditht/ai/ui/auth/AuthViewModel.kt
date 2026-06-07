@@ -32,6 +32,17 @@ class AuthViewModel @Inject constructor() : ViewModel() {
     private val _state = MutableStateFlow(AuthState(currentUser = auth.currentUser))
     val state: StateFlow<AuthState> = _state.asStateFlow()
 
+    init {
+        viewModelScope.launch {
+            try {
+                auth.currentUser?.reload()?.await()
+                _state.value = _state.value.copy(currentUser = auth.currentUser)
+            } catch (e: Exception) {
+                // Ignore network issues
+            }
+        }
+    }
+
     val isLoggedIn: Boolean get() = auth.currentUser != null
     val currentUserId: String get() = auth.currentUser?.uid ?: ""
 
