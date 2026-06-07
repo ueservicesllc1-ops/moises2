@@ -10,6 +10,10 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+import android.content.Context
+import android.media.MediaMetadataRetriever
+import dagger.hilt.android.qualifiers.ApplicationContext
+
 // ── Stem individual seleccionable ─────────────────────────────────────────────
 
 data class StemSelection(
@@ -53,7 +57,9 @@ data class UploadState(
     val error: String? = null,
     val taskId: String? = null,
     val needsPaywall: Boolean = false,
-    val paywallReason: String? = null
+    val paywallReason: String? = null,
+    val estimatedDurationSeconds: Double = 0.0,
+    val estimatedTokensCost: Int = 0
 ) {
     fun getSeparationType(): String = when (mode) {
         SeparationMode.VocalInstrumental -> "vocals-instrumental"
@@ -74,14 +80,37 @@ data class UploadState(
 @HiltViewModel
 class UploadViewModel @Inject constructor(
     private val repository: SeparationRepository,
-    private val tokenRepository: com.juditht.ai.data.repository.TokenRepository
+    private val tokenRepository: com.juditht.ai.data.repository.TokenRepository,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(UploadState())
     val state: StateFlow<UploadState> = _state.asStateFlow()
 
     fun onFileSelected(uri: Uri, fileName: String) {
-        _state.update { it.copy(selectedUri = uri, selectedFileName = fileName, error = null) }
+        var durationMs = 0L
+        try {
+            val retriever = MediaMetadataRetriever()
+            retriever.setDataSource(context, uri)
+            val time = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            durationMs = time?.toLongOrNull() ?: 0L
+            retriever.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        val durationSeconds = durationMs / 1000.0
+        val tokensCost = Math.ceil((durationSeconds / 60.0) * 33.0).toInt() // TOKENS_PER_MINUTE = 33
+
+        _state.update {
+            it.copy(
+                selectedUri = uri,
+                selectedFileName = fileName,
+                error = null,
+                estimatedDurationSeconds = durationSeconds,
+                estimatedTokensCost = tokensCost
+            )
+        }
     }
 
     fun onModeChanged(mode: SeparationMode) {

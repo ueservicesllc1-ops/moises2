@@ -174,6 +174,57 @@ fun UploadScreen(
                 }
             }
 
+            if (hasFile) {
+                val mins = (state.estimatedDurationSeconds / 60).toInt()
+                val secs = (state.estimatedDurationSeconds % 60).toInt()
+                val durationText = String.format("%02d:%02d", mins, secs)
+
+                GlassCard(modifier = Modifier.fillMaxWidth(), cornerRadius = 12.dp) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = SonicPrimary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "Duración: $durationText",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = SonicOnSurface
+                                )
+                                Text(
+                                    text = "Costo estimado: ${state.estimatedTokensCost} tokens",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = SonicOnSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = SonicPrimary.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = "⚡ -${state.estimatedTokensCost} Tkn",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = SonicPrimary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
             // ── Selector de modo de separación ────────────────────────────────
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SectionLabel("MODO DE SEPARACIÓN")
