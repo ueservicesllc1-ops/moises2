@@ -112,7 +112,7 @@ class SeparationRepository @Inject constructor(
                 )
                 ApiResult.Success(body)
             } else {
-                ApiResult.Error(response.errorBody()?.string() ?: "Upload failed", response.code())
+                ApiResult.Error(parseErrorMessage(response.errorBody()?.string()), response.code())
             }
         } catch (e: Exception) {
             ApiResult.Error(e.message ?: "Unknown error")
@@ -142,7 +142,7 @@ class SeparationRepository @Inject constructor(
                 }
                 ApiResult.Success(status)
             } else {
-                ApiResult.Error(response.errorBody()?.string() ?: "Status check failed", response.code())
+                ApiResult.Error(parseErrorMessage(response.errorBody()?.string()), response.code())
             }
         } catch (e: Exception) {
             ApiResult.Error(e.message ?: "Network error")
@@ -175,6 +175,21 @@ class SeparationRepository @Inject constructor(
             gson.fromJson(json, Map::class.java) as Map<String, String>
         } catch (e: Exception) {
             emptyMap()
+        }
+    }
+
+    private fun parseErrorMessage(errorBody: String?): String {
+        if (errorBody == null) return "Error en la solicitud"
+        return try {
+            val map = gson.fromJson(errorBody, Map::class.java)
+            val detail = map["detail"]
+            if (detail is Map<*, *>) {
+                (detail["message"] as? String) ?: errorBody
+            } else {
+                (detail as? String) ?: (map["error"] as? String) ?: (map["message"] as? String) ?: errorBody
+            }
+        } catch (e: Exception) {
+            errorBody
         }
     }
 }

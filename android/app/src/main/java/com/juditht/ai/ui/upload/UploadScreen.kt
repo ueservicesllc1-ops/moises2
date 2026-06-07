@@ -45,12 +45,25 @@ fun UploadScreen(
     var showPaywallDialog by remember { mutableStateOf(false) }
     var paywallReason by remember { mutableStateOf<String?>(null) }
 
+    var showErrorDialog by remember { mutableStateOf(false) }
+    var errorDialogText by remember { mutableStateOf("") }
+
     // Mostrar el modal de alerta si requiere tokens o suscripción
     LaunchedEffect(state.needsPaywall) {
         if (state.needsPaywall) {
             paywallReason = state.paywallReason
             showPaywallDialog = true
             viewModel.clearPaywallTrigger()
+        }
+    }
+
+    // Mostrar modal de error si ocurre un fallo en el servidor
+    LaunchedEffect(state.error) {
+        state.error?.let { err ->
+            if (!err.contains("Selecciona") && !err.contains("instrumento")) {
+                errorDialogText = err
+                showErrorDialog = true
+            }
         }
     }
 
@@ -317,7 +330,10 @@ fun UploadScreen(
 
             // ── Error ─────────────────────────────────────────────────────────
             if (state.error != null) {
-                Text(state.error!!, color = SonicError, style = MaterialTheme.typography.bodyMedium)
+                val err = state.error!!
+                if (err.contains("Selecciona") || err.contains("instrumento")) {
+                    Text(err, color = SonicError, style = MaterialTheme.typography.bodyMedium)
+                }
             }
 
             // ── Botón de inicio ───────────────────────────────────────────────
@@ -356,12 +372,12 @@ fun UploadScreen(
                         modifier = Modifier.size(28.dp)
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("¡Límite de Tokens Alcanzado!", color = SonicOnSurface)
+                    Text("Tokens Insuficientes", color = SonicOnSurface)
                 }
             },
             text = {
                 Text(
-                    "No tienes suficientes tokens para procesar esta canción. Por favor actualiza a uno de nuestros planes premium para continuar separando canciones de forma ilimitada.",
+                    "Error: No tienes suficientes tokens para separar esta canción.\n\nPor favor, mejora tu plan o compra más tokens para continuar.",
                     color = SonicOnSurfaceVariant
                 )
             },
@@ -373,7 +389,7 @@ fun UploadScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = SonicPrimary)
                 ) {
-                    Text("Ver Planes Premium", color = SonicOnPrimary)
+                    Text("Mejorar Plan", color = SonicOnPrimary)
                 }
             },
             dismissButton = {
@@ -385,6 +401,47 @@ fun UploadScreen(
             },
             containerColor = SonicSurface,
             titleContentColor = SonicPrimary,
+            textContentColor = SonicOnSurfaceVariant
+        )
+    }
+
+    if (showErrorDialog) {
+        AlertDialog(
+            onDismissRequest = { 
+                showErrorDialog = false 
+                viewModel.clearError()
+            },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Error,
+                        contentDescription = null,
+                        tint = SonicError,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Error de Procesamiento", color = SonicOnSurface)
+                }
+            },
+            text = {
+                Text(
+                    text = errorDialogText,
+                    color = SonicOnSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showErrorDialog = false
+                        viewModel.clearError()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = SonicPrimary)
+                ) {
+                    Text("Entendido", color = SonicOnPrimary)
+                }
+            },
+            containerColor = SonicSurface,
+            titleContentColor = SonicError,
             textContentColor = SonicOnSurfaceVariant
         )
     }

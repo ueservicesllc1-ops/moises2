@@ -129,9 +129,14 @@ class UploadViewModel @Inject constructor(
                     return@launch
                 }
             } else if (tokenCheck is ApiResult.Error) {
+                val cleanMsg = if (tokenCheck.message.length > 150 || tokenCheck.message.contains("<html") || tokenCheck.message.contains("Exception")) {
+                    "Error del servidor al verificar tokens."
+                } else {
+                    tokenCheck.message
+                }
                 _state.update { it.copy(
                     isUploading = false,
-                    error = "Error al verificar tus tokens: ${tokenCheck.message}"
+                    error = "Error al verificar tus tokens: $cleanMsg"
                 ) }
                 return@launch
             }
@@ -173,6 +178,8 @@ class UploadViewModel @Inject constructor(
     fun clearPaywallTrigger() {
         _state.update { it.copy(needsPaywall = false, paywallReason = null) }
     }
+
+    fun clearError() { _state.update { it.copy(error = null) } }
 
     fun clearTaskId() { _state.update { it.copy(taskId = null) } }
 }
