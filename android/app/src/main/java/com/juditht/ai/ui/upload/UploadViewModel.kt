@@ -148,7 +148,22 @@ class UploadViewModel @Inject constructor(
                     _state.update { it.copy(isUploading = false, taskId = result.data.data?.taskId) }
                 }
                 is ApiResult.Error -> {
-                    _state.update { it.copy(isUploading = false, error = result.message) }
+                    val msg = result.message.lowercase()
+                    if (result.code == 403 || msg.contains("token") || msg.contains("insufficient") || msg.contains("exhausted") || msg.contains("limit")) {
+                        _state.update { it.copy(
+                            isUploading = false,
+                            needsPaywall = true,
+                            paywallReason = "no_tokens"
+                        ) }
+                    } else {
+                        // Clean up extremely long stack trace strings
+                        val cleanMessage = if (result.message.length > 150 || result.message.contains("Exception") || result.message.contains("at ")) {
+                            "Error del servidor al procesar el audio. Por favor, intenta de nuevo."
+                        } else {
+                            result.message
+                        }
+                        _state.update { it.copy(isUploading = false, error = cleanMessage) }
+                    }
                 }
                 else -> {}
             }

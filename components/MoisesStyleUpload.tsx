@@ -13,7 +13,7 @@ import { saveSong, getCurrentMonthProcessedSeconds } from '../lib/firestore';
 import { getBackendUrl } from '../lib/config';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
-import { PLAN_LIMITS, resolvePlanIdFromUserData } from '@/lib/pricing';
+import { PLAN_LIMITS, resolvePlanIdFromUserData, type PlanId } from '@/lib/pricing';
 import SuccessWavePopup from './SuccessWavePopup';
 
 interface MoisesStyleUploadProps {
@@ -35,7 +35,7 @@ interface SeparationOptions {
 
 const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete, preloadedFile }) => {
   const { user } = useAuth();
-  const [currentPlanId, setCurrentPlanId] = useState<'starter' | 'lite' | 'pro'>('starter');
+  const [currentPlanId, setCurrentPlanId] = useState<PlanId>('starter');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadMessage, setUploadMessage] = useState('');

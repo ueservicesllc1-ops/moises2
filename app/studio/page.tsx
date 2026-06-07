@@ -1003,7 +1003,7 @@ export default function Home() {
       for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i)
       const audioBlob = new Blob([bytes], { type: 'audio/mpeg' })
 
-      const fileName = `${data.title}.mp3`.replace(/[<>:"/\\|?*]/g, '_')
+      const fileName = `${data.title}.mp3`.replace(/[<>:"\/\\|?*]/g, '_')
       const audioFile = new File([audioBlob], fileName, { type: 'audio/mpeg' })
 
       setYoutubeExtractedAudio(audioFile)
@@ -1638,6 +1638,17 @@ export default function Home() {
     path += ` Z`; // Cerrar el path
     return path;
   };
+
+  interface MultiResLevel {
+    samplesPerPeak: number;
+    peaks: Float32Array;
+  }
+
+  interface MultiResData {
+    levels: MultiResLevel[];
+    sampleRate: number;
+    duration: number;
+  }
 
   const generateMultiResWaveform = (channelData: Float32Array, sampleRate: number): MultiResData => {
     const duration = channelData.length / sampleRate;
@@ -2358,6 +2369,8 @@ export default function Home() {
     } finally {
       setClickSyncBusy(false);
     }
+  };
+
   const handleSnapDownbeat = useCallback(async () => {
     // Buscar la pista de referencia rítmica más sólida
     const refOrder = ['drums', 'instrumental', 'other', 'bass'] as const;
@@ -2401,7 +2414,10 @@ export default function Home() {
       
       // Actualizar estado local
       setSongs(prev => prev.map(s => (s.id === selectedSong.id ? { ...s, clickConfig: config } : s)));
-      setSelectedSong(prev => (prev?.id === selectedSong.id ? { ...prev, clickConfig: config } : prev));
+      setSelectedSong(prev => {
+        if (!prev) return null;
+        return prev.id === selectedSong.id ? { ...prev, clickConfig: config } : prev;
+      });
       
       // Forzar regeneración del click (usamos un pequeño delay para asegurar el estado)
       setTimeout(() => {
@@ -2454,11 +2470,15 @@ export default function Home() {
         if (refKey) {
           const url = resolveAudioFetchUrl(stems[refKey]);
           if (url) {
-            console.log(`[MAGIC SYNC] Cargando referencia desde URL: ${refKey}`);
-            const decoded = await fetchDecodeMono(url);
-            refData = decoded.data;
-            refSr = decoded.sampleRate;
-            refLabel = refKey;
+            const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
+            try {
+              const decoded = await fetchDecodeMono(url, ac);
+              refData = decoded.data;
+              refSr = decoded.sr;
+              refLabel = refKey;
+            } finally {
+              await ac.close();
+            }
           }
         }
       }

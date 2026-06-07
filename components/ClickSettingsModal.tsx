@@ -116,7 +116,7 @@ const ClickSettingsModal: React.FC<ClickSettingsModalProps> = ({
                 }`}
               >
                 {config.isManual && <Check className="w-4 h-4" />}
-                Marcar como "Tiempo 1" (Downbeat)
+                Marcar como &quot;Tiempo 1&quot; (Downbeat)
               </button>
               
               {onSnap && (
@@ -134,7 +134,7 @@ const ClickSettingsModal: React.FC<ClickSettingsModalProps> = ({
                   className="w-full py-2 px-4 rounded-xl font-bold text-xs bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-500 hover:to-indigo-500 transition-all flex items-center justify-center gap-2 shadow-lg border border-white/10"
                 >
                   <Magnet className="w-4 h-4" />
-                  Ajustar al "golpe" más cercano (Snap)
+                  Ajustar al &quot;golpe&quot; más cercano (Snap)
                 </button>
               )}
               {config.downbeatSec !== undefined && config.downbeatSec > 0 && (
@@ -165,7 +165,7 @@ const ClickSettingsModal: React.FC<ClickSettingsModalProps> = ({
               </button>
               
               <div className="flex-1 text-center bg-black/60 py-3 rounded-xl border border-gray-800 font-mono text-xl font-bold text-white">
-                {config.offsetMs > 0 ? '+' : ''}{config.offsetMs} ms
+                {(config.offsetMs ?? 0) > 0 ? '+' : ''}{config.offsetMs ?? 0} ms
               </div>
 
               <button 

@@ -42,12 +42,15 @@ fun UploadScreen(
     val state   by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    // Navegar a la pantalla de pago si lo requiere
+    var showPaywallDialog by remember { mutableStateOf(false) }
+    var paywallReason by remember { mutableStateOf<String?>(null) }
+
+    // Mostrar el modal de alerta si requiere tokens o suscripción
     LaunchedEffect(state.needsPaywall) {
         if (state.needsPaywall) {
-            val reason = state.paywallReason
+            paywallReason = state.paywallReason
+            showPaywallDialog = true
             viewModel.clearPaywallTrigger()
-            onNavigateToPaywall(reason)
         }
     }
 
@@ -339,6 +342,51 @@ fun UploadScreen(
 
             Spacer(Modifier.height(80.dp))
         }
+    }
+
+    if (showPaywallDialog) {
+        AlertDialog(
+            onDismissRequest = { showPaywallDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = SonicPrimary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("¡Límite de Tokens Alcanzado!", color = SonicOnSurface)
+                }
+            },
+            text = {
+                Text(
+                    "No tienes suficientes tokens para procesar esta canción. Por favor actualiza a uno de nuestros planes premium para continuar separando canciones de forma ilimitada.",
+                    color = SonicOnSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showPaywallDialog = false
+                        onNavigateToPaywall(paywallReason)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = SonicPrimary)
+                ) {
+                    Text("Ver Planes Premium", color = SonicOnPrimary)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showPaywallDialog = false }
+                ) {
+                    Text("Cancelar", color = SonicOutline)
+                }
+            },
+            containerColor = SonicSurface,
+            titleContentColor = SonicPrimary,
+            textContentColor = SonicOnSurfaceVariant
+        )
     }
 }
 
