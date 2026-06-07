@@ -281,9 +281,12 @@ app.add_middleware(
         "https://moises2-production.up.railway.app",
         "https://moises2-production-d1cb.up.railway.app",
         "https://judith.life",
-        "https://www.judith.life"
+        "https://www.judith.life",
+        # Android apps send no Origin header, so allow_origins=* is needed.
+        # Alternatively keep specific origins; Android native HTTP does not use CORS.
+        "*",
     ],
-    allow_credentials=True,
+    allow_credentials=False,  # must be False when allow_origins=["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -485,8 +488,9 @@ async def separate_with_demucs(
     separation_options: Optional[str] = Form(None),
     user_id: Optional[str] = Form(None),
     quality_profile: Optional[str] = Form("pro_balanced"),
+    generate_click: str = Form("true"),
 ):
-    return await separate_audio_handler(background_tasks, file, separation_type, hi_fi, separation_options, user_id, quality_profile)
+    return await separate_audio_handler(background_tasks, file, separation_type, hi_fi, separation_options, user_id, quality_profile, generate_click)
 
 @app.post("/separate")
 async def separate_alias(
@@ -497,8 +501,9 @@ async def separate_alias(
     separation_options: Optional[str] = Form(None),
     user_id: Optional[str] = Form(None),
     quality_profile: Optional[str] = Form("pro_balanced"),
+    generate_click: str = Form("true"),
 ):
-    return await separate_audio_handler(background_tasks, file, separation_type, hi_fi, separation_options, user_id, quality_profile)
+    return await separate_audio_handler(background_tasks, file, separation_type, hi_fi, separation_options, user_id, quality_profile, generate_click)
 
 async def separate_audio_handler(
     background_tasks: BackgroundTasks,
@@ -508,6 +513,7 @@ async def separate_audio_handler(
     separation_options: Optional[str] = Form(None),
     user_id: Optional[str] = Form(None),
     quality_profile: Optional[str] = Form("pro_balanced"),
+    generate_click: str = Form("true"),
 ):
     """Separar audio usando Demucs"""
     try:
@@ -657,13 +663,15 @@ async def separate_audio_handler(
         # Encolar procesamiento en lugar de lanzarlo directamente
         print(f"[QUEUE] Encolando tarea {task.id}...")
         
+        is_generate_click_bool = generate_click.lower() == "true"
         await queue_manager.add_task(
             task.id,
             process_audio,
             task,
             custom_tracks,
             is_hifi_bool,
-            task.quality_profile
+            task.quality_profile,
+            is_generate_click_bool
         )
         
         queue_pos = queue_manager.get_queue_position(task.id)
@@ -690,6 +698,7 @@ async def process_audio(
     custom_tracks: Optional[Dict] = None,
     hi_fi: bool = False,
     quality_profile: str = "pro_balanced",
+    generate_click: bool = True,
 ):
     """Background task to process audio"""
     try:
@@ -860,7 +869,7 @@ async def process_audio(
         update_progress(82, "Sincronizando metrónomo con la métrica del audio...")
         print(f"[CLICK_DEBUG] Pre-click stems keys at backend: {list(stems.keys())}")
         click_key = _find_click_key(stems)
-        if not click_key:
+        if not click_key and generate_click:
             try:
                 print("[PROCESS] Click no vino desde Modal, ejecutando fallback local...")
                 click_source_path = stems.get("instrumental") or next(iter(stems.values()))
@@ -889,7 +898,7 @@ async def process_audio(
                 print(f"[PROCESS] Error generando click track en fallback local: {e}")
                 import traceback
                 print(f"[PROCESS] Click track traceback:\n{traceback.format_exc()}")
-        else:
+        elif click_key:
             try:
                 click_path = Path(stems[click_key])
                 click_size = click_path.stat().st_size if click_path.exists() else 0
