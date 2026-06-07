@@ -752,6 +752,22 @@ async def separate_audio_handler(
                 db.commit()
                 db.close()
                 print(f"[CACHE] Hit for task {task_id} with key {cache_key[:12]}...")
+
+                # ── Deduct tokens even on cache hit ──────────────────────────
+                if uid:
+                    try:
+                        state_cache = _get_user_token_state(uid)
+                        if state_cache:
+                            plan_cache = state_cache.get("planId", "free")
+                            is_free_cache = plan_cache in ("free", "starter")
+                            if is_free_cache:
+                                _mark_free_separation_used(uid)
+                            else:
+                                _deduct_tokens(uid, float(task.duration or 0))
+                    except Exception as tok_cache_e:
+                        print(f"[TOKENS] Error during cache-hit token update: {tok_cache_e}")
+                # ─────────────────────────────────────────────────────────────
+
                 return {
                     "success": True,
                     "data": {
