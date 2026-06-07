@@ -33,6 +33,39 @@ class MainActivity : ComponentActivity() {
                     Screen.Login.route
                 }
 
+                if (authState.isNewPremium) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { /* Force them to click OK */ },
+                        title = {
+                            androidx.compose.material3.Text(
+                                "¡Felicidades!", 
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                color = com.juditht.ai.ui.theme.SonicPrimary
+                            )
+                        },
+                        text = {
+                            androidx.compose.material3.Text("Tu cuenta ha sido actualizada. ¡Ahora eres Premium y tienes acceso a todas las funcionalidades exclusivas!")
+                        },
+                        confirmButton = {
+                            androidx.compose.material3.TextButton(
+                                onClick = {
+                                    authViewModel.clearNewPremiumStatus()
+                                    // Force reload by navigating to profile if not already there, 
+                                    // or just relying on standard compose recomposition.
+                                    navController.navigate(Screen.Profile.route) {
+                                        popUpTo(Screen.Library.route) { inclusive = false }
+                                    }
+                                }
+                            ) {
+                                androidx.compose.material3.Text("Aceptar", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                            }
+                        },
+                        containerColor = com.juditht.ai.ui.theme.SonicSurfaceContainer,
+                        titleContentColor = com.juditht.ai.ui.theme.SonicOnSurface,
+                        textContentColor = com.juditht.ai.ui.theme.SonicOnSurfaceVariant
+                    )
+                }
+
                 SonicNavGraph(
                     navController    = navController,
                     startDestination = startDestination

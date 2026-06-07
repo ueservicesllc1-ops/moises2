@@ -21,26 +21,70 @@ import javax.inject.Inject
 data class AuthState(
     val isLoading: Boolean = false,
     val currentUser: FirebaseUser? = null,
-    val error: String? = null
+    val error: String? = null,
+    val isNewPremium: Boolean = false
 )
 
 @HiltViewModel
 class AuthViewModel @Inject constructor() : ViewModel() {
 
     private val auth = FirebaseAuth.getInstance()
+    private val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
 
     private val _state = MutableStateFlow(AuthState(currentUser = auth.currentUser))
     val state: StateFlow<AuthState> = _state.asStateFlow()
 
+    private var tokenListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var lastKnownPlanId: String? = null
+
     init {
+        auth.addAuthStateListener { firebaseAuth ->
+            val user = firebaseAuth.currentUser
+            _state.value = _state.value.copy(currentUser = user)
+            setupFirestoreListener(user?.uid)
+        }
+        
         viewModelScope.launch {
             try {
                 auth.currentUser?.reload()?.await()
-                _state.value = _state.value.copy(currentUser = auth.currentUser)
             } catch (e: Exception) {
                 // Ignore network issues
             }
         }
+    }
+
+    private fun setupFirestoreListener(uid: String?) {
+        tokenListener?.remove()
+        tokenListener = null
+        if (uid == null) {
+            lastKnownPlanId = null
+            return
+        }
+
+        tokenListener = firestore.collection("users").document(uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                if (snapshot != null && snapshot.exists()) {
+                    val planId = snapshot.getString("planId") ?: "free"
+                    
+                    if (lastKnownPlanId != null && 
+                        (lastKnownPlanId == "free" || lastKnownPlanId == "starter") && 
+                        (planId != "free" && planId != "starter")) {
+                        // User just upgraded to premium!
+                        _state.value = _state.value.copy(isNewPremium = true)
+                    }
+                    lastKnownPlanId = planId
+                }
+            }
+    }
+
+    fun clearNewPremiumStatus() {
+        _state.value = _state.value.copy(isNewPremium = false)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        tokenListener?.remove()
     }
 
     val isLoggedIn: Boolean get() = auth.currentUser != null
