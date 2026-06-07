@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "987812763731",
+    "project_id": "moises-17d22",
+    "storage_bucket": "moises-17d22.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:987812763731:android:895dd2d8db2baf21038ea6",
+        "android_client_info": {
+          "package_name": "com.juditht.ai"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "987812763731-rdggiufo50egkjndojnkr2v1jeunj794.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.juditht.ai",
+            "certificate_hash": "b25af313fd59e766c06ed143037c12608321a21f"
+          }
+        },
+        {
+          "client_id": "987812763731-ve9mp5squndupmphqk7kqb2ur3ou7are.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDjaURDIhzKSD07H0H_UfW7nDo2PPTRWdc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "987812763731-ve9mp5squndupmphqk7kqb2ur3ou7are.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

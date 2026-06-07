@@ -8,7 +8,7 @@ export const checkoutUrls = {
 
 export type BillingPeriod = 'monthly' | 'yearly'
 
-export type PlanId = 'starter' | 'lite' | 'pro'
+export type PlanId = 'starter' | 'free' | 'lite' | 'pro' | 'ultra'
 
 export type PlanLimits = {
   planId: PlanId
@@ -18,35 +18,65 @@ export type PlanLimits = {
   maxUploadBytes: number
   requiresCard: boolean
   freePreviews: boolean
+  tokensMonthly: number
+  previewOnlySeconds: number | null  // null = full access
 }
 
 export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
   starter: {
     planId: 'starter',
-    displayName: 'Starter',
-    includedMinutesMonthly: 10,
+    displayName: 'Free',
+    includedMinutesMonthly: 0,
     fastQueueMinutesMonthly: 0,
     maxUploadBytes: 200 * 1024 * 1024,
     requiresCard: false,
     freePreviews: true,
+    tokensMonthly: 0,
+    previewOnlySeconds: 40,
+  },
+  free: {
+    planId: 'free',
+    displayName: 'Free',
+    includedMinutesMonthly: 0,
+    fastQueueMinutesMonthly: 0,
+    maxUploadBytes: 200 * 1024 * 1024,
+    requiresCard: false,
+    freePreviews: true,
+    tokensMonthly: 0,
+    previewOnlySeconds: 40,
   },
   lite: {
     planId: 'lite',
     displayName: 'Lite',
-    includedMinutesMonthly: null,
+    includedMinutesMonthly: 30,
     fastQueueMinutesMonthly: 90,
     maxUploadBytes: 2 * 1024 * 1024 * 1024,
     requiresCard: true,
-    freePreviews: true,
+    freePreviews: false,
+    tokensMonthly: 1_000,
+    previewOnlySeconds: null,
   },
   pro: {
     planId: 'pro',
     displayName: 'Pro',
-    includedMinutesMonthly: null,
+    includedMinutesMonthly: 180,
     fastQueueMinutesMonthly: 250,
     maxUploadBytes: 2 * 1024 * 1024 * 1024,
     requiresCard: true,
-    freePreviews: true,
+    freePreviews: false,
+    tokensMonthly: 6_000,
+    previewOnlySeconds: null,
+  },
+  ultra: {
+    planId: 'ultra',
+    displayName: 'Ultra',
+    includedMinutesMonthly: 600,
+    fastQueueMinutesMonthly: 600,
+    maxUploadBytes: 2 * 1024 * 1024 * 1024,
+    requiresCard: true,
+    freePreviews: false,
+    tokensMonthly: 20_000,
+    previewOnlySeconds: null,
   },
 }
 
@@ -56,10 +86,16 @@ type UserLike = {
 } | null | undefined
 
 export function resolvePlanIdFromUserData(userData: UserLike): PlanId {
-  if (!userData) return 'starter'
-  if (userData.planId === 'starter' || userData.planId === 'lite' || userData.planId === 'pro') {
-    return userData.planId
+  if (!userData) return 'free'
+  if (
+    userData.planId === 'free' ||
+    userData.planId === 'starter' ||
+    userData.planId === 'lite' ||
+    userData.planId === 'pro' ||
+    userData.planId === 'ultra'
+  ) {
+    return userData.planId as PlanId
   }
   if (userData.isPremium) return 'pro'
-  return 'starter'
+  return 'free'
 }

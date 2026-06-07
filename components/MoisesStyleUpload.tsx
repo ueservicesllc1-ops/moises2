@@ -280,23 +280,26 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
       console.warn('No se pudo calcular duración antes de subir:', err);
     }
 
-    if (planLimits.includedMinutesMonthly !== null) {
-      try {
-        const usedSeconds = await getCurrentMonthProcessedSeconds(user.uid);
-        const monthlyLimitSeconds = planLimits.includedMinutesMonthly * 60;
-        const projectedTotal = usedSeconds + nextAudioDurationSeconds;
-        if (projectedTotal > monthlyLimitSeconds) {
-          const usedMinutes = (usedSeconds / 60).toFixed(1);
+    // Verificación de tokens usando el nuevo sistema centralizado
+    try {
+      setUploadMessage('Verificando balance de tokens...');
+      const checkRes = await fetch(`/api/check-tokens?uid=${user.uid}`)
+      if (checkRes.ok) {
+        const checkData = await checkRes.json()
+        if (!checkData.canSeparate) {
+          window.dispatchEvent(new Event('open-paywall-modal'))
           alert(
-            `Tu plan Starter incluye 10 minutos al mes. Ya llevas ${usedMinutes} min este mes. ` +
-            'Puedes ver resultados gratis y subir más minutos al pasar a Lite o Pro.'
-          );
-          setUploadMessage('❌ Límite mensual Starter alcanzado (10 min)');
-          return;
+            checkData.reason === 'free_exhausted'
+              ? 'Has agotado tu separación gratuita. Por favor, actualiza a un plan Premium.'
+              : 'No tienes suficientes tokens para realizar esta separación.'
+          )
+          setUploadMessage('❌ Sin tokens suficientes')
+          setIsUploading(false)
+          return
         }
-      } catch (err) {
-        console.error('Error validando minutos del plan Starter:', err);
       }
+    } catch (err) {
+      console.warn('Error checking tokens, continuing:', err)
     }
 
     console.log('🚀 Iniciando upload:', {
@@ -329,6 +332,11 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
       formData.append('separation_type', getSeparationType(separationOptions));
       formData.append('hi_fi', separationOptions.hiFiMode.toString());
       formData.append('user_id', user.uid);
+      
+      // 🔥 Le decimos explícitamente al Backend/Modal que NO genere el click
+      // porque lo vamos a generar matemáticamente en el frontend.
+      formData.append('generate_click', 'false');
+      
       const effectiveQualityProfile = separationOptions.hiFiMode ? 'hifi' : separationOptions.qualityProfile;
       formData.append('quality_profile', effectiveQualityProfile);
       
@@ -541,34 +549,44 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
           // Usar valores del backend
           let calculatedKey = statusResult.key || 'E';
           let calculatedTimeSignature = statusResult.timeSignature || '4/4';
+          let detectedBpm = statusResult.bpm || 126;
 
           console.log('[FIRESTORE] Preparing song data...');
           
+          const finalStems = statusResult.stems || {
+            vocals: `${getBackendUrl()}/audio/${taskId}/vocals.wav`,
+            drums: `${getBackendUrl()}/audio/${taskId}/drums.wav`,
+            bass: `${getBackendUrl()}/audio/${taskId}/bass.wav`,
+            other: `${getBackendUrl()}/audio/${taskId}/other.wav`
+          };
+          
+          // 🔥 Inyectar el canal vacío para el click, basado en el BPM detectado,
+          // para que el Mixer reserve el espacio y muestre el botón "✨ Sync".
+          const clickKeyName = `click_${Math.round(detectedBpm)}`;
+          if (!Object.keys(finalStems).some(key => key.startsWith('click_'))) {
+            finalStems[clickKeyName] = ''; // URL vacía, se generará localmente
+          }
+
           // Guardar en Firestore
           const songData = {
             title: file.name.replace(/\.[^/.]+$/, ""), // Sin extensión
             artist: user.displayName || 'Usuario',
             genre: 'Unknown',
-            bpm: statusResult.bpm || 126,
+            bpm: detectedBpm,
             key: calculatedKey,
             duration: audioDuration.duration,
             durationSeconds: audioDuration.durationSeconds,
             timeSignature: calculatedTimeSignature,
             album: '',
             thumbnail: '',
-            fileUrl: statusResult.stems?.original || `${getBackendUrl()}/audio/${taskId}/original.mp3`,
+            fileUrl: finalStems.original || `${getBackendUrl()}/audio/${taskId}/original.mp3`,
             uploadedAt: new Date().toISOString(),
             userId: user.uid,
             userEmail: user.email || '',
             fileSize: file.size,
             fileName: file.name,
             status: 'completed' as const,
-            stems: statusResult.stems || {
-              vocals: `${getBackendUrl()}/audio/${taskId}/vocals.wav`,
-              drums: `${getBackendUrl()}/audio/${taskId}/drums.wav`,
-              bass: `${getBackendUrl()}/audio/${taskId}/bass.wav`,
-              other: `${getBackendUrl()}/audio/${taskId}/other.wav`
-            },
+            stems: finalStems,
             separationTaskId: taskId,
             chords: statusResult.chords || [],
             keyInfo: statusResult.keyInfo || null
@@ -577,6 +595,7 @@ const MoisesStyleUpload: React.FC<MoisesStyleUploadProps> = ({ onUploadComplete,
           console.log('[FIRESTORE] About to save song...');
           const firestoreSongId = await saveSong(songData);
           console.log('[FIRESTORE] Song saved successfully! ID:', firestoreSongId);
+          window.dispatchEvent(new Event('refresh-tokens'));
           try {
             const refreshedUsage = await getCurrentMonthProcessedSeconds(user.uid);
             setMonthlyUsedSeconds(refreshedUsage);

@@ -17,7 +17,7 @@ export function wrapPhaseDeltaSec(deltaSec: number, periodSec: number): number {
   return d
 }
 
-function linearResample(input: Float32Array, srcSr: number, dstSr: number): Float32Array {
+export function linearResample(input: Float32Array, srcSr: number, dstSr: number): Float32Array {
   if (srcSr === dstSr || input.length === 0) return input
   const ratio = dstSr / srcSr
   const outLen = Math.max(1, Math.floor(input.length * ratio))
@@ -48,7 +48,7 @@ function bufferToMono(buf: AudioBuffer): { data: Float32Array; sr: number } {
   return { data: out, sr: buf.sampleRate }
 }
 
-async function fetchDecodeMono(url: string, ac: AudioContext): Promise<{ data: Float32Array; sr: number }> {
+export async function fetchDecodeMono(url: string, ac: AudioContext): Promise<{ data: Float32Array; sr: number }> {
   const r = await fetch(url)
   if (!r.ok) throw new Error(`No se pudo descargar audio (${r.status})`)
   const ab = await r.arrayBuffer()
@@ -81,72 +81,66 @@ export function estimateBeatGridPhaseOffsetSec(
   bpm: number,
   anchorSec: number,
 ): number {
-  const n = Math.min(refMono.length, clickMono.length)
-  if (n < sr * 0.35 || bpm < 40 || bpm > 240) return 0
-  const period = (60 / bpm) * sr
-  const periodSec = 60 / bpm
-  const hop = Math.max(128, Math.floor(sr / 220))
-  const start = Math.max(0, Math.min(Math.floor(anchorSec * sr), n - 1))
-  const winLen = Math.min(Math.floor(sr * 8), n - start)
-  if (winLen < sr * 0.35) return 0
-
-  const fluxBins = Math.floor(winLen / hop)
-  const flux = new Float32Array(fluxBins)
-  for (let i = 2; i < fluxBins; i++) {
-    const pos = start + i * hop
-    let pos0 = 0
-    let pos1 = 0
-    for (let j = 0; j < hop; j++) {
-      const a = refMono[pos + j] ?? 0
-      const b = refMono[pos + j - hop] ?? 0
-      pos0 += Math.max(0, a - b)
-      pos1 += Math.abs(a)
+  const n = Math.min(refMono.length, sr * 20); // Analizamos los primeros 20s para estabilidad
+  if (n < sr * 0.35 || bpm < 40 || bpm > 240) return 0;
+  
+  const beatPeriod = 60 / bpm;
+  const beatSamples = Math.floor(beatPeriod * sr);
+  
+  // 1. Detección de Fase Fina (Alineación con cualquier golpe)
+  let bestOffsetSamples = 0;
+  let maxPhaseCorr = -1;
+  
+  for (let offset = 0; offset < beatSamples; offset += 32) { // Escaneo por saltos para velocidad
+    let corr = 0;
+    for (let j = 0; j < 8; j++) { 
+      const pos = offset + Math.floor(j * beatSamples);
+      if (pos < n) {
+        // Miramos energía local
+        for (let k = 0; k < 128 && pos + k < n; k++) {
+          corr += Math.abs(refMono[pos + k]);
+        }
+      }
     }
-    flux[i] = pos0 * 0.65 + pos1 * 0.08
-  }
-
-  const cflux = new Float32Array(fluxBins)
-  for (let i = 0; i < fluxBins; i++) {
-    const pos = start + i * hop
-    let e = 0
-    for (let j = 0; j < hop; j++) e += Math.abs(clickMono[pos + j] ?? 0)
-    cflux[i] = e
-  }
-
-  const steps = Math.max(32, Math.min(96, Math.ceil(period / hop)))
-  let bestRef = 0
-  let bestRefScore = -Infinity
-  for (let s = 0; s < steps; s++) {
-    const phi = (s / steps) * period
-    let score = 0
-    for (let t = phi; t < winLen; t += period) {
-      const fi = Math.floor(t / hop)
-      if (fi >= 0 && fi < fluxBins) score += flux[fi]
-    }
-    if (score > bestRefScore) {
-      bestRefScore = score
-      bestRef = phi
+    if (corr > maxPhaseCorr) {
+      maxPhaseCorr = corr;
+      bestOffsetSamples = offset;
     }
   }
 
-  let bestClick = 0
-  let bestClickScore = -Infinity
-  for (let s = 0; s < steps; s++) {
-    const phi = (s / steps) * period
-    let score = 0
-    for (let t = phi; t < winLen; t += period) {
-      const fi = Math.floor(t / hop)
-      if (fi >= 0 && fi < fluxBins) score += cflux[fi]
+  // 2. DETECCIÓN DE DOWNBEAT (Acentuación del "1")
+  // Probamos cuál de los 4 beats del compás tiene más peso rítmico
+  let bestDownbeatIndex = 0;
+  let maxDownbeatEnergy = -1;
+  
+  for (let i = 0; i < 4; i++) {
+    let energy = 0;
+    const startOffset = bestOffsetSamples + (i * beatSamples);
+    
+    // Sumamos energía solo en los tiempos fuertes (cada 4 beats)
+    for (let bar = 0; bar < 4; bar++) {
+      const pos = startOffset + (bar * beatSamples * 4);
+      if (pos < n) {
+        for (let k = -200; k < 200; k++) {
+          if (pos + k >= 0 && pos + k < n) {
+            energy += Math.abs(refMono[pos + k]);
+          }
+        }
+      }
     }
-    if (score > bestClickScore) {
-      bestClickScore = score
-      bestClick = phi
+    
+    if (energy > maxDownbeatEnergy) {
+      maxDownbeatEnergy = energy;
+      bestDownbeatIndex = i;
     }
   }
 
-  const deltaSamples = bestClick - bestRef
-  const deltaSec = deltaSamples / sr
-  return wrapPhaseDeltaSec(deltaSec, periodSec)
+  // El offset final mueve el inicio del click al Downbeat más probable
+  const finalOffsetSamples = bestOffsetSamples + (bestDownbeatIndex * beatSamples);
+  const finalOffsetSec = finalOffsetSamples / sr;
+  
+  // Ajustar para que el click no empiece en el futuro lejano
+  return finalOffsetSec % (beatPeriod * 4);
 }
 
 export async function computeClickSyncOffsetSecFromStems(options: {
@@ -179,4 +173,40 @@ export async function computeClickSyncOffsetSecFromStems(options: {
   } finally {
     await ac.close()
   }
+}
+/**
+ * Encuentra el transitorio (golpe) más cercano a un tiempo objetivo.
+ * Útil para "ajustar" manualmente el metrónomo al impacto exacto de un bombo/redoble.
+ */
+export function findNearestTransientSec(
+  data: Float32Array,
+  sampleRate: number,
+  targetSec: number,
+  windowSec: number = 0.3
+): number {
+  const halfWinSamples = Math.floor((windowSec / 2) * sampleRate);
+  const centerIdx = Math.floor(targetSec * sampleRate);
+  
+  const startIdx = Math.max(0, centerIdx - halfWinSamples);
+  const endIdx = Math.min(data.length - 1, centerIdx + halfWinSamples);
+  
+  let maxEnergy = -1;
+  let bestIdx = centerIdx;
+
+  // Usamos una pequeña ventana deslizante para promediar energía y evitar picos de ruido aislados
+  const smoothWindow = Math.floor(sampleRate * 0.01); // 10ms
+  
+  for (let i = startIdx; i < endIdx - smoothWindow; i++) {
+    let energy = 0;
+    for (let j = 0; j < smoothWindow; j++) {
+      energy += Math.abs(data[i + j]);
+    }
+    
+    if (energy > maxEnergy) {
+      maxEnergy = energy;
+      bestIdx = i + Math.floor(smoothWindow / 2);
+    }
+  }
+  
+  return bestIdx / sampleRate;
 }

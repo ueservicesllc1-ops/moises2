@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<title>SonicSplit AI - Music Library</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&amp;family=Geist:wght@400;600&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Inter:wght@100..900&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-top: 1px solid rgba(255, 255, 255, 0.15);
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .active-glow {
+            box-shadow: 0 0 15px rgba(173, 199, 255, 0.3);
+        }
+        body {
+            background-color: #050505;
+            color: #e5e2e1;
+            -webkit-font-smoothing: antialiased;
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-fixed-dim": "#ebb2ff",
+                        "surface-tint": "#adc7ff",
+                        "tertiary-container": "#1da800",
+                        "on-background": "#e5e2e1",
+                        "secondary": "#ebb2ff",
+                        "primary-fixed-dim": "#adc7ff",
+                        "on-tertiary": "#053900",
+                        "on-primary-container": "#00285b",
+                        "on-primary-fixed": "#001a41",
+                        "on-secondary": "#520072",
+                        "on-primary": "#002e68",
+                        "surface-variant": "#353534",
+                        "on-tertiary-fixed": "#022100",
+                        "on-error": "#690005",
+                        "tertiary-fixed-dim": "#2ae500",
+                        "error-container": "#93000a",
+                        "surface-container": "#201f1f",
+                        "surface-container-low": "#1c1b1b",
+                        "surface-container-lowest": "#0e0e0e",
+                        "tertiary-fixed": "#79ff5b",
+                        "on-secondary-container": "#fff6fc",
+                        "on-secondary-fixed": "#320047",
+                        "primary-fixed": "#d8e2ff",
+                        "inverse-surface": "#e5e2e1",
+                        "on-error-container": "#ffdad6",
+                        "on-secondary-fixed-variant": "#74009f",
+                        "surface-container-high": "#2a2a2a",
+                        "primary-container": "#4a8eff",
+                        "on-primary-fixed-variant": "#004493",
+                        "outline-variant": "#414754",
+                        "on-surface": "#e5e2e1",
+                        "inverse-on-surface": "#313030",
+                        "tertiary": "#2ae500",
+                        "secondary-fixed": "#f8d8ff",
+                        "on-tertiary-fixed-variant": "#095300",
+                        "background": "#131313",
+                        "error": "#ffb4ab",
+                        "surface": "#131313",
+                        "surface-dim": "#131313",
+                        "surface-container-highest": "#353534",
+                        "primary": "#adc7ff",
+                        "secondary-container": "#b600f8",
+                        "surface-bright": "#3a3939",
+                        "on-surface-variant": "#c1c6d7",
+                        "on-tertiary-container": "#043200",
+                        "inverse-primary": "#005bc0",
+                        "outline": "#8b90a0"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "xl": "32px",
+                        "margin-mobile": "20px",
+                        "gutter": "16px",
+                        "md": "16px",
+                        "base": "4px",
+                        "sm": "8px",
+                        "xs": "4px",
+                        "lg": "24px"
+                    },
+                    "fontFamily": {
+                        "display-lg": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "headline-lg-mobile": ["Inter"],
+                        "label-caps": ["Geist"],
+                        "title-md": ["Inter"],
+                        "headline-lg": ["Inter"]
+                    },
+                    "fontSize": {
+                        "display-lg": ["48px", { "lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "800" }],
+                        "body-sm": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "body-lg": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "headline-lg-mobile": ["28px", { "lineHeight": "36px", "fontWeight": "700" }],
+                        "label-caps": ["12px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600" }],
+                        "title-md": ["20px", { "lineHeight": "28px", "fontWeight": "600" }],
+                        "headline-lg": ["32px", { "lineHeight": "40px", "fontWeight": "700" }]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background selection:bg-primary-container/30">
+<!-- Top App Bar -->
+<header class="fixed top-0 w-full z-50 bg-surface/30 backdrop-blur-xl border-b border-white/10 flex justify-between items-center px-margin-mobile h-16">
+<div class="flex items-center gap-md">
+<span class="material-symbols-outlined text-primary hover:opacity-80 transition-opacity active:scale-95 duration-100 cursor-pointer" data-icon="menu">menu</span>
+<h1 class="font-display-lg-mobile text-display-lg-mobile text-primary tracking-tighter">SonicSplit AI</h1>
+</div>
+<div class="flex items-center">
+<div class="w-10 h-10 rounded-full border-2 border-primary/20 overflow-hidden hover:opacity-80 transition-opacity active:scale-95 duration-100 cursor-pointer">
+<img alt="Profile" class="w-full h-full object-cover" data-alt="A professional studio headshot of a creative audio producer in a dimly lit, high-tech recording studio. The individual has a neutral, focused expression. The background is blurred with subtle bokeh from violet and blue LED studio equipment lights, maintaining the sleek, dark-themed, glassmorphism aesthetic of a premium AI tool." src="https://lh3.googleusercontent.com/aida-public/AB6AXuA4fSP_MSEMLWKDn18_Td_hWv2ESgvmfLeK_xsZr2yffuTeVHxkWRade8v5izGvPSMDcwInT1qNwNgWFnQsgUU8bdEaNLo_5XvQ0KrRXOUi4kmzsxOmq2VHClnEjGSH5oP_kpa2rTN22-f2uKemeHFp5-uHuem4cckcmrguoYoM0qh4MSrBcYSV5szTn8AfuY5IU_J9nNaDJZN-xWEvlUeMkdUd2nrxqQsBSS6F58kxCAtxRIKHuslxvwx8kfCia-ws__AWwOW2"/>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="pt-24 pb-32 px-margin-mobile max-w-4xl mx-auto min-h-screen">
+<!-- Search & Filter Area -->
+<section class="mb-lg">
+<div class="glass-card rounded-xl p-base flex items-center gap-sm px-md h-14">
+<span class="material-symbols-outlined text-outline" data-icon="search">search</span>
+<input class="bg-transparent border-none outline-none w-full text-on-surface font-body-lg text-body-lg placeholder:text-outline/50 focus:ring-0" placeholder="Search your library..." type="text"/>
+<span class="material-symbols-outlined text-outline hover:text-primary cursor-pointer transition-colors" data-icon="tune">tune</span>
+</div>
+<div class="flex gap-sm mt-md overflow-x-auto pb-xs scrollbar-hide">
+<span class="bg-primary-container/20 text-primary border border-primary/30 px-md py-xs rounded-full font-label-caps text-label-caps whitespace-nowrap">All Tracks</span>
+<span class="bg-surface-variant/30 text-on-surface-variant border border-white/5 px-md py-xs rounded-full font-label-caps text-label-caps whitespace-nowrap hover:bg-surface-variant/50 cursor-pointer">Vocals Only</span>
+<span class="bg-surface-variant/30 text-on-surface-variant border border-white/5 px-md py-xs rounded-full font-label-caps text-label-caps whitespace-nowrap hover:bg-surface-variant/50 cursor-pointer">Instrumental</span>
+<span class="bg-surface-variant/30 text-on-surface-variant border border-white/5 px-md py-xs rounded-full font-label-caps text-label-caps whitespace-nowrap hover:bg-surface-variant/50 cursor-pointer">Drums</span>
+</div>
+</section>
+<!-- Library List -->
+<section class="flex flex-col gap-md">
+<h2 class="font-title-md text-title-md text-on-surface mb-sm flex items-center gap-sm">
+                Recent Projects
+                <span class="bg-primary/10 text-primary px-sm py-[2px] rounded text-[10px] font-bold uppercase tracking-widest">8 Songs</span>
+</h2>
+<!-- Song Item 1 -->
+<div class="glass-card rounded-xl p-md flex items-center gap-md group hover:bg-white/5 transition-all duration-300">
+<div class="relative w-16 h-16 rounded-lg overflow-hidden shrink-0">
+<img alt="Album Art" class="w-full h-full object-cover" data-alt="A futuristic, abstract album cover featuring neon blue and violet sound waves crashing against each other in a dark, infinite void. The aesthetic is sharp, technical, and digital, mirroring a professional audio processing interface. Soft glowing particles add depth and a sense of high-fidelity precision." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCpjWoPkrkJWH6_kq6OMTsQgaQS3zu4ZGFP1ZcWICsDYptFlfIbmHjrwfYbijnZsVKjHIWahFRy_Zq3IiN6C4FcYhodE-rKHgRvOBnJbVi76ir117HmmbFxoJ7zYb6yAJShYI7ljsdR-N5QVslVqLrU72fjG1JyZt2HZOHqupNLA0kbsSkckJnpW7xVZFXO7tfI6oZpv_7XQOvsZYE0k6cWBxg8tOcqosS47T3M-_l_v7xsrYcWA129KOLlaWasG89c9C3H2sMI"/>
+<div class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-white text-3xl" data-icon="play_arrow" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</div>
+</div>
+<div class="flex-grow min-w-0">
+<h3 class="font-body-lg text-body-lg font-bold text-on-surface truncate">Midnight Synthesis</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant truncate">Neon Architect</p>
+<div class="flex items-center gap-sm mt-xs">
+<span class="flex items-center gap-[2px] text-tertiary font-label-caps text-label-caps">
+<span class="material-symbols-outlined text-[14px]" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                            Completed
+                        </span>
+<span class="text-outline/30">•</span>
+<span class="text-outline font-label-caps text-label-caps uppercase">FLAC</span>
+</div>
+</div>
+<div class="flex flex-col items-end gap-sm">
+<button class="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center hover:bg-primary/20 hover:text-primary transition-all active:scale-90">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Song Item 2 -->
+<div class="glass-card rounded-xl p-md flex items-center gap-md group hover:bg-white/5 transition-all duration-300">
+<div class="relative w-16 h-16 rounded-lg overflow-hidden shrink-0">
+<img alt="Album Art" class="w-full h-full object-cover" data-alt="Abstract minimalist digital art depicting a sunset in cyberspace, with deep purple gradients and horizontal neon green lines resembling an equalizer. The visual style is clean, sleek, and futuristic, aligning with a dark-mode professional music library interface." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBP4LSUv481dMpIwCqrOa5PcHPkysoOA5nHKUgUXbEETIXRVRYHGUBIjZyqsHA37wPxi_Cid6kC31CsnkVoSkW4WlzX-q9dOVA7rr4C0ViunEUWXsF_ILynyMCtouSL9x7p3u2HUyV6dzhHe9SuRblI1TW18UNsyVtsLCLUPqWum6EE5crZ9N3zM6DWBfTrUyBlhDdlpiigJcViFiMfvkp51IV1NxjVIUkUyJIEWDSVxAPMcGTL4O-nrBkwjah8tvCmT2t_AMa-"/>
+<div class="absolute inset-0 bg-black/40 flex items-center justify-center">
+<!-- Spinner for processing state -->
+<div class="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div>
+</div>
+</div>
+<div class="flex-grow min-w-0">
+<h3 class="font-body-lg text-body-lg font-bold text-on-surface truncate">Pulse Interference</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant truncate">Data Stream</p>
+<div class="flex items-center gap-sm mt-xs">
+<span class="flex items-center gap-[2px] text-primary font-label-caps text-label-caps animate-pulse">
+<span class="material-symbols-outlined text-[14px]" data-icon="sync">sync</span>
+                            Processing 82%
+                        </span>
+</div>
+</div>
+<div class="flex flex-col items-end gap-sm">
+<button class="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center hover:bg-white/10 transition-all opacity-50 cursor-not-allowed">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Song Item 3 -->
+<div class="glass-card rounded-xl p-md flex items-center gap-md group hover:bg-white/5 transition-all duration-300">
+<div class="relative w-16 h-16 rounded-lg overflow-hidden shrink-0">
+<img alt="Album Art" class="w-full h-full object-cover" data-alt="Macro photography of a vinyl record's grooves illuminated by a sharp, cold blue light. The image captures the physical texture of music with a technical, high-precision aesthetic. The colors are deep blacks and vibrant neon blues, fitting a premium audiophile software tool." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD4Epj9weOz17fVNvm2nUQdoniaeJq12azjXpbnzYvt98aVp2VzXCTVQFFn_W8REQ822EnDlW-8PIhYF76_jzhUzQqn3Bcoi0YVd7vK14-sVnDgh8TnHCdCLJNDtv3VuOZKWqSxfUro7A8fMEnpjupuyVP0qzMfpDP8a8R3THN45EvzllaEz4W2sD4K-U8qjJ6cOOr-3H6vjjOfWXGLScVj05uqCNTnszNxlPQ0XIkPVsH6pWhJO55n_jvTJck-HsK3aNWfCgcv"/>
+<div class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-white text-3xl" data-icon="play_arrow" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</div>
+</div>
+<div class="flex-grow min-w-0">
+<h3 class="font-body-lg text-body-lg font-bold text-on-surface truncate">Acoustic Logic</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant truncate">The Frequency</p>
+<div class="flex items-center gap-sm mt-xs">
+<span class="flex items-center gap-[2px] text-tertiary font-label-caps text-label-caps">
+<span class="material-symbols-outlined text-[14px]" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                            Completed
+                        </span>
+<span class="text-outline/30">•</span>
+<span class="text-outline font-label-caps text-label-caps uppercase">WAV</span>
+</div>
+</div>
+<div class="flex flex-col items-end gap-sm">
+<button class="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center hover:bg-primary/20 hover:text-primary transition-all active:scale-90">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Song Item 4 -->
+<div class="glass-card rounded-xl p-md flex items-center gap-md group hover:bg-white/5 transition-all duration-300">
+<div class="relative w-16 h-16 rounded-lg overflow-hidden shrink-0">
+<img alt="Album Art" class="w-full h-full object-cover" data-alt="A minimalist digital illustration of a mountain range made from vertical digital audio bars. The sky is a deep dark charcoal, and the peaks are highlighted with a glowing electric purple. The overall mood is sophisticated and futuristic, suited for a high-performance audio app." src="https://lh3.googleusercontent.com/aida-public/AB6AXuANvVpJf2r6_Y9jrOV7UHXEcIVKWhnpsLncUBQ2YYAQZ3IinkLyQBFwufkd1Rrm8vSpaAzcLdoSUxmtJTIaMZu3OYk1fCJAXXrI4Y21WEtgZ7gaNc8yDCIc7y6SFGdvh2tX041oBfPtyAAmZAIv577935Z-VAnSetq3mAX6tzQw8HHGy65hqDF5PF0MyqbJgXs7dJwgfLe_23WBoPRHFjfTGqUOfNLXupuUPB0SMcTE5ylaVj3zgKug_Gm5J-4O2h1Ed51_IRMz"/>
+<div class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-white text-3xl" data-icon="play_arrow" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</div>
+</div>
+<div class="flex-grow min-w-0">
+<h3 class="font-body-lg text-body-lg font-bold text-on-surface truncate">Subzero Reverb</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant truncate">Glitch Theory</p>
+<div class="flex items-center gap-sm mt-xs">
+<span class="flex items-center gap-[2px] text-tertiary font-label-caps text-label-caps">
+<span class="material-symbols-outlined text-[14px]" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                            Completed
+                        </span>
+<span class="text-outline/30">•</span>
+<span class="text-outline font-label-caps text-label-caps uppercase">MP3</span>
+</div>
+</div>
+<div class="flex flex-col items-end gap-sm">
+<button class="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center hover:bg-primary/20 hover:text-primary transition-all active:scale-90">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</button>
+</div>
+</div>
+</section>
+<!-- Upsell Card -->
+<section class="mt-xl">
+<div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-secondary-container/40 to-primary/10 border border-white/10 p-lg">
+<div class="relative z-10 flex flex-col gap-sm">
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-white leading-tight">Unlock Lossless<br/>Processing</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant max-w-[200px]">Get unlimited FLAC exports and priority AI processing speeds.</p>
+<button class="mt-md bg-white text-black font-bold py-sm px-lg rounded-full w-fit hover:bg-primary transition-all active:scale-95 shadow-[0_0_20px_rgba(255,255,255,0.2)]">
+                        Go Premium
+                    </button>
+</div>
+<!-- Background Decoration -->
+<div class="absolute -right-10 -bottom-10 w-40 h-40 bg-secondary-container blur-[60px] opacity-30"></div>
+<span class="material-symbols-outlined absolute right-4 top-4 text-white/10 text-8xl" data-icon="workspace_premium">workspace_premium</span>
+</div>
+</section>
+</main>
+<!-- FAB for New Upload -->
+<button class="fixed bottom-24 right-margin-mobile z-40 bg-primary text-on-primary w-14 h-14 rounded-2xl flex items-center justify-center active-glow shadow-xl active:scale-90 transition-transform duration-200">
+<span class="material-symbols-outlined text-3xl" data-icon="add" style="font-variation-settings: 'wght' 600;">add</span>
+</button>
+<!-- Bottom Navigation Bar -->
+<nav class="fixed bottom-0 w-full z-50 rounded-t-xl bg-surface/10 backdrop-blur-2xl border-t border-white/5 shadow-[0_-4px_20px_rgba(0,0,0,0.5)] flex justify-around items-center h-20 px-4 pb-safe">
+<!-- Library Active -->
+<a class="flex flex-col items-center justify-center text-primary bg-primary-container/20 rounded-xl px-4 py-1 shadow-[0_0_15px_rgba(173,199,255,0.3)] transition-all active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="library_music" style="font-variation-settings: 'FILL' 1;">library_music</span>
+<span class="font-label-caps text-label-caps">Library</span>
+</a>
+<!-- Upload -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant opacity-60 hover:text-primary transition-all active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="cloud_upload">cloud_upload</span>
+<span class="font-label-caps text-label-caps">Upload</span>
+</a>
+<!-- Settings -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant opacity-60 hover:text-primary transition-all active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-label-caps text-label-caps">Settings</span>
+</a>
+</nav>
+<script>
+        // Simple Interaction logic for search focus
+        const searchInput = document.querySelector('input[type="text"]');
+        const searchContainer = searchInput.parentElement;
+
+        searchInput.addEventListener('focus', () => {
+            searchContainer.classList.add('border-primary/50', 'bg-white/10');
+            searchContainer.style.boxShadow = '0 0 15px rgba(173, 199, 255, 0.1)';
+        });
+
+        searchInput.addEventListener('blur', () => {
+            searchContainer.classList.remove('border-primary/50', 'bg-white/10');
+            searchContainer.style.boxShadow = 'none';
+        });
+
+        // Toggle Active State for Filters
+        const filterChips = document.querySelectorAll('.rounded-full.cursor-pointer');
+        filterChips.forEach(chip => {
+            chip.addEventListener('click', () => {
+                // Clear others
+                document.querySelector('.bg-primary-container\\/20').classList.replace('bg-primary-container/20', 'bg-surface-variant/30');
+                document.querySelector('.text-primary').classList.replace('text-primary', 'text-on-surface-variant');
+                
+                // Set active
+                chip.classList.replace('bg-surface-variant/30', 'bg-primary-container/20');
+                chip.classList.replace('text-on-surface-variant', 'text-primary');
+            });
+        });
+    </script>
+</body></html>

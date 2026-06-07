@@ -51,7 +51,9 @@ data class UploadState(
     val hiFi: Boolean = true,
     val isUploading: Boolean = false,
     val error: String? = null,
-    val taskId: String? = null
+    val taskId: String? = null,
+    val needsPaywall: Boolean = false,
+    val paywallReason: String? = null
 ) {
     fun getSeparationType(): String = when (mode) {
         SeparationMode.VocalInstrumental -> "vocals-instrumental"
@@ -71,7 +73,8 @@ data class UploadState(
 
 @HiltViewModel
 class UploadViewModel @Inject constructor(
-    private val repository: SeparationRepository
+    private val repository: SeparationRepository,
+    private val tokenRepository: com.juditht.ai.data.repository.TokenRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(UploadState())
@@ -111,7 +114,28 @@ class UploadViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            _state.update { it.copy(isUploading = true, error = null) }
+            _state.update { it.copy(isUploading = true, error = null, needsPaywall = false, paywallReason = null) }
+            
+            // ── Token system check before uploading ──────────────────
+            val tokenCheck = tokenRepository.getTokenStatus(userId)
+            if (tokenCheck is ApiResult.Success) {
+                val status = tokenCheck.data
+                if (!status.canSeparate) {
+                    _state.update { it.copy(
+                        isUploading = false,
+                        needsPaywall = true,
+                        paywallReason = status.reason ?: "no_tokens"
+                    ) }
+                    return@launch
+                }
+            } else if (tokenCheck is ApiResult.Error) {
+                _state.update { it.copy(
+                    isUploading = false,
+                    error = "Error al verificar tus tokens: ${tokenCheck.message}"
+                ) }
+                return@launch
+            }
+
             val result = repository.startSeparation(
                 audioUri              = uri,
                 separationType        = _state.value.getSeparationType(),
@@ -129,6 +153,10 @@ class UploadViewModel @Inject constructor(
                 else -> {}
             }
         }
+    }
+
+    fun clearPaywallTrigger() {
+        _state.update { it.copy(needsPaywall = false, paywallReason = null) }
     }
 
     fun clearTaskId() { _state.update { it.copy(taskId = null) } }

@@ -27,6 +27,75 @@ from b2_storage import b2_storage
 import librosa
 import numpy as np
 
+# ── Firebase Admin (token validation) ───────────────────────────────────────
+try:
+    import firebase_admin
+    from firebase_admin import credentials, firestore as fb_firestore
+    _firebase_sa_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+    if _firebase_sa_json and not firebase_admin._apps:
+        import json as _json
+        _cred = credentials.Certificate(_json.loads(_firebase_sa_json))
+        firebase_admin.initialize_app(_cred)
+    _firestore_client = fb_firestore.client() if firebase_admin._apps else None
+except Exception as _fb_init_err:
+    _firestore_client = None
+    print(f"[FIREBASE] Could not initialize Admin SDK: {_fb_init_err}")
+
+TOKENS_PER_MINUTE = 33  # 1 token ≈ 1.8 seconds
+FREE_PREVIEW_SECONDS = 40
+
+
+def _get_firestore():
+    """Return Firestore client or None if unavailable."""
+    return _firestore_client
+
+
+def _get_user_token_state(uid: str) -> Optional[Dict]:
+    """Return user document fields relevant to token gating."""
+    fs = _get_firestore()
+    if not fs or not uid:
+        return None
+    try:
+        doc = fs.collection("users").document(uid).get()
+        if not doc.exists:
+            return None
+        d = doc.to_dict()
+        return {
+            "planId": d.get("planId", "free"),
+            "tokenBalance": int(d.get("tokenBalance", 0)),
+            "freeSeparationUsed": bool(d.get("freeSeparationUsed", False)),
+        }
+    except Exception as e:
+        print(f"[FIREBASE] Error reading user {uid}: {e}")
+        return None
+
+
+def _deduct_tokens(uid: str, duration_seconds: float) -> int:
+    """Deduct tokens from user balance. Returns tokens_deducted."""
+    fs = _get_firestore()
+    if not fs or not uid:
+        return 0
+    tokens = max(1, int((duration_seconds / 60.0) * TOKENS_PER_MINUTE))
+    try:
+        ref = fs.collection("users").document(uid)
+        ref.update({"tokenBalance": fb_firestore.Increment(-tokens)})
+        print(f"[TOKENS] Deducted {tokens} tokens from user {uid} for {duration_seconds:.1f}s audio")
+    except Exception as e:
+        print(f"[TOKENS] Error deducting tokens for user {uid}: {e}")
+    return tokens
+
+
+def _mark_free_separation_used(uid: str):
+    """Mark free user's single separation as consumed."""
+    fs = _get_firestore()
+    if not fs or not uid:
+        return
+    try:
+        fs.collection("users").document(uid).update({"freeSeparationUsed": True})
+        print(f"[TOKENS] Marked freeSeparationUsed=True for user {uid}")
+    except Exception as e:
+        print(f"[TOKENS] Error marking free separation for user {uid}: {e}")
+
 # In-memory task storage
 tasks_storage = {}
 DEPENDENCY_STATUS: Dict[str, object] = {"checked": False}
@@ -400,6 +469,42 @@ async def get_visit_stats():
     finally:
         db.close()
 
+
+@app.get("/api/visits/android-count")
+async def get_android_installs_count():
+    """Count unique visitors with user agent matching JudithAndroidApp"""
+    db = SessionLocal()
+    try:
+        android_visits = db.query(VisitDB).filter(VisitDB.user_agent.like("%JudithAndroidApp%")).all()
+        unique_visitors = {v.visitor_id for v in android_visits if v.visitor_id}
+        return {"count": len(unique_visitors)}
+    except Exception as e:
+        print(f"[ERROR] Counting android installs: {e}")
+        return {"count": 0}
+    finally:
+        db.close()
+
+
+@app.get("/api/admin/separation-stats")
+async def get_separation_stats_count():
+    """Count total tracks/songs separated, grouped by android (user_id present or custom header) vs web"""
+    db = SessionLocal()
+    try:
+        # We can count total rows in TaskDB as total separations
+        total_songs = db.query(TaskDB).count()
+        android_songs = db.query(TaskDB).filter(TaskDB.user_id.isnot(None), TaskDB.user_id != "").count()
+        web_songs = total_songs - android_songs
+        return {
+            "total_songs": total_songs,
+            "android_songs": android_songs,
+            "web_songs": web_songs
+        }
+    except Exception as e:
+        print(f"[ERROR] Fetching separation stats: {e}")
+        return {"total_songs": 0, "android_songs": 0, "web_songs": 0}
+    finally:
+        db.close()
+
 @app.get("/api/health/deep")
 async def health_check_deep():
     """
@@ -519,15 +624,47 @@ async def separate_audio_handler(
     try:
         print(f"[SEPARATE] Iniciando separación - File: {file.filename}, Type: {separation_type}")
         
-        if not file.content_type or not file.content_type.startswith("audio/"):
+        if not file.content_type or (not file.content_type.startswith("audio/") and not file.content_type.startswith("video/") and file.content_type != "application/octet-stream"):
             print(f"[ERROR] Invalid content type: {file.content_type}")
             raise HTTPException(status_code=400, detail="File must be audio")
         
         # Generar task ID
         task_id = str(uuid.uuid4())
         print(f"[SEPARATE] Task ID generado: {task_id}")
-        
-        # Guardar archivo en uploads/
+
+        # ── Token Gate ──────────────────────────────────────────────────────
+        uid = (user_id or "").strip()
+        if uid:
+            token_state = _get_user_token_state(uid)
+            if token_state is not None:
+                plan_id = token_state.get("planId", "free")
+                token_balance = token_state.get("tokenBalance", 0)
+                free_used = token_state.get("freeSeparationUsed", False)
+                is_free_plan = plan_id in ("free", "starter")
+                if is_free_plan and free_used:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=json.dumps({
+                            "error": "free_exhausted",
+                            "message": "Has usado tu separación gratuita. Suscríbete a un plan para continuar.",
+                            "upgrade_required": True,
+                        }),
+                    )
+                if not is_free_plan and token_balance <= 0:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=json.dumps({
+                            "error": "no_tokens",
+                            "message": "Sin tokens disponibles. Tu plan se renueva el próximo ciclo.",
+                            "upgrade_required": False,
+                        }),
+                    )
+                print(f"[TOKENS] User {uid} plan={plan_id} tokens={token_balance} free_used={free_used} ✅")
+            else:
+                print(f"[TOKENS] Could not read token state for user {uid}, proceeding without gate")
+        # ────────────────────────────────────────────────────────────────────
+
+
         upload_dir = Path(f"uploads/{task_id}")
         upload_dir.mkdir(parents=True, exist_ok=True)
         
@@ -609,6 +746,7 @@ async def separate_audio_handler(
                     duration=task.duration,
                     chords=json.dumps(task.chords),
                     completed_at=datetime.utcnow(),
+                    user_id=uid,
                 )
                 db.add(db_task)
                 db.commit()
@@ -640,6 +778,7 @@ async def separate_audio_handler(
         task.quality_profile = profile_name
         task.requested_tracks = requested_tracks
         task.cache_key = cache_key
+        task.user_id = uid  # store for token deduction on completion
         tasks_storage[task_id] = task
         
         # Guardar en base de datos para persistencia y Metabase
@@ -651,7 +790,8 @@ async def separate_audio_handler(
                 file_path=str(file_path),
                 separation_type=separation_type,
                 status=TaskStatus.PROCESSING,
-                progress=0
+                progress=0,
+                user_id=uid,
             )
             db.add(db_task)
             db.commit()
@@ -1093,7 +1233,24 @@ async def process_audio(
         print(f"   - Stems: {len(stem_urls)}")
         print(f"   - BPM: {bpm}, Key: {key}, Duration: {duration}s")
         print(f"{'='*60}\n")
-        
+
+        # ── Deduct tokens / mark free separation used ─────────────────────
+        uid_for_deduct = getattr(task, "user_id", None) or ""
+        if uid_for_deduct:
+            try:
+                state_after = _get_user_token_state(uid_for_deduct)
+                if state_after:
+                    plan_after = state_after.get("planId", "free")
+                    is_free = plan_after in ("free", "starter")
+                    if is_free:
+                        _mark_free_separation_used(uid_for_deduct)
+                    else:
+                        _deduct_tokens(uid_for_deduct, float(duration or 0))
+            except Exception as tok_e:
+                print(f"[TOKENS] Error during post-completion token update: {tok_e}")
+        # ──────────────────────────────────────────────────────────────────
+
+
     except asyncio.TimeoutError:
         task.status = TaskStatus.FAILED
         task.error = f"Tiempo de espera agotado en separación remota ({REMOTE_SEPARATION_TIMEOUT_SECONDS}s)"

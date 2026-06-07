@@ -8,12 +8,14 @@ interface BpmDisplayProps {
   headerKey?: string
   /** Cabecera del mezclador: menos padding y tipografía más pequeña */
   compact?: boolean
+  onBpmChange?: (bpm: number) => void
 }
 
 const BpmDisplay: React.FC<BpmDisplayProps> = ({
   headerBpm,
   headerKey,
   compact = false,
+  onBpmChange,
 }) => {
   const lab = compact
     ? 'text-[10px] font-mono text-white/90 md:text-xs'
@@ -31,9 +33,19 @@ const BpmDisplay: React.FC<BpmDisplayProps> = ({
         <span className={lab}>BPM:</span>
         <div className={`bg-black shadow-lg ${compact ? 'p-0.5' : 'p-1'}`}>
           {headerBpm ? (
-            <div className={`bg-gray-800 text-gray-200 ${box}`}>
-              {headerBpm % 1 === 0 ? headerBpm.toFixed(0) : headerBpm.toFixed(1)}
-            </div>
+            <input
+              type="number"
+              step="0.01"
+              defaultValue={headerBpm}
+              onBlur={(e) => onBpmChange?.(parseFloat(e.target.value))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  onBpmChange?.(parseFloat(e.currentTarget.value))
+                  e.currentTarget.blur()
+                }
+              }}
+              className={`bg-gray-800 text-teal-400 outline-none focus:ring-1 focus:ring-teal-500 w-20 text-center ${box}`}
+            />
           ) : (
             <div className={`bg-gray-900 text-gray-500 ${box}`}>-</div>
           )}

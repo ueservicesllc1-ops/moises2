@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type Stripe from 'stripe'
-import { getStripeServerClient } from '@/lib/stripe'
+import { getStripeServerClient, PLAN_TOKEN_GRANTS } from '@/lib/stripe'
 import { getAdminDb } from '@/lib/firebaseAdmin'
 
 async function markUserPlanFromCheckout(session: Stripe.Checkout.Session) {
@@ -8,9 +8,10 @@ async function markUserPlanFromCheckout(session: Stripe.Checkout.Session) {
   const planId = session.metadata?.planId
   const billingPeriod = session.metadata?.billingPeriod
 
-  if (!uid || (planId !== 'lite' && planId !== 'pro')) return
+  if (!uid || !['lite', 'pro', 'ultra'].includes(planId ?? '')) return
 
   const db = getAdminDb()
+  const tokens = PLAN_TOKEN_GRANTS[planId!] ?? 0
   await db.collection('users').doc(uid).set(
     {
       planId,
@@ -18,6 +19,8 @@ async function markUserPlanFromCheckout(session: Stripe.Checkout.Session) {
       billingPeriod: billingPeriod === 'yearly' ? 'yearly' : 'monthly',
       stripeCustomerId: typeof session.customer === 'string' ? session.customer : null,
       stripeSubscriptionId: typeof session.subscription === 'string' ? session.subscription : null,
+      tokenBalance: tokens,
+      freeSeparationUsed: true,  // premium users bypass the free gate
       planUpdateSource: 'stripe_webhook_checkout_completed',
       planUpdatedAt: new Date().toISOString(),
     },
@@ -52,12 +55,16 @@ async function markSubscriptionStatus(subscription: Stripe.Subscription) {
   if (!querySnap || querySnap.empty) return
 
   const active = subscription.status === 'active' || subscription.status === 'trialing'
+  const resolvedPlanId = active ? (subscription.metadata?.planId || 'pro') : 'free'
+  const tokens = active ? (PLAN_TOKEN_GRANTS[resolvedPlanId] ?? 0) : 0
   const docRef = querySnap.docs[0].ref
   await docRef.set(
     {
       isPremium: active,
-      planId: active ? (subscription.metadata?.planId || 'pro') : 'starter',
+      planId: resolvedPlanId,
       stripeSubscriptionStatus: subscription.status,
+      // Reset tokens on every renewal cycle
+      tokenBalance: tokens,
       planUpdateSource: 'stripe_webhook_subscription_update',
       planUpdatedAt: new Date().toISOString(),
     },

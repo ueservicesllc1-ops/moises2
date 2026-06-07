@@ -43,6 +43,8 @@ import {
 } from 'lucide-react'
 import MoisesStyleUpload from '@/components/MoisesStyleUpload'
 import ConnectionStatus from '@/components/ConnectionStatus'
+import PaywallModal from '@/components/PaywallModal'
+import TokenBadge from '@/components/TokenBadge'
 import PitchTempoChanger from '@/components/PitchTempoChanger'
 import ChordAnalysis from '@/components/ChordAnalysis'
 import BeatEditor from '@/components/BeatEditor'
@@ -52,14 +54,20 @@ import MetronomeModal from '@/components/MetronomeModal'
 import VolumeEQModal from '@/components/VolumeEQModal'
 import BpmDetectorModal from '@/components/BpmDetectorModal'
 import ChordAnalysisModal from '@/components/ChordAnalysisModal'
+import WaveformClipCanvas from '@/components/WaveformClipCanvas'
+import ClickSettingsModal from '@/components/ClickSettingsModal'
 import { resolvePlanIdFromUserData, type PlanId } from '@/lib/pricing'
 import { stemPathFromB2PublicUrl, normalizeStemPlayUrl, resolveAudioFetchUrl, getCachedAudioBlobUrl } from '@/lib/audioProxy'
-import { isClickStemKey, computeClickSyncOffsetSecFromStems } from '@/lib/clickSync'
+import { isClickStemKey, computeClickSyncOffsetSecFromStems, estimateBeatGridPhaseOffsetSec, findNearestTransientSec, fetchDecodeMono, linearResample } from '@/lib/clickSync'
+import { analyzeBpmFromChannelData } from '@/lib/bpmEngine'
+import SyncLoadingOverlay from '@/components/SyncLoadingOverlay'
+import { updateSongClickConfig } from '@/lib/firestore'
 import {
   clampClipStartSec,
   snapSecondsToGrid,
   type TimelineSnapGrid,
 } from '@/lib/timelineSnap'
+
 import {
   clampSourceInOut,
   clipFadeGainAtProjectTime,
@@ -161,6 +169,9 @@ export default function Home() {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false)
   const [upgradeBilling, setUpgradeBilling] = useState<'monthly' | 'yearly'>('yearly')
   const [songs, setSongs] = useState<Song[]>([])
+  const [isAnalyzingBpm, setIsAnalyzingBpm] = useState(false)
+  const [isAutoSyncing, setIsAutoSyncing] = useState(false)
+  const [showClickSettings, setShowClickSettings] = useState(false)
   const [songsLoading, setSongsLoading] = useState(true)
   const [showSongModal, setShowSongModal] = useState(false)
   const [selectedSong, setSelectedSong] = useState<Song | null>(null)
@@ -181,6 +192,7 @@ export default function Home() {
   const [audioElements, setAudioElements] = useState<{ [key: string]: HTMLAudioElement }>({})
   const [isLoadingAudio, setIsLoadingAudio] = useState(false)
   const [waveforms, setWaveforms] = useState<{ [key: string]: number[] }>({})
+  const [fullChannelData, setFullChannelData] = useState<Record<string, { data: Float32Array, sampleRate: number }>>({})
   const [trackOnsets, setTrackOnsets] = useState<{ [key: string]: number }>({}) // Onset en ms de cada track
   /** Inicio del clip en la línea de tiempo (s): t=0 del archivo alinea con este instante del proyecto. */
   const [trackClipOffsetSec, setTrackClipOffsetSec] = useState<Record<string, number>>({})
@@ -687,6 +699,21 @@ export default function Home() {
     return stemFileTimeFromTimelineTrimmed(timelineSec, clip, sourceIn, off)
   }, [])
 
+  const handleUpdateBpm = (newBpm: number, targetSongId?: string) => {
+    const id = targetSongId || selectedSong?.id
+    if (!id) return
+    
+    setSongs(prev => prev.map(s => (s.id === id ? { ...s, bpm: newBpm } : s)))
+    
+    // Si la canción actualizada es la que estamos viendo, actualizar el estado local también
+    setSelectedSong(prev => {
+      if (prev?.id === id) return { ...prev, bpm: newBpm }
+      return prev
+    })
+    
+    console.log(`[BPM ENGINE] Sincronización exitosa: ${newBpm} BPM para canción ${id}`)
+  }
+
   // Sincronizar trackOrder si cambian los stems de la canción (ej. nueva separación)
   useEffect(() => {
     if (selectedSong?.stems) {
@@ -784,6 +811,12 @@ export default function Home() {
 
     loadUserPlan()
   }, [user?.uid])
+
+  useEffect(() => {
+    const handleOpenPaywall = () => setShowUpgradeModal(true)
+    window.addEventListener('open-paywall-modal', handleOpenPaywall)
+    return () => window.removeEventListener('open-paywall-modal', handleOpenPaywall)
+  }, [])
 
   // Zoom/scroll horizontal: listeners `wheel` con { passive: false } (React onWheel no puede hacer preventDefault).
   useLayoutEffect(() => {
@@ -1606,6 +1639,40 @@ export default function Home() {
     return path;
   };
 
+  const generateMultiResWaveform = (channelData: Float32Array, sampleRate: number): MultiResData => {
+    const duration = channelData.length / sampleRate;
+    const levels: MultiResLevel[] = [];
+    
+    // Niveles: 1 (max res), 4, 16, 64, 256, 1024, 4096 muestras por pico
+    const steps = [1, 4, 16, 64, 256, 1024, 4096];
+    
+    for (const step of steps) {
+      const numPeaks = Math.ceil(channelData.length / step);
+      const peaks = new Float32Array(numPeaks * 2); // [min, max, ...]
+      
+      for (let i = 0; i < numPeaks; i++) {
+        const start = i * step;
+        const end = Math.min(start + step, channelData.length);
+        
+        let min = 0;
+        let max = 0;
+        
+        for (let j = start; j < end; j++) {
+          const s = channelData[j];
+          if (s < min) min = s;
+          if (s > max) max = s;
+        }
+        
+        peaks[i * 2] = min;
+        peaks[i * 2 + 1] = max;
+      }
+      
+      levels.push({ samplesPerPeak: step, peaks });
+    }
+    
+    return { levels, sampleRate, duration };
+  };
+
   // Función profesional para generar waveform de alta precisión
   const generateProfessionalWaveform = (channelData: Float32Array, targetLength: number): number[] => {
     const sourceLength = channelData.length;
@@ -1748,9 +1815,11 @@ export default function Home() {
       // 3. Caso: Dentro del clip (reproducción normal)
       const clamped = Math.max(sourceIn, Math.min(ft, sourceOut, safe))
       
-      // SOLO actualizamos currentTime si el desfase es significativo (> 50ms)
-      // Esto evita el sonido entrecortado (jitter)
-      if (Math.abs(audio.currentTime - clamped) > 0.05) {
+      // SOLO actualizamos currentTime si el desfase es significativo (> 150ms durante playback)
+      // Esto evita el sonido entrecortado (jitter) que se percibe como falta de tempo.
+      // Si no está reproduciendo (seek manual), usamos un umbral más bajo (20ms).
+      const driftThreshold = transportPlaying ? 0.15 : 0.02
+      if (Math.abs(audio.currentTime - clamped) > driftThreshold) {
         audio.currentTime = clamped
       }
       
@@ -2113,49 +2182,336 @@ export default function Home() {
       return;
     }
     const clickKey = Object.keys(stems).find(isClickStemKey);
-    if (!clickKey || !stems[clickKey]) {
-      alert(
-        'Esta canción no tiene stem de click (click_…). Separa de nuevo el tema con la versión actual del servidor, o abre una pista que sí incluya click.'
-      );
+    if (!clickKey) {
+      alert('Esta canción no tiene un canal reservado para el click.');
       return;
     }
-    const bpm = Number(selectedSong?.bpm);
+    const config = selectedSong?.clickConfig;
+    const bpm = config?.bpm || Number(selectedSong?.bpm);
+    const manualOffsetSec = (config?.offsetMs || 0) / 1000;
+    const timeSignature = config?.timeSignature || '4/4';
+    const beatsPerBar = timeSignature === '3/4' ? 3 : timeSignature === '6/8' ? 6 : 4;
+
     if (!Number.isFinite(bpm) || bpm < 40 || bpm > 240) {
-      alert('Necesitamos un BPM válido de la canción. Usa el detector de BPM o reimporta el tema.');
+      alert('Necesitamos un BPM válido de la canción para generar el click matemáticamente. Usa el detector de BPM.');
       return;
     }
-    const refOrder = ['drums', 'instrumental', 'other', 'bass', 'vocals'] as const;
-    const refUrls: string[] = [];
-    for (const k of refOrder) {
-      const raw = stems[k];
-      if (raw && !isClickStemKey(k)) {
-        const u = resolveAudioFetchUrl(raw);
-        if (u) refUrls.push(u);
-      }
-    }
-    if (refUrls.length === 0) {
-      alert('No hay stems suficientes como referencia rítmica.');
-      return;
-    }
+    
+    console.log(`[CLICK SYNC] Generando click track. BPM: ${bpm.toFixed(2)}, Compás: ${timeSignature}, Offset: ${manualOffsetSec}s`);
     setClickSyncBusy(true);
+    setTrackLoadingStates(prev => ({ ...prev, [clickKey]: 'loading' }));
+    
     try {
+      // 0. Calcular OFFSET de fase (Alineación con el primer beat)
+      let phaseOffsetSec = manualOffsetSec;
+      
+      // Si no hay offset manual y tenemos stems, calculamos automáticamente
+      if (manualOffsetSec === 0 && !config?.downbeatSec) {
+        // Prioridad: 1. Drums + Bass combined, 2. Drums, 3. Instrumental/Mix
+        let refData: Float32Array | null = null;
+        let refSr = 44100;
+        
+        const drums = fullChannelData['drums'];
+        const bass = fullChannelData['bass'];
+        const inst = fullChannelData['instrumental'] || fullChannelData['other'];
+
+        if (drums && bass) {
+          console.log('[CLICK SYNC] Usando referencia combinada: Batería + Bajo');
+          refSr = drums.sampleRate;
+          refData = new Float32Array(drums.data.length);
+          for (let i = 0; i < drums.data.length; i++) {
+            refData[i] = Math.abs(drums.data[i]) * 0.7 + Math.abs(bass.data[i] || 0) * 0.3;
+          }
+        } else if (drums) {
+          console.log('[CLICK SYNC] Usando referencia: Batería');
+          refData = drums.data;
+          refSr = drums.sampleRate;
+        } else if (inst) {
+          console.log('[CLICK SYNC] Usando referencia fallback: Mezcla/Instrumental');
+          refData = inst.data;
+          refSr = inst.sampleRate;
+        }
+
+        if (refData) {
+          const testClickLen = Math.min(refData.length, refSr * 10);
+          const testClick = new Float32Array(testClickLen);
+          const beatPeriod = 60 / bpm;
+          for (let i = 0; i < testClickLen; i++) {
+            const t = i / refSr;
+            if (t % beatPeriod < 0.02) testClick[i] = 1.0;
+          }
+          phaseOffsetSec = estimateBeatGridPhaseOffsetSec(refData, testClick, refSr, bpm, 0);
+          console.log(`[CLICK SYNC] Fase detectada automáticamente: ${phaseOffsetSec.toFixed(4)}s`);
+        }
+      } else if (config?.downbeatSec) {
+        phaseOffsetSec = config.downbeatSec + manualOffsetSec;
+      }
+
+      // 1. Generar audio sintético perfecto en el frontend
+      const songDuration = duration > 0 ? duration : 300; 
+      const sampleRate = 44100;
+      const numSamples = Math.ceil(songDuration * sampleRate);
+      const samples = new Float32Array(numSamples);
+      for (let i = 0; i < numSamples; i++) {
+        const time = i / sampleRate;
+        const beatFloat = (time - phaseOffsetSec) * (bpm / 60);
+        const currentBeat = Math.floor(beatFloat + 0.0000001); 
+        const timeOfBeatStart = (currentBeat * (60 / bpm)) + phaseOffsetSec;
+        const timeInBeat = time - timeOfBeatStart;
+        
+        if (timeInBeat >= 0 && timeInBeat < 0.05) { // 50ms click
+          const isDownbeat = (currentBeat % beatsPerBar) === 0;
+          const freq = isDownbeat ? 1200 : 800; 
+          const envelope = Math.exp(-timeInBeat * 80);
+          samples[i] = Math.sin(2 * Math.PI * freq * timeInBeat) * envelope * 0.6;
+        }
+      }
+      
+      const buffer = new ArrayBuffer(44 + samples.length * 2);
+      const view = new DataView(buffer);
+      const writeString = (v: DataView, offset: number, string: string) => {
+        for (let i = 0; i < string.length; i++) v.setUint8(offset + i, string.charCodeAt(i));
+      };
+      writeString(view, 0, 'RIFF');
+      view.setUint32(4, 36 + samples.length * 2, true);
+      writeString(view, 8, 'WAVE');
+      writeString(view, 12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeString(view, 36, 'data');
+      view.setUint32(40, samples.length * 2, true);
+      
+      let offsetBytes = 44;
+      for (let i = 0; i < samples.length; i++, offsetBytes += 2) {
+        let s = Math.max(-1, Math.min(1, samples[i]));
+        view.setInt16(offsetBytes, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      }
+      
+      const blob = new Blob([buffer], { type: 'audio/wav' });
+      const trackUrl = URL.createObjectURL(blob);
+      
+      // 2. Cargar en audioElements
+      const audio = createConfiguredStemAudio(trackUrl);
+      audio.addEventListener('ended', () => {
+        Object.values(audioElementsRef.current).forEach(a => { a.pause(); a.currentTime = 0 });
+        setIsPlaying(false);
+        setCurrentTime(0);
+        playbackWallOriginProjectSecRef.current = 0;
+        playbackWallOriginPerfRef.current = performance.now();
+      });
+      setAudioElements(prev => ({ ...prev, [clickKey]: audio }));
+      
+      // 3. Generar waveform visual
+      const wSamples = 800;
+      const blockSize = Math.floor(samples.length / wSamples);
+      const waveformData: number[] = [];
+      for (let i = 0; i < wSamples; i++) {
+        let blockStart = blockSize * i;
+        let sum = 0;
+        for (let j = 0; j < blockSize; j++) {
+          sum += Math.abs(samples[blockStart + j]);
+        }
+        waveformData.push(sum / blockSize);
+      }
+      const maxVal = Math.max(...waveformData, 1e-8);
+      const normalizedWaveform = waveformData.map(n => n / maxVal);
+      setWaveforms(prev => ({ ...prev, [clickKey]: normalizedWaveform }));
+      setFullChannelData(prev => ({ ...prev, [clickKey]: { data: samples, sampleRate } }));
+      setTrackLoadingStates(prev => ({ ...prev, [clickKey]: 'ready' }));
+
+      // 4. Sincronizar el offset con la batería
+      const refOrder = ['drums', 'instrumental', 'other', 'bass', 'vocals'] as const;
+      const refUrls: string[] = [];
+      for (const k of refOrder) {
+        const raw = stems[k];
+        if (raw && !isClickStemKey(k)) {
+          const u = resolveAudioFetchUrl(raw);
+          if (u) refUrls.push(u);
+        }
+      }
+      
+      if (refUrls.length === 0) {
+        alert('Click local generado, pero no hay stems suficientes para sincronizarlo.');
+        return;
+      }
+      
       const off = await computeClickSyncOffsetSecFromStems({
         refUrls,
-        clickUrl: resolveAudioFetchUrl(stems[clickKey])!,
+        clickUrl: trackUrl,
         bpm,
         anchorSec: currentTime,
       });
+      
       setClickSyncOffsetSec(off);
       clickSyncOffsetSecRef.current = off;
-      
-      // Unmute the click track now that it's synced!
       setTrackMutedStates(prev => ({ ...prev, [clickKey]: false }));
-      
       resyncStemAudioFilePositions(getProjectTimelineFromRefs(), isPlayingRef.current);
+      
     } catch (err) {
       console.error('[SYNC CLICK]', err);
-      alert(`No se pudo sincronizar el click: ${err instanceof Error ? err.message : 'error'}`);
+      alert(`Error generando el click local: ${err instanceof Error ? err.message : 'error'}`);
     } finally {
+      setClickSyncBusy(false);
+    }
+  const handleSnapDownbeat = useCallback(async () => {
+    // Buscar la pista de referencia rítmica más sólida
+    const refOrder = ['drums', 'instrumental', 'other', 'bass'] as const;
+    let refData: Float32Array | null = null;
+    let refSr = 44100;
+    let refKeyFound = '';
+
+    for (const key of refOrder) {
+      if (fullChannelData[key]) {
+        refData = fullChannelData[key].data;
+        refSr = fullChannelData[key].sampleRate;
+        refKeyFound = key;
+        break;
+      }
+    }
+
+    if (!refData) {
+      console.warn('[CLICK SYNC] No hay datos de audio para hacer Snap.');
+      return undefined;
+    }
+
+    const snappedTime = findNearestTransientSec(refData, refSr, currentTimeRef.current);
+    console.log(`[CLICK SYNC] Snap detectado: ${currentTimeRef.current.toFixed(3)}s -> ${snappedTime.toFixed(3)}s (Ref: ${refKeyFound})`);
+    
+    // Feedback visual: mover el cursor al punto de snap
+    setCurrentTime(snappedTime);
+    if (audioElementsRef.current) {
+      Object.values(audioElementsRef.current).forEach(audio => {
+        audio.currentTime = snappedTime;
+      });
+    }
+    
+    return snappedTime;
+  }, [fullChannelData]);
+
+  const handleSaveClickSettings = async (config: any) => {
+    if (!selectedSong?.id || !selectedSong) return;
+    try {
+      console.log('[CLICK SYNC] Guardando nueva configuración:', config);
+      await updateSongClickConfig(selectedSong.id, config);
+      
+      // Actualizar estado local
+      setSongs(prev => prev.map(s => (s.id === selectedSong.id ? { ...s, clickConfig: config } : s)));
+      setSelectedSong(prev => (prev?.id === selectedSong.id ? { ...prev, clickConfig: config } : prev));
+      
+      // Forzar regeneración del click (usamos un pequeño delay para asegurar el estado)
+      setTimeout(() => {
+        handleSyncClick();
+      }, 200);
+    } catch (error) {
+      console.error('Error al guardar configuración de click:', error);
+      alert('Error al guardar los ajustes de click.');
+    }
+  };
+
+  /**
+   * handleAutoMagicSync: Orquestación del pipeline automático de sincronización rítmica.
+   * 1. Detecta BPM real (DSP).
+   * 2. Localiza el primer golpe (Downbeat).
+   * 3. Estima la fase (Correlation).
+   * 4. Guarda y regenera el click.
+   */
+  const handleAutoMagicSync = async () => {
+    if (!selectedSong?.id) return;
+    
+    console.log('[MAGIC SYNC] Iniciando pipeline de sincronización automática...');
+    setIsAutoSyncing(true);
+    setClickSyncBusy(true);
+
+    try {
+      // 1. Identificar pista de referencia (Drums > Bass+Drums > Instrumental/Other)
+      const stems = selectedSong.stems as Record<string, string>;
+      const drums = fullChannelData['drums'];
+      const bass = fullChannelData['bass'];
+      const instrumental = fullChannelData['instrumental'] || fullChannelData['other'] || fullChannelData['mix'];
+
+      let refData: Float32Array | null = null;
+      let refSr = 44100;
+      let refLabel = '';
+
+      if (drums) {
+        refData = drums.data;
+        refSr = drums.sampleRate;
+        refLabel = 'Batería';
+      } else if (instrumental) {
+        refData = instrumental.data;
+        refSr = instrumental.sampleRate;
+        refLabel = 'Instrumental/Mix';
+      }
+
+      if (!refData) {
+        // Si no hay datos decodificados aún (raro si estamos en studio), intentamos cargar de la URL
+        const refKey = Object.keys(stems).find(k => k === 'drums' || k === 'instrumental' || k === 'other');
+        if (refKey) {
+          const url = resolveAudioFetchUrl(stems[refKey]);
+          if (url) {
+            console.log(`[MAGIC SYNC] Cargando referencia desde URL: ${refKey}`);
+            const decoded = await fetchDecodeMono(url);
+            refData = decoded.data;
+            refSr = decoded.sampleRate;
+            refLabel = refKey;
+          }
+        }
+      }
+
+      if (!refData) {
+        throw new Error('No se encontró una pista de audio válida para analizar el ritmo.');
+      }
+
+      // 2. Análisis de BPM (si no lo tenemos preciso o para validar)
+      console.log(`[MAGIC SYNC] Analizando BPM sobre ${refLabel}...`);
+      const detectedBpm = analyzeBpmFromChannelData(refData, refSr, bass?.data);
+      console.log(`[MAGIC SYNC] BPM Detectado: ${detectedBpm}`);
+
+      // 3. Localizar Downbeat (primer transitorio significativo)
+      // Buscamos el primer golpe fuerte en los primeros 10 segundos
+      console.log(`[MAGIC SYNC] Localizando primer downbeat...`);
+      const downbeatSec = findNearestTransientSec(refData, refSr, 0.0);
+      console.log(`[MAGIC SYNC] Downbeat localizado en: ${downbeatSec.toFixed(3)}s`);
+
+      // 4. Estimación de Fase (Ajuste fino de correlación)
+      // Generamos un click de prueba corto para comparar
+      const testBpm = detectedBpm;
+      const beatPeriod = 60 / testBpm;
+      const testClick = new Float32Array(Math.min(refData.length, refSr * 10));
+      for (let i = 0; i < testClick.length; i++) {
+        const t = (i / refSr);
+        if (t % beatPeriod < 0.02) testClick[i] = 1.0;
+      }
+      
+      const phaseOffset = estimateBeatGridPhaseOffsetSec(refData, testClick, refSr, testBpm, 0);
+      console.log(`[MAGIC SYNC] Fase optimizada (Correlation): ${phaseOffset.toFixed(4)}s`);
+
+      // 5. Consolidar configuración
+      const newConfig = {
+        ...(selectedSong.clickConfig || {}),
+        bpm: Number(detectedBpm.toFixed(2)),
+        downbeatSec: Number(phaseOffset.toFixed(4)),
+        offsetMs: 0, // Reset manual offset ya que ahora es "mágico"
+        timeSignature: timelineMeter,
+        isAutoSynced: true,
+        lastSyncedAt: Date.now()
+      };
+
+      // 6. Persistir y Regenerar
+      await handleSaveClickSettings(newConfig);
+      
+      console.log('[MAGIC SYNC] ¡Sincronización automática completada con éxito!');
+      
+    } catch (err) {
+      console.error('[MAGIC SYNC] Error en el pipeline:', err);
+      alert(`Error en Magic Sync: ${err instanceof Error ? err.message : 'Error desconocido'}`);
+    } finally {
+      setIsAutoSyncing(false);
       setClickSyncBusy(false);
     }
   };
@@ -2234,32 +2590,92 @@ export default function Home() {
     setTrackMutedStates(initialMuted);
 
     setIsLoadingAudio(true)
+    setIsAnalyzingBpm(true)
     const newAudioElements: { [key: string]: HTMLAudioElement } = {}
     const newWaveforms: { [key: string]: number[] } = {}
     const newLoadingStates: { [key: string]: 'idle' | 'loading' | 'cached' | 'ready' } = {}
 
     try {
-    console.log(' Loading song tracks:', song.stems)
-    for (const [trackKey, originalTrackUrl] of Object.entries(song.stems)) {
-      const stemSrc = typeof originalTrackUrl === 'string' ? originalTrackUrl : ''
-      const cacheKeyStable = normalizeStemPlayUrl(stemSrc) || stemSrc
-      const b2Fallback = stemSrc && stemPathFromB2PublicUrl(stemSrc) ? stemSrc : undefined
-      if (!cacheKeyStable) continue
+      console.log(' Loading song tracks:', song.stems)
+      for (const [trackKey, originalTrackUrl] of Object.entries(song.stems)) {
+        const stemSrc = typeof originalTrackUrl === 'string' ? originalTrackUrl : ''
+        const cacheKeyStable = normalizeStemPlayUrl(stemSrc) || stemSrc
+        const b2Fallback = stemSrc && stemPathFromB2PublicUrl(stemSrc) ? stemSrc : undefined
+        if (!cacheKeyStable) continue
+        
+        // Ignorar el click track en la carga inicial para dejar el canal vacío
+        if (isClickStemKey(trackKey)) {
+          continue;
+        }
 
-      console.log(` Loading audio for ${trackKey}:`, stemSrc)
+        console.log(` Loading audio for ${trackKey}:`, stemSrc)
 
-      // Cada stem se carga de forma independiente: un fallo no detiene los demás
-      try {
-        // Descargar o recuperar del caché de la Cache API y convertir en Blob URL
-        const trackUrl = await getCachedAudioBlobUrl(stemSrc, b2Fallback)
+        try {
+          // Descargar o recuperar del caché de la Cache API y convertir en Blob URL
+          const trackUrl = await getCachedAudioBlobUrl(stemSrc, b2Fallback)
 
-        // 1. PRIMERO: Buscar waveform en cache localStorage
-        if (waveformCache[cacheKeyStable]) {
-          console.log(` CACHE HIT para ${trackKey}`)
-          newLoadingStates[trackKey] = 'cached'
-          newWaveforms[trackKey] = waveformCache[cacheKeyStable]
+          // 1. PRIMERO: Buscar waveform en cache localStorage
+          if (waveformCache[cacheKeyStable]) {
+            console.log(` CACHE HIT para ${trackKey}`)
+            newLoadingStates[trackKey] = 'cached'
+            newWaveforms[trackKey] = waveformCache[cacheKeyStable]
+            console.log(`[WAVEFORM CANVAS] fallback SVG ready for ${trackKey}`)
+
+            const audio = createConfiguredStemAudio(trackUrl)
+            audio.addEventListener('ended', () => {
+              Object.values(newAudioElements).forEach(a => { a.pause(); a.currentTime = 0 })
+              setIsPlaying(false)
+              setCurrentTime(0)
+              playbackWallOriginProjectSecRef.current = 0
+              playbackWallOriginPerfRef.current = performance.now()
+            })
+            newAudioElements[trackKey] = audio
+
+            // Decodificar para alta resolución en background (para no bloquear el inicio del playback si ya hay cache)
+            // Usamos una promesa autoejecutada para que el loop continúe inmediatamente
+            ;(async () => {
+              try {
+                const response = await fetch(trackUrl)
+                const arrayBuffer = await response.arrayBuffer()
+                const ctx = new AudioContext()
+                const buf = await ctx.decodeAudioData(arrayBuffer)
+                ctx.close()
+                
+                const channelData = buf.getChannelData(0)
+                setFullChannelData(prev => ({ 
+                  ...prev, 
+                  [trackKey]: { data: channelData, sampleRate: buf.sampleRate } 
+                }))
+                
+                const onsetTimeMs = detectOnset(buf)
+                setTrackOnsets(prev => ({ ...prev, [trackKey]: onsetTimeMs }))
+                setTrackLoadingStates(prev => ({ ...prev, [trackKey]: 'ready' }))
+                console.log(`[WAVEFORM CANVAS] high-res ready for cached track ${trackKey}`)
+
+                // SIEMPRE re-analizamos BPM si es batería o instrumental para asegurar precisión decimal real
+                if (trackKey === 'drums' || trackKey === 'instrumental') {
+                  console.log(`[BPM ENGINE] Iniciando análisis intensivo para ${trackKey}...`)
+                  const bassData = fullChannelData['bass']?.data;
+                  const preciseBpm = analyzeBpmFromChannelData(channelData, buf.sampleRate, bassData)
+                  handleUpdateBpm(preciseBpm, song.id)
+                  console.log(`[BPM ENGINE] RESULTADO FINAL: ${preciseBpm} BPM detectado.`)
+                  setIsAnalyzingBpm(false)
+                }
+              } catch (err) {
+                console.warn(`[WAVEFORM CANVAS] Error background decoding cached ${trackKey}:`, err)
+              }
+            })()
+
+            continue
+          }
+
+          // 2. SEGUNDO: Si no está en cache, cargar desde la URL (blob de B2)
+          console.log(` CACHE MISS para ${trackKey} - cargando audio`)
+          newLoadingStates[trackKey] = 'loading'
+          setTrackLoadingStates(prev => ({ ...prev, [trackKey]: 'loading' }))
 
           const audio = createConfiguredStemAudio(trackUrl)
+
           audio.addEventListener('ended', () => {
             Object.values(newAudioElements).forEach(a => { a.pause(); a.currentTime = 0 })
             setIsPlaying(false)
@@ -2267,157 +2683,92 @@ export default function Home() {
             playbackWallOriginProjectSecRef.current = 0
             playbackWallOriginPerfRef.current = performance.now()
           })
-          newAudioElements[trackKey] = audio
 
-          // Detectar onset (no bloquea si falla)
-          try {
-            const res = await fetch(trackUrl)
-            const ab = await res.arrayBuffer()
-            const ctx = new AudioContext()
-            const buf = await ctx.decodeAudioData(ab)
-            ctx.close()
-            const onsetTimeMs = detectOnset(buf)
-            console.log(`[ONSET] ${trackKey}: ${onsetTimeMs}ms`)
-            setTrackOnsets(prev => ({ ...prev, [trackKey]: onsetTimeMs }))
-          } catch (onsetErr) {
-            console.warn(`[ONSET] No se pudo detectar onset para ${trackKey}:`, onsetErr)
-          }
-          continue
-        }
-
-        // 2. SEGUNDO: Si no está en cache, cargar desde la URL (blob de B2)
-        console.log(` CACHE MISS para ${trackKey} - cargando audio`)
-        newLoadingStates[trackKey] = 'loading'
-        setTrackLoadingStates(prev => ({ ...prev, [trackKey]: 'loading' }))
-
-        const audio = createConfiguredStemAudio(trackUrl)
-
-        audio.addEventListener('loadedmetadata', () => {
-          console.log(` ${trackKey} metadata loaded: dur=${audio.duration?.toFixed(2)}s`)
-        })
-
-        audio.addEventListener('ended', () => {
-          Object.values(newAudioElements).forEach(a => { a.pause(); a.currentTime = 0 })
-          setIsPlaying(false)
-          setCurrentTime(0)
-          playbackWallOriginProjectSecRef.current = 0
-          playbackWallOriginPerfRef.current = performance.now()
-        })
-
-        // Esperar canplaythrough (sin llamar load() extra — asignar src ya lo dispara)
-        await new Promise<void>((resolve, reject) => {
-          const onCanPlay = () => {
-            audio.removeEventListener('canplaythrough', onCanPlay)
-            audio.removeEventListener('error', onError)
-            console.log(` ${trackKey} audio ready to play`)
-            resolve()
-          }
-          const onError = () => {
-            audio.removeEventListener('canplaythrough', onCanPlay)
-            audio.removeEventListener('error', onError)
-            const code = audio.error?.code
-            const msg = audio.error?.message
-            console.error(` ${trackKey} audio failed to load`, { code, msg, src: audio.src?.slice(0, 80) })
-            reject(new Error(`${trackKey}: audio error ${code ?? '?'}`))
-          }
-          audio.addEventListener('canplaythrough', onCanPlay)
-          audio.addEventListener('error', onError)
-        })
-
-        newAudioElements[trackKey] = audio
-
-        // Generar waveform + detectar onset
-        try {
-          console.log(` Generating waveform for ${trackKey}`)
-          const response = await fetch(trackUrl)
-          const arrayBuffer = await response.arrayBuffer()
-          console.log(`${trackKey} file size: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`)
-
-          const tempContext = new AudioContext()
-          const audioBuffer = await tempContext.decodeAudioData(arrayBuffer)
-          tempContext.close()
-
-          // Detectar onset
-          const onsetTimeMs = detectOnset(audioBuffer)
-          console.log(`[ONSET] ${trackKey}: ${onsetTimeMs}ms`)
-          setTrackOnsets(prev => ({ ...prev, [trackKey]: onsetTimeMs }))
-
-          const channelData = audioBuffer.getChannelData(0)
-
-          let maxAmplitude = 0
-          for (let i = 0; i < channelData.length; i++) {
-            const abs = Math.abs(channelData[i])
-            if (abs > maxAmplitude) maxAmplitude = abs
-          }
-
-          let sumSquares = 0
-          for (let i = 0; i < channelData.length; i++) sumSquares += channelData[i] * channelData[i]
-          const rmsAmplitude = Math.sqrt(sumSquares / channelData.length)
-
-          console.log(` ${trackKey} audio analysis:`, {
-            samples: channelData.length,
-            maxAmplitude,
-            rmsAmplitude,
-            duration: audioBuffer.duration,
-            sampleRate: audioBuffer.sampleRate,
-            hasAudio: maxAmplitude > 0.001,
+          // Esperar canplaythrough
+          await new Promise<void>((resolve, reject) => {
+            const onCanPlay = () => {
+              audio.removeEventListener('canplaythrough', onCanPlay)
+              audio.removeEventListener('error', onError)
+              resolve()
+            }
+            const onError = () => {
+              audio.removeEventListener('canplaythrough', onCanPlay)
+              audio.removeEventListener('error', onError)
+              reject(new Error(`${trackKey}: audio error`))
+            }
+            audio.addEventListener('canplaythrough', onCanPlay)
+            audio.addEventListener('error', onError)
           })
 
-          const waveformData = generateProfessionalWaveform(channelData, 800)
-          newWaveforms[trackKey] = waveformData
+          newAudioElements[trackKey] = audio
 
-          // Guardar en cache persistente
-          const newPersistentCache = { ...waveformCache, [cacheKeyStable]: waveformData }
-          setWaveformCache(newPersistentCache)
+          // Generar waveform + detectar onset (AWAITED para evitar que la UI se vea vacía)
           try {
-            localStorage.setItem('waveform-cache', JSON.stringify(newPersistentCache))
-            console.log(` GUARDADO en cache para ${trackKey}`)
-          } catch {
-            localStorage.removeItem('waveform-cache')
+            const response = await fetch(trackUrl)
+            const arrayBuffer = await response.arrayBuffer()
+            const tempContext = new AudioContext()
+            const audioBuffer = await tempContext.decodeAudioData(arrayBuffer)
+            tempContext.close()
+            
+            const channelData = audioBuffer.getChannelData(0)
+            const waveformData = generateProfessionalWaveform(channelData, 800)
+            
+            newWaveforms[trackKey] = waveformData
+            setFullChannelData(prev => ({ 
+              ...prev, 
+              [trackKey]: { data: channelData, sampleRate: audioBuffer.sampleRate } 
+            }))
+            
+            console.log(`[WAVEFORM CANVAS] fullChannelData available ${trackKey}`)
+
+            // Guardar en cache persistente
+            const newPersistentCache = { ...waveformCache, [cacheKeyStable]: waveformData }
+            setWaveformCache(newPersistentCache)
             try {
-              localStorage.setItem('waveform-cache', JSON.stringify({ [cacheKeyStable]: waveformData }))
+              localStorage.setItem('waveform-cache', JSON.stringify(newPersistentCache))
             } catch {
               console.warn('No se pudo guardar waveform en localStorage para', trackKey)
             }
-          }
 
-          newLoadingStates[trackKey] = 'ready'
-          console.log(` Waveform generado para ${trackKey}: ${waveformData.length} puntos`)
-        } catch (waveErr) {
-          console.error(`Error generating waveform for ${trackKey}:`, waveErr)
+            const onsetTimeMs = detectOnset(audioBuffer)
+            setTrackOnsets(prev => ({ ...prev, [trackKey]: onsetTimeMs }))
+
+            // SIEMPRE re-analizamos BPM si es batería o instrumental
+            if (trackKey === 'drums' || trackKey === 'instrumental') {
+              console.log(`[BPM ENGINE] Iniciando análisis intensivo para ${trackKey}...`)
+              const bassData = fullChannelData['bass']?.data;
+              const preciseBpm = analyzeBpmFromChannelData(channelData, audioBuffer.sampleRate, bassData)
+              handleUpdateBpm(preciseBpm, song.id)
+              console.log(`[BPM ENGINE] RESULTADO FINAL: ${preciseBpm} BPM detectado.`)
+              setIsAnalyzingBpm(false)
+            }
+
+            newLoadingStates[trackKey] = 'ready'
+          } catch (err) {
+            console.error(`[WAVEFORM CANVAS] Error processing waveform for ${trackKey}:`, err)
+            newLoadingStates[trackKey] = 'ready'
+          }
+        } catch (stemError) {
+          console.error(`[loadAudioFiles] Falló el stem "${trackKey}":`, stemError)
           newLoadingStates[trackKey] = 'idle'
         }
-
-        console.log(`Audio loaded successfully for ${trackKey}`)
-      } catch (stemError) {
-        // Un stem fallido NO detiene los demás tracks
-        console.error(`[loadAudioFiles] Falló el stem "${trackKey}" — continuando con el resto:`, stemError)
-        newLoadingStates[trackKey] = 'idle'
       }
-    }
 
-    setAudioElements(newAudioElements)
-    setWaveforms(newWaveforms)
-    setTrackLoadingStates(newLoadingStates)
+      setAudioElements(newAudioElements)
+      setWaveforms(newWaveforms)
+      setTrackLoadingStates(newLoadingStates)
 
-    let maxAudioDur = 0
-    for (const a of Object.values(newAudioElements)) {
-      maxAudioDur = Math.max(maxAudioDur, Number(a.duration) || 0)
-    }
-    const songSec =
-      typeof song.durationSeconds === 'number' && Number.isFinite(song.durationSeconds)
-        ? song.durationSeconds
-        : 0
-    if (maxAudioDur > 0 || songSec > 0) {
-      setDuration((d) => Math.max(d, maxAudioDur, songSec))
-    }
-    
-    // NO resetear el tiempo si ya había audios cargados
-    // Esto previene que se reinicie cuando se recarga por cambios de color u otras actualizaciones
-    console.log(' Carga completada - manteniendo estado de reproducción actual')
-    
-    console.log('All audio files loaded:', Object.keys(newAudioElements))
-    console.log('All waveforms generated:', Object.keys(newWaveforms))
+      let maxAudioDur = 0
+      for (const a of Object.values(newAudioElements)) {
+        maxAudioDur = Math.max(maxAudioDur, Number(a.duration) || 0)
+      }
+      const songSec = Number(song.durationSeconds) || 0
+      if (maxAudioDur > 0 || songSec > 0) {
+        setDuration((d) => Math.max(d, maxAudioDur, songSec))
+      }
+      
+      console.log(' Carga completada - manteniendo estado de reproducción actual')
+      console.log('All audio files loaded:', Object.keys(newAudioElements))
     } catch (outerError) {
       console.error('[loadAudioFiles] Error inesperado:', outerError)
     } finally {
@@ -2438,9 +2789,20 @@ export default function Home() {
         return
       }
 
+      const projectT_raw = getTransportProjectTimeFromWallClock()
       const dCap = Math.max(0.01, durationRef.current || 3600)
-      const projectT = Math.max(0, Math.min(getTransportProjectTimeFromWallClock(), dCap))
+      const projectT = Math.max(0, Math.min(projectT_raw, dCap))
       setCurrentTime(projectT)
+
+      // Auto-stop al final
+      if (projectT_raw >= dCap && isPlaying) {
+        setIsPlaying(false)
+        Object.values(audioElements).forEach(a => {
+          a.pause()
+          a.currentTime = dCap
+        })
+        return // Salir para no llamar resyncStemAudioFilePositions
+      }
 
       let maxDur = 0
       for (const a of Object.values(audioElements)) {
@@ -2720,7 +3082,10 @@ export default function Home() {
               <span className="text-sm font-semibold text-white">Judith</span>
             </div>
           </div>
-          <ConnectionStatus />
+          <div className="flex items-center gap-3">
+            <TokenBadge onClick={() => setShowUpgradeModal(true)} />
+            <ConnectionStatus />
+          </div>
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col">
@@ -2887,6 +3252,8 @@ export default function Home() {
                 isOpen
                 embedded
                 onClose={goToTracksSection}
+                currentBpm={Number(selectedSong?.bpm)}
+                onApply={handleUpdateBpm}
               />
             </div>
           ) : activeStudioView === 'tempo' ? (
@@ -3013,6 +3380,7 @@ export default function Home() {
                             onClick={async (e) => {
                               e.stopPropagation()
                               console.log('Opening modal for song:', song.title)
+                              setIsAnalyzingBpm(true)
                               setSelectedSong(song)
                               setShowSongModal(true)
                               setTimeout(() => loadAudioFiles(song), 100)
@@ -3354,9 +3722,10 @@ export default function Home() {
               <BpmDisplay 
                 songId={selectedSong?.id}
                 originalUrl={selectedSong?.fileUrl}
-                headerBpm={selectedSong?.bpm}
+                headerBpm={isAnalyzingBpm ? undefined : selectedSong?.bpm}
                 headerKey={selectedSong?.key}
                 compact
+                onBpmChange={handleUpdateBpm}
               />
 
               <button
@@ -3620,7 +3989,22 @@ export default function Home() {
                                   <ChevronDown className="h-3.5 w-3.5" strokeWidth={2.5} />
                                 </button>
                               </div>
-                              <span className="text-white text-[9px] md:text-xs font-bold truncate leading-none tracking-tight">{config.name}</span>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="text-white text-[9px] md:text-xs font-bold truncate leading-none tracking-tight">{config.name}</span>
+                                {clickLike && (
+                                  <div className="flex items-center gap-1">
+                                    <span className={`shrink-0 text-[7px] md:text-[8px] font-mono font-bold px-1 py-0.5 rounded border shadow-sm ${
+                                      audioElements[trackKey] 
+                                        ? 'text-teal-400 bg-black/40 border-teal-500/20' 
+                                        : 'text-amber-400 bg-black/40 border-amber-500/20 animate-pulse'
+                                    }`}>
+                                      {audioElements[trackKey] 
+                                        ? `${Number(selectedSong?.bpm || 0).toFixed(2)} BPM` 
+                                        : 'SYNC PENDING'}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
                               {trackUrl === undefined ? (
                                 <span className="text-gray-400 text-[7px] md:text-[9px] font-mono bg-gray-800/50 px-0.5 rounded animate-pulse">
                                   ...
@@ -3641,40 +4025,56 @@ export default function Home() {
                           </div>
                           
                           {/* Botón selector de color - LED parpadeante */}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setShowColorPicker(trackKey);
-                            }}
-                            className="h-3 w-4 md:h-5 md:w-6 min-h-0 min-w-0 rounded border border-gray-600 hover:border-white transition-all duration-300 animate-pulse shadow-lg shrink-0"
-                            style={{ 
-                              backgroundColor: getColorFromClass(trackBackgroundColor),
-                              boxShadow: `0 0 4px ${getColorFromClass(trackBackgroundColor)}, 0 0 8px ${getColorFromClass(trackBackgroundColor)}`
-                            }}
-                            title="Cambiar color del track"
-                          />
-                          {/* Botón de Sincronización Mágica para click track */}
-                          {isClickStemKey(trackKey) && (
+                          <div className="flex items-center gap-1 shrink-0">
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                handleSyncClick();
+                                setShowColorPicker(trackKey);
                               }}
-                              disabled={clickSyncBusy}
-                              className={`ml-1 px-1.5 py-0.5 rounded text-[8px] md:text-[9px] font-bold shadow-md transition-all ${
-                                clickSyncBusy 
-                                  ? 'bg-gray-700 text-gray-400 cursor-not-allowed animate-pulse' 
-                                  : 'bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 text-white border border-teal-400/30'
-                              }`}
-                              title="Calcular offset y sincronizar mágicamente con la batería"
-                            >
-                              {clickSyncBusy ? '...' : '✨ Sync'}
-                            </button>
-                          )}
+                              className="h-3 w-4 md:h-5 md:w-6 min-h-0 min-w-0 rounded border border-gray-600 hover:border-white transition-all duration-300 animate-pulse shadow-lg"
+                              style={{ 
+                                backgroundColor: getColorFromClass(trackBackgroundColor),
+                                boxShadow: `0 0 4px ${getColorFromClass(trackBackgroundColor)}, 0 0 8px ${getColorFromClass(trackBackgroundColor)}`
+                              }}
+                              title="Cambiar color del track"
+                            />
+                            {/* Controles avanzados para click track */}
+                            {isClickStemKey(trackKey) && (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setShowClickSettings(true);
+                                  }}
+                                  className="p-1 rounded bg-gray-800/80 hover:bg-gray-700 text-gray-400 hover:text-teal-400 transition-all border border-gray-700"
+                                  title="Configuración Manual"
+                                >
+                                  <Settings className="w-2.5 h-2.5 md:w-3 md:h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleAutoMagicSync();
+                                  }}
+                                  disabled={clickSyncBusy}
+                                  className={`px-1.5 py-0.5 rounded text-[8px] md:text-[9px] font-bold shadow-md transition-all ${
+                                    clickSyncBusy 
+                                      ? 'bg-gray-700 text-gray-400 cursor-not-allowed animate-pulse' 
+                                      : 'bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 text-white border border-teal-400/30'
+                                  }`}
+                                  title="Calcular offset y sincronizar mágicamente con la batería"
+                                >
+                                  {clickSyncBusy ? '...' : '✨ Sync'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                         
                         {/* Slider de Volumen + Botones M y S - Solo mostrar si no se está generando */}
@@ -4003,7 +4403,9 @@ export default function Home() {
                           waveforms[trackKey].length > 0 ? (
                             <div
                               data-clip-body
-                              className={`absolute inset-y-0 z-[1] flex overflow-hidden rounded-md border border-black/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] ring-1 ring-black/30 transition-shadow group-hover/row:ring-teal-500/40 ${trackBackgroundColor}`}
+                              className={`group/clip absolute inset-y-0 z-[1] flex overflow-hidden rounded-md border border-black/80 shadow-[0_2px_10px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.08)] ring-1 ring-black/40 transition-all hover:ring-teal-500/50 ${trackBackgroundColor} ${
+                                selectedEditTrackKey === trackKey ? 'brightness-110 saturate-110' : 'opacity-90'
+                              }`}
                               style={{
                                 left: `${clipStartFrac * 100}%`,
                                 width: `${clipWidthFrac * 100}%`,
@@ -4011,88 +4413,97 @@ export default function Home() {
                               }}
                               title="Clip: arrastra bordes para trim no destructivo; arrastra el centro para mover."
                             >
+                              {/* Trim handles visuales */}
+                              <div className="pointer-events-none absolute left-0 inset-y-0 w-1.5 bg-white/20 opacity-0 group-hover/clip:opacity-100 transition-opacity z-10" />
+                              <div className="pointer-events-none absolute right-0 inset-y-0 w-1.5 bg-white/20 opacity-0 group-hover/clip:opacity-100 transition-opacity z-10" />
+                              
                               <div className="flex h-full w-full min-w-0 items-center justify-center">
-                                {waveformStyle === 'bars' && (
-                                  <div className="relative flex h-full w-full min-w-0 items-center justify-center">
-                                    <svg
-                                      width="100%"
-                                      height="100%"
-                                      viewBox="0 0 800 60"
-                                      className="absolute inset-0"
-                                      preserveAspectRatio="none"
-                                    >
-                                      <defs>
-                                        <linearGradient
-                                          id={`waveGradient-${trackKey}`}
-                                          x1="0%"
-                                          y1="0%"
-                                          x2="0%"
-                                          y2="100%"
-                                        >
-                                          <stop
-                                            offset="0%"
-                                            style={{ stopColor: '#FFFFFF', stopOpacity: 0.9 }}
-                                          />
-                                          <stop
-                                            offset="100%"
-                                            style={{ stopColor: '#FFFFFF', stopOpacity: 0.9 }}
-                                          />
-                                        </linearGradient>
-                                      </defs>
+                                {fullChannelData[trackKey] ? (
+                                  <WaveformClipCanvas 
+                                    channelData={fullChannelData[trackKey].data}
+                                    sampleRate={fullChannelData[trackKey].sampleRate}
+                                    sourceInSec={sourceInSec}
+                                    sourceOutSec={sourceOutSec}
+                                    color="rgba(255, 255, 255, 0.9)"
+                                    height={rowH}
+                                    zoom={horizontalZoom}
+                                    selected={selectedEditTrackKey === trackKey}
+                                    muted={trackMutedStates[trackKey]}
+                                  />
+                                ) : (
+                                  (() => {
+                                    if (waveformStyle === 'bars') {
+                                      // Log only if fullChannelData is not yet available
+                                      if (!fullChannelData[trackKey]) {
+                                        // console.log(`[WAVEFORM CANVAS] fallback SVG ${trackKey}`)
+                                      }
+                                      return (
+                                        <div className="relative flex h-full w-full min-w-0 items-center justify-center">
+                                          <svg
+                                            width="100%"
+                                            height="100%"
+                                            viewBox="0 0 800 60"
+                                            className="absolute inset-0"
+                                            preserveAspectRatio="none"
+                                          >
+                                            <defs>
+                                              <linearGradient
+                                                id={`waveGradient-${trackKey}`}
+                                                x1="0%"
+                                                y1="0%"
+                                                x2="0%"
+                                                y2="100%"
+                                              >
+                                                <stop
+                                                  offset="0%"
+                                                  style={{ stopColor: '#FFFFFF', stopOpacity: 0.9 }}
+                                                />
+                                                <stop
+                                                  offset="100%"
+                                                  style={{ stopColor: '#FFFFFF', stopOpacity: 0.9 }}
+                                                />
+                                              </linearGradient>
+                                            </defs>
 
-                                      <line
-                                        x1="2"
-                                        y1="30"
-                                        x2="800"
-                                        y2="30"
-                                        stroke="#374151"
-                                        strokeWidth="0.5"
-                                        opacity="0.3"
-                                      />
+                                            <line
+                                              x1="2"
+                                              y1="30"
+                                              x2="800"
+                                              y2="30"
+                                              stroke="#374151"
+                                              strokeWidth="0.5"
+                                              opacity="0.3"
+                                            />
 
-                                      <path
-                                        d={generateFilledWaveformPath(peaksTrim)}
-                                        fill={`url(#waveGradient-${trackKey})`}
-                                        stroke="none"
-                                      />
+                                            <path
+                                              d={generateFilledWaveformPath(peaksTrim)}
+                                              fill={`url(#waveGradient-${trackKey})`}
+                                              stroke="none"
+                                            />
 
-                                      <path
-                                        d={peaksTrim
-                                          .map((value, index) => {
-                                            const x =
-                                              2 +
-                                              (index / Math.max(1, peaksTrim.length - 1)) * 798
-                                            const y = 30 - value * 25
-                                            return index === 0 ? `M ${x},${y}` : `L ${x},${y}`
-                                          })
-                                          .join(' ')}
-                                        fill="none"
-                                        stroke="#FFFFFF"
-                                        strokeWidth="1"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        opacity="0.8"
-                                      />
-
-                                      <path
-                                        d={peaksTrim
-                                          .map((value, index) => {
-                                            const x =
-                                              2 +
-                                              (index / Math.max(1, peaksTrim.length - 1)) * 798
-                                            const y = 30 + value * 25
-                                            return index === 0 ? `M ${x},${y}` : `L ${x},${y}`
-                                          })
-                                          .join(' ')}
-                                        fill="none"
-                                        stroke="#FFFFFF"
-                                        strokeWidth="1"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        opacity="0.8"
-                                      />
-                                    </svg>
-                                  </div>
+                                            <path
+                                              d={peaksTrim
+                                                .map((value, index) => {
+                                                  const x =
+                                                    2 +
+                                                    (index / Math.max(1, peaksTrim.length - 1)) * 798
+                                                  const y = 30 - value * 25
+                                                  return index === 0 ? `M ${x},${y}` : `L ${x},${y}`
+                                                })
+                                                .join(' ')}
+                                              fill="none"
+                                              stroke="#FFFFFF"
+                                              strokeWidth="1.5"
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                              opacity="0.95"
+                                            />
+                                          </svg>
+                                        </div>
+                                      )
+                                    }
+                                    return null
+                                  })()
                                 )}
                               </div>
                               {/* Fades visuales (triángulos) */}
@@ -4621,6 +5032,20 @@ export default function Home() {
         </div>
       )}
 
+      {/* Modal de Configuración de Click */}
+      {showClickSettings && selectedSong && (
+        <ClickSettingsModal
+          isOpen={showClickSettings}
+          onClose={() => setShowClickSettings(false)}
+          songTitle={selectedSong.title}
+          currentBpm={selectedSong.clickConfig?.bpm || selectedSong.bpm}
+          currentTime={currentTime}
+          initialConfig={selectedSong.clickConfig}
+          onSave={handleSaveClickSettings}
+          onSnap={handleSnapDownbeat}
+        />
+      )}
+
       {/* Modal de confirmación de eliminación */}
       {deleteConfirmModal.show && deleteConfirmModal.song && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[10000]">
@@ -4674,99 +5099,9 @@ export default function Home() {
       )}
 
       {showUpgradeModal && (
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-3xl rounded-xl border border-[#2a2a2a] bg-[#111] p-4 md:p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-white">Elige tu plan</h3>
-              <button
-                type="button"
-                onClick={() => setShowUpgradeModal(false)}
-                className="rounded p-2 text-[#a3a3a3] hover:bg-[#1a1a1a] hover:text-white"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="mb-4 inline-flex rounded-lg border border-[#2a2a2a] bg-[#0d0d0d] p-1">
-              <button
-                type="button"
-                onClick={() => setUpgradeBilling('monthly')}
-                className={`rounded px-3 py-1.5 text-xs font-medium ${
-                  upgradeBilling === 'monthly' ? 'bg-[#2a2a2a] text-white' : 'text-[#a3a3a3]'
-                }`}
-              >
-                Mensual
-              </button>
-              <button
-                type="button"
-                onClick={() => setUpgradeBilling('yearly')}
-                className={`rounded px-3 py-1.5 text-xs font-medium ${
-                  upgradeBilling === 'yearly' ? 'bg-[#2a2a2a] text-white' : 'text-[#a3a3a3]'
-                }`}
-              >
-                Anual
-              </button>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-lg border border-[#2a2a2a] bg-[#151515] p-4">
-                <p className="text-sm text-[#a3a3a3]">Lite</p>
-                <p className="mt-1 text-2xl font-semibold text-white">
-                  {upgradeBilling === 'yearly' ? '$4.17/mo' : '$4.99/mo'}
-                </p>
-                <p className="text-xs text-[#737373]">
-                  {upgradeBilling === 'yearly' ? '$49.99 billed annually' : 'Facturación mensual'}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (currentPlanId === 'lite') return
-                    setShowUpgradeModal(false)
-                    setSidebarOpen(false)
-                    startUpgradeCheckout('lite', upgradeBilling)
-                  }}
-                  disabled={currentPlanId === 'lite'}
-                  className={`mt-3 w-full rounded-md px-3 py-2 text-sm font-semibold transition ${
-                    currentPlanId === 'lite'
-                      ? 'cursor-not-allowed border border-[#3a3a3a] bg-[#1e1e1e] text-[#737373]'
-                      : 'bg-[#f3d12f] text-black hover:brightness-105'
-                  }`}
-                >
-                  {currentPlanId === 'lite' ? 'Plan actual' : 'Elegir Lite'}
-                </button>
-              </div>
-
-              <div className="rounded-lg border border-[#2a2a2a] bg-[#151515] p-4">
-                <p className="text-sm text-[#a3a3a3]">Pro</p>
-                <p className="mt-1 text-2xl font-semibold text-white">
-                  {upgradeBilling === 'yearly' ? '$8.33/mo' : '$9.99/mo'}
-                </p>
-                <p className="text-xs text-[#737373]">
-                  {upgradeBilling === 'yearly' ? '$99.99 billed annually' : 'Facturación mensual'}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (currentPlanId === 'pro') return
-                    setShowUpgradeModal(false)
-                    setSidebarOpen(false)
-                    startUpgradeCheckout('pro', upgradeBilling)
-                  }}
-                  disabled={currentPlanId === 'pro'}
-                  className={`mt-3 w-full rounded-md px-3 py-2 text-sm font-semibold transition ${
-                    currentPlanId === 'pro'
-                      ? 'cursor-not-allowed border border-[#3a3a3a] bg-[#1e1e1e] text-[#737373]'
-                      : 'bg-[#f3d12f] text-black hover:brightness-105'
-                  }`}
-                >
-                  {currentPlanId === 'pro' ? 'Plan actual' : 'Elegir Pro'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PaywallModal isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} />
       )}
-
+      <SyncLoadingOverlay isVisible={isAutoSyncing} />
     </div>
   )
 }

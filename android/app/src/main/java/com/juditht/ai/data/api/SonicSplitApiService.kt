@@ -14,7 +14,7 @@ interface SonicSplitApiService {
      * POST /api/separate-demucs
      */
     @Multipart
-    @POST("api/separate-demucs")
+    @POST("api/separate")
     suspend fun separateAudio(
         @Part file: MultipartBody.Part,
         @Part("separation_type") separationType: RequestBody,
@@ -27,9 +27,9 @@ interface SonicSplitApiService {
 
     /**
      * Poll the status of a separation job.
-     * GET /status/{task_id}
+     * GET /api/status/{task_id}
      */
-    @GET("status/{taskId}")
+    @GET("api/status/{taskId}")
     suspend fun getStatus(
         @Path("taskId") taskId: String
     ): Response<StatusResponse>
@@ -40,4 +40,22 @@ interface SonicSplitApiService {
      */
     @GET("api/health")
     suspend fun health(): Response<Map<String, Any>>
+
+    /**
+     * Check user token balance before separation.
+     * GET /api/check-tokens?uid=<uid>
+     */
+    @GET("api/check-tokens")
+    suspend fun checkTokens(
+        @Query("uid") uid: String
+    ): Response<Map<String, Any>>
+
+    /**
+     * Create a Stripe checkout session.
+     * POST /api/stripe/create-checkout-session
+     */
+    @POST("api/stripe/create-checkout-session")
+    suspend fun createCheckoutSession(
+        @Body body: Map<String, String>
+    ): Response<Map<String, String>>
 }

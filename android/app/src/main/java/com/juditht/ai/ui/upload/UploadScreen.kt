@@ -32,12 +32,24 @@ import com.juditht.ai.ui.theme.*
 @Composable
 fun UploadScreen(
     onBack: () -> Unit,
+    onLibraryClick: () -> Unit,
+    onProfileClick: () -> Unit,
     onJobStarted: (String) -> Unit,
+    onNavigateToPaywall: (String?) -> Unit,
     viewModel: UploadViewModel = hiltViewModel(),
     authViewModel: AuthViewModel = hiltViewModel()
 ) {
     val state   by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    // Navegar a la pantalla de pago si lo requiere
+    LaunchedEffect(state.needsPaywall) {
+        if (state.needsPaywall) {
+            val reason = state.paywallReason
+            viewModel.clearPaywallTrigger()
+            onNavigateToPaywall(reason)
+        }
+    }
 
     // Navegar cuando el trabajo empieza
     LaunchedEffect(state.taskId) {
@@ -69,7 +81,12 @@ fun UploadScreen(
             SonicTopBar(title = "Judit", onBack = onBack)
         },
         bottomBar = {
-            SonicUploadBottomNav(onLibraryClick = onBack)
+            SonicBottomNav(
+                activeTab = 1,
+                onLibraryClick = onLibraryClick,
+                onUploadClick = {},
+                onProfileClick = onProfileClick
+            )
         }
     ) { padding ->
         Column(
@@ -325,33 +342,4 @@ fun UploadScreen(
     }
 }
 
-@Composable
-private fun SonicUploadBottomNav(onLibraryClick: () -> Unit) {
-    NavigationBar(
-        containerColor = SonicSurface.copy(alpha = 0.6f),
-        tonalElevation = 0.dp
-    ) {
-        NavigationBarItem(
-            selected = false,
-            onClick  = onLibraryClick,
-            icon     = { Icon(Icons.Default.LibraryMusic, contentDescription = "Librería") },
-            label    = { Text("Librería") },
-            colors   = NavigationBarItemDefaults.colors(
-                unselectedIconColor = SonicOnSurfaceVariant,
-                unselectedTextColor = SonicOnSurfaceVariant,
-                indicatorColor      = SonicPrimary.copy(alpha = 0.15f)
-            )
-        )
-        NavigationBarItem(
-            selected = true,
-            onClick  = {},
-            icon     = { Icon(Icons.Default.CloudUpload, contentDescription = "Subir") },
-            label    = { Text("Subir") },
-            colors   = NavigationBarItemDefaults.colors(
-                selectedIconColor   = SonicPrimary,
-                selectedTextColor   = SonicPrimary,
-                indicatorColor      = SonicPrimary.copy(alpha = 0.15f)
-            )
-        )
-    }
-}
+

@@ -37,6 +37,7 @@ class TaskDB(Base):
     chords = Column(Text)  # JSON string
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime)
+    user_id = Column(String)
 
 
 class SeparationCacheDB(Base):
@@ -82,6 +83,7 @@ def _ensure_sqlite_task_columns():
         "key": "VARCHAR",
         "duration": "FLOAT",
         "chords": "TEXT",
+        "user_id": "VARCHAR",
     }
 
     with engine.connect() as conn:

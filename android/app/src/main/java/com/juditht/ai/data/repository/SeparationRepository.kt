@@ -76,7 +76,7 @@ class SeparationRepository @Inject constructor(
 
             val filePart = MultipartBody.Part.createFormData(
                 "file", displayName,
-                tempFile.asRequestBody(mimeType.toMediaType())
+                tempFile.asRequestBody((if (mimeType.startsWith("audio/")) mimeType else "audio/mpeg").toMediaType())
             )
             val profile = if (hiFi) "hifi" else "pro_balanced"
             val optionsPart = separationOptionsJson?.toRequestBody("text/plain".toMediaType())

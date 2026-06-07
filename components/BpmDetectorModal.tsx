@@ -1,80 +1,30 @@
 'use client'
 
 import React, { useState, useRef } from 'react'
-import { X, Upload, Music } from 'lucide-react'
+import { X, Upload, Music, Check } from 'lucide-react'
 import AdminModalLabel from './AdminModalLabel'
+import { analyzeBpmFromChannelData } from '@/lib/bpmEngine'
 
 interface BpmDetectorModalProps {
   isOpen: boolean
   onClose: () => void
   embedded?: boolean
+  currentBpm?: number
+  onApply?: (bpm: number) => void
 }
 
-const BpmDetectorModal: React.FC<BpmDetectorModalProps> = ({ isOpen, onClose, embedded = false }) => {
+const BpmDetectorModal: React.FC<BpmDetectorModalProps> = ({ 
+  isOpen, 
+  onClose, 
+  embedded = false,
+  currentBpm,
+  onApply
+}) => {
   const [audioFile, setAudioFile] = useState<File | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [detectedBpm, setDetectedBpm] = useState<number | null>(null)
   const [detectedKey, setDetectedKey] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-
-  // Detectar BPM usando análisis de picos en el audio
-  const detectBPM = async (audioBuffer: AudioBuffer): Promise<number> => {
-    console.log('🎵 Analizando BPM...')
-    
-    // Obtener datos del canal (mono o promedio de stereo)
-    const channelData = audioBuffer.getChannelData(0)
-    const sampleRate = audioBuffer.sampleRate
-    
-    // Calcular energía por ventanas
-    const windowSize = Math.floor(sampleRate * 0.05) // Ventanas de 50ms
-    const energies: number[] = []
-    
-    for (let i = 0; i < channelData.length; i += windowSize) {
-      let energy = 0
-      for (let j = 0; j < windowSize && i + j < channelData.length; j++) {
-        energy += Math.abs(channelData[i + j])
-      }
-      energies.push(energy / windowSize)
-    }
-    
-    // Detectar picos
-    const threshold = energies.reduce((a, b) => a + b, 0) / energies.length * 1.5
-    const peaks: number[] = []
-    
-    for (let i = 1; i < energies.length - 1; i++) {
-      if (energies[i] > threshold && 
-          energies[i] > energies[i - 1] && 
-          energies[i] > energies[i + 1]) {
-        peaks.push(i)
-      }
-    }
-    
-    // Calcular intervalos entre picos
-    const intervals: number[] = []
-    for (let i = 1; i < peaks.length; i++) {
-      intervals.push(peaks[i] - peaks[i - 1])
-    }
-    
-    if (intervals.length === 0) {
-      throw new Error('No se pudieron detectar picos en el audio')
-    }
-    
-    // Calcular intervalo promedio
-    const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length
-    
-    // Convertir a BPM
-    const timePerWindow = windowSize / sampleRate
-    const bpm = 60 / (avgInterval * timePerWindow)
-    
-    console.log(`✅ BPM detectado: ${bpm.toFixed(1)}`)
-    
-    // Ajustar si está fuera de rango típico (60-180 BPM)
-    let finalBpm = bpm
-    while (finalBpm < 60) finalBpm *= 2
-    while (finalBpm > 180) finalBpm /= 2
-    
-    return Math.round(finalBpm) // BPM entero para uso musical práctico
-  }
 
   // Cargar y analizar archivo
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -93,21 +43,17 @@ const BpmDetectorModal: React.FC<BpmDetectorModalProps> = ({ isOpen, onClose, em
       const arrayBuffer = await file.arrayBuffer()
       const audioContext = new AudioContext()
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+      audioContext.close()
       
-      console.log('✅ Audio decodificado')
-      console.log('   Duration:', audioBuffer.duration.toFixed(2), 's')
-      console.log('   Sample Rate:', audioBuffer.sampleRate, 'Hz')
-      console.log('   Channels:', audioBuffer.numberOfChannels)
+      console.log('✅ Audio decodificado. Analizando con motor profesional...')
       
-      // Detectar BPM
-      const bpm = await detectBPM(audioBuffer)
+      const channelData = audioBuffer.getChannelData(0)
+      const bpm = analyzeBpmFromChannelData(channelData, audioBuffer.sampleRate)
+      
       setDetectedBpm(bpm)
+      console.log(`✅ BPM detectado: ${bpm}`)
       
-      // TODO: Detectar key/tonalidad (por ahora dejamos null)
-      // Esto requeriría una librería más compleja como music-tempo o essentia.js
-      
-      await audioContext.close()
-      
+      setIsAnalyzing(false)
     } catch (error) {
       console.error('❌ Error analizando audio:', error)
       alert('Error al analizar el archivo de audio')
@@ -233,6 +179,20 @@ const BpmDetectorModal: React.FC<BpmDetectorModalProps> = ({ isOpen, onClose, em
                 <span className="text-green-400 text-sm font-semibold">Tempo Detectado</span>
               </div>
             </div>
+
+            {/* Botón para aplicar al proyecto */}
+            {onApply && detectedBpm && (
+              <button
+                onClick={() => {
+                  onApply(detectedBpm)
+                  onClose()
+                }}
+                className="w-full py-4 font-bold text-lg transition-all duration-200 flex items-center justify-center space-x-3 bg-green-600 hover:bg-green-500 text-white rounded-xl shadow-[0_0_20px_rgba(34,197,94,0.4)]"
+              >
+                <Check className="w-6 h-6" />
+                <span>Aplicar al Proyecto ({detectedBpm} BPM)</span>
+              </button>
+            )}
 
             {/* Info del archivo */}
             {audioFile && (

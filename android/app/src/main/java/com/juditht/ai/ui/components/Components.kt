@@ -15,7 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
 import androidx.compose.ui.res.painterResource
 import com.juditht.ai.R
 import com.juditht.ai.ui.theme.*
@@ -221,4 +221,60 @@ fun SonicTopBar(
             navigationIconContentColor = SonicPrimary
         )
     )
+}
+
+/**
+ * Shared bottom navigation bar for main tabs: Library, Upload, and Profile.
+ */
+@Composable
+fun SonicBottomNav(
+    activeTab: Int,
+    onLibraryClick: () -> Unit,
+    onUploadClick: () -> Unit,
+    onProfileClick: () -> Unit
+) {
+    NavigationBar(
+        containerColor = SonicSurface.copy(alpha = 0.6f),
+        tonalElevation = 0.dp
+    ) {
+        NavigationBarItem(
+            selected = activeTab == 0,
+            onClick = onLibraryClick,
+            icon = { Icon(Icons.Default.LibraryMusic, contentDescription = "Librería") },
+            label = { Text("Librería") },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor       = SonicPrimary,
+                selectedTextColor       = SonicPrimary,
+                unselectedIconColor     = SonicOnSurfaceVariant,
+                unselectedTextColor     = SonicOnSurfaceVariant,
+                indicatorColor          = SonicPrimary.copy(alpha = 0.15f)
+            )
+        )
+        NavigationBarItem(
+            selected = activeTab == 1,
+            onClick = onUploadClick,
+            icon = { Icon(Icons.Default.CloudUpload, contentDescription = "Subir") },
+            label = { Text("Subir") },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor       = SonicPrimary,
+                selectedTextColor       = SonicPrimary,
+                unselectedIconColor     = SonicOnSurfaceVariant,
+                unselectedTextColor     = SonicOnSurfaceVariant,
+                indicatorColor          = SonicPrimary.copy(alpha = 0.15f)
+            )
+        )
+        NavigationBarItem(
+            selected = activeTab == 2,
+            onClick = onProfileClick,
+            icon = { Icon(Icons.Default.Person, contentDescription = "Perfil") },
+            label = { Text("Perfil") },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor       = SonicPrimary,
+                selectedTextColor       = SonicPrimary,
+                unselectedIconColor     = SonicOnSurfaceVariant,
+                unselectedTextColor     = SonicOnSurfaceVariant,
+                indicatorColor          = SonicPrimary.copy(alpha = 0.15f)
+            )
+        )
+    }
 }

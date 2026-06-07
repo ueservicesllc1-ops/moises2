@@ -64,6 +64,30 @@ export interface Song {
     confidence: number
     tonic: string
   }
+  /** Configuración personalizada del click (estilo Moises) */
+  clickConfig?: {
+    bpm?: number
+    offsetMs?: number
+    timeSignature?: '4/4' | '3/4' | '2/4' | '6/8'
+    downbeatSec?: number
+    isManual?: boolean
+  }
+}
+
+/** Actualiza la configuración del click de una canción en Firestore */
+export async function updateSongClickConfig(songId: string, config: Song['clickConfig']): Promise<void> {
+  try {
+    console.log('🔄 Actualizando ClickConfig en Firestore:', songId, config)
+    const songRef = doc(db, 'songs', songId)
+    await updateDoc(songRef, { 
+      clickConfig: config,
+      updatedAt: new Date()
+    })
+    console.log('✅ ClickConfig actualizado exitosamente')
+  } catch (error) {
+    console.error('❌ Error actualizando ClickConfig:', error)
+    throw error
+  }
 }
 
 // Guardar nueva canción en Firestore

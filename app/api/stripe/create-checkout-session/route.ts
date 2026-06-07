@@ -14,7 +14,7 @@ type Payload = {
 }
 
 function isValidPlan(plan: string | undefined): plan is CheckoutPlan {
-  return plan === 'lite' || plan === 'pro'
+  return plan === 'lite' || plan === 'pro' || plan === 'ultra'
 }
 
 function isValidBilling(billing: string | undefined): billing is CheckoutBilling {

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>SonicSplit AI - Authentication</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&amp;family=Geist:wght@600&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Inter:wght@100..900&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .glow-primary {
+            box-shadow: 0 0 15px rgba(173, 199, 255, 0.3);
+        }
+        body {
+            background-color: #050505;
+            color: #e5e2e1;
+            overflow-x: hidden;
+        }
+        .bg-mesh {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background: radial-gradient(circle at 20% 30%, rgba(173, 199, 255, 0.05) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 70%, rgba(182, 0, 248, 0.05) 0%, transparent 50%);
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "secondary-fixed-dim": "#ebb2ff",
+                      "surface-tint": "#adc7ff",
+                      "tertiary-container": "#1da800",
+                      "on-background": "#e5e2e1",
+                      "secondary": "#ebb2ff",
+                      "primary-fixed-dim": "#adc7ff",
+                      "on-tertiary": "#053900",
+                      "on-primary-container": "#00285b",
+                      "on-primary-fixed": "#001a41",
+                      "on-secondary": "#520072",
+                      "on-primary": "#002e68",
+                      "surface-variant": "#353534",
+                      "on-tertiary-fixed": "#022100",
+                      "on-error": "#690005",
+                      "tertiary-fixed-dim": "#2ae500",
+                      "error-container": "#93000a",
+                      "surface-container": "#201f1f",
+                      "surface-container-low": "#1c1b1b",
+                      "surface-container-lowest": "#0e0e0e",
+                      "tertiary-fixed": "#79ff5b",
+                      "on-secondary-container": "#fff6fc",
+                      "on-secondary-fixed": "#320047",
+                      "primary-fixed": "#d8e2ff",
+                      "inverse-surface": "#e5e2e1",
+                      "on-error-container": "#ffdad6",
+                      "on-secondary-fixed-variant": "#74009f",
+                      "surface-container-high": "#2a2a2a",
+                      "primary-container": "#4a8eff",
+                      "on-primary-fixed-variant": "#004493",
+                      "outline-variant": "#414754",
+                      "on-surface": "#e5e2e1",
+                      "inverse-on-surface": "#313030",
+                      "tertiary": "#2ae500",
+                      "secondary-fixed": "#f8d8ff",
+                      "on-tertiary-fixed-variant": "#095300",
+                      "background": "#131313",
+                      "error": "#ffb4ab",
+                      "surface": "#131313",
+                      "surface-dim": "#131313",
+                      "surface-container-highest": "#353534",
+                      "primary": "#adc7ff",
+                      "secondary-container": "#b600f8",
+                      "surface-bright": "#3a3939",
+                      "on-surface-variant": "#c1c6d7",
+                      "on-tertiary-container": "#043200",
+                      "inverse-primary": "#005bc0",
+                      "outline": "#8b90a0"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "xl": "32px",
+                      "margin-mobile": "20px",
+                      "gutter": "16px",
+                      "md": "16px",
+                      "base": "4px",
+                      "sm": "8px",
+                      "xs": "4px",
+                      "lg": "24px"
+              },
+              "fontFamily": {
+                      "display-lg": ["Inter"],
+                      "body-sm": ["Inter"],
+                      "body-lg": ["Inter"],
+                      "headline-lg-mobile": ["Inter"],
+                      "label-caps": ["Geist"],
+                      "title-md": ["Inter"],
+                      "headline-lg": ["Inter"]
+              },
+              "fontSize": {
+                      "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                      "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                      "headline-lg-mobile": ["28px", {"lineHeight": "36px", "fontWeight": "700"}],
+                      "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                      "title-md": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                      "headline-lg": ["32px", {"lineHeight": "40px", "fontWeight": "700"}]
+              }
+            },
+          },
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background min-h-screen flex flex-col items-center justify-center p-margin-mobile">
+<div class="bg-mesh"></div>
+<!-- Header / Brand Identity (TopAppBar instructions implied shell-less focus) -->
+<header class="mb-xl text-center">
+<h1 class="font-display-lg-mobile text-display-lg-mobile text-primary tracking-tighter mb-sm">SonicSplit AI</h1>
+<p class="font-body-sm text-body-sm text-on-surface-variant">The future of studio-grade stem separation.</p>
+</header>
+<main class="w-full max-w-md">
+<!-- Auth Container -->
+<div class="glass-card p-lg rounded-xl shadow-2xl relative overflow-hidden" id="auth-card">
+<!-- Decorative light source -->
+<div class="absolute -top-10 -left-10 w-32 h-32 bg-primary/10 blur-3xl rounded-full"></div>
+<!-- Login State -->
+<div class="space-y-lg" id="login-form">
+<div class="space-y-xs">
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile text-on-surface">Welcome back</h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Access your studio projects.</p>
+</div>
+<form class="space-y-md" onsubmit="event.preventDefault();">
+<div class="space-y-sm">
+<label class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest block" for="login-email">Email Address</label>
+<input class="w-full bg-white/5 border border-white/10 rounded-lg px-md py-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary transition-all outline-none" id="login-email" placeholder="name@studio.com" type="email"/>
+</div>
+<div class="space-y-sm">
+<div class="flex justify-between items-center">
+<label class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest block" for="login-password">Password</label>
+<a class="font-label-caps text-label-caps text-primary hover:opacity-80 transition-opacity" href="#">Forgot?</a>
+</div>
+<input class="w-full bg-white/5 border border-white/10 rounded-lg px-md py-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary transition-all outline-none" id="login-password" placeholder="••••••••" type="password"/>
+</div>
+<button class="w-full bg-primary-container text-on-primary-container font-title-md text-title-md py-sm rounded-lg glow-primary hover:opacity-90 active:scale-95 transition-all duration-200">
+                        Sign In
+                    </button>
+</form>
+<div class="relative flex items-center py-sm">
+<div class="flex-grow border-t border-white/10"></div>
+<span class="flex-shrink mx-4 font-label-caps text-label-caps text-on-surface-variant">OR CONTINUE WITH</span>
+<div class="flex-grow border-t border-white/10"></div>
+</div>
+<button class="w-full flex items-center justify-center gap-sm bg-white/5 border border-white/10 text-on-surface font-body-lg text-body-lg py-sm rounded-lg hover:bg-white/10 transition-all active:scale-95">
+<img alt="Google Logo" class="w-5 h-5" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB0a5QrxH315ntWonfp8qgtOpF0qzm4-HGtvbbXAsi6Td1F3WC7W-ZXCw2NRRcQ-Xa8RvV1IXNAptSqG-9jE60kqxiOXf2j95xyT8U_h0FaH3Mxzls7w7g0keMG5d7J6ToBikeG1wUhhVR2DW4D4crF_TrecpVzRgdNXit8JvRkx69R1o0wyu8yyobOKHWzuhRGAtTrv_cZaiJLgaMi2ZfI1h9-yvAq1imWXwoZw3NSq3XDFgU9Je6u0nh7ZFIbvpJTowL7IAFt"/>
+                    Google
+                </button>
+<p class="text-center font-body-sm text-body-sm text-on-surface-variant">
+                    New to SonicSplit? 
+                    <button class="text-primary font-bold hover:underline" onclick="toggleAuth()">Sign Up</button>
+</p>
+</div>
+<!-- Sign Up State (Hidden by default) -->
+<div class="hidden space-y-lg" id="signup-form">
+<div class="space-y-xs">
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile text-on-surface">Create Account</h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Start splitting high-fidelity stems for free.</p>
+</div>
+<form class="space-y-md" onsubmit="event.preventDefault();">
+<div class="space-y-sm">
+<label class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest block" for="signup-name">Full Name</label>
+<input class="w-full bg-white/5 border border-white/10 rounded-lg px-md py-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary transition-all outline-none" id="signup-name" placeholder="John Producer" type="text"/>
+</div>
+<div class="space-y-sm">
+<label class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest block" for="signup-email">Email Address</label>
+<input class="w-full bg-white/5 border border-white/10 rounded-lg px-md py-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary transition-all outline-none" id="signup-email" placeholder="name@studio.com" type="email"/>
+</div>
+<div class="space-y-sm">
+<label class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest block" for="signup-password">Create Password</label>
+<input class="w-full bg-white/5 border border-white/10 rounded-lg px-md py-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary transition-all outline-none" id="signup-password" placeholder="••••••••" type="password"/>
+</div>
+<button class="w-full bg-primary-container text-on-primary-container font-title-md text-title-md py-sm rounded-lg glow-primary hover:opacity-90 active:scale-95 transition-all duration-200">
+                        Create Account
+                    </button>
+</form>
+<p class="text-center font-body-sm text-body-sm text-on-surface-variant">
+                    Already have an account? 
+                    <button class="text-primary font-bold hover:underline" onclick="toggleAuth()">Sign In</button>
+</p>
+</div>
+</div>
+<!-- Secondary Visual/Bento Element (Mobile Optimized) -->
+<div class="mt-lg grid grid-cols-2 gap-md">
+<div class="glass-card p-md rounded-xl flex items-center gap-sm">
+<div class="w-10 h-10 rounded-lg bg-secondary-container/20 flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined">waves</span>
+</div>
+<div>
+<p class="font-label-caps text-label-caps text-secondary uppercase">Lossless</p>
+<p class="font-body-sm text-[10px] text-on-surface-variant">WAV &amp; FLAC Support</p>
+</div>
+</div>
+<div class="glass-card p-md rounded-xl flex items-center gap-sm">
+<div class="w-10 h-10 rounded-lg bg-tertiary-container/20 flex items-center justify-center text-tertiary">
+<span class="material-symbols-outlined">bolt</span>
+</div>
+<div>
+<p class="font-label-caps text-label-caps text-tertiary uppercase">Fast AI</p>
+<p class="font-body-sm text-[10px] text-on-surface-variant">96kHz Processing</p>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer Utility -->
+<footer class="mt-xl text-center">
+<div class="flex gap-md justify-center mb-md">
+<a class="font-label-caps text-label-caps text-on-surface-variant hover:text-primary transition-colors" href="#">Privacy Policy</a>
+<a class="font-label-caps text-label-caps text-on-surface-variant hover:text-primary transition-colors" href="#">Terms of Service</a>
+</div>
+<p class="font-body-sm text-[11px] text-on-surface-variant opacity-40">© 2024 SonicSplit AI Audio Technologies. All rights reserved.</p>
+</footer>
+<!-- Background Decoration Images -->
+<div class="fixed top-0 right-0 w-1/3 h-full overflow-hidden opacity-20 pointer-events-none hidden lg:block">
+<img class="object-cover w-full h-full" data-alt="A professional recording studio interior with high-end audio hardware and sleek neon lights. The environment is dark and technical, filled with rack-mounted compressors and mixing consoles. Soft purple and blue light reflects off metallic surfaces, creating a futuristic and high-fidelity atmosphere consistent with an advanced AI audio application." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBCiAUDR5qWuvUbFiXkq66MHll-bxZCDgLZS3D3S29i97ganv8tyOJGz092QMT0ycQOZ8za9cQpMkQZnQjaZyRjxKgqT2a90KI7AtF4iFi7Uk4exxNsGn4t9zFnl461s_r73ejLZPpY6bDGGUrvU2QR9fQZwIjtPwpxo-KM1NU3tATfu9wu8ZT9em9f0KEtztNk-YsKr1I3yrO9YSHpbUHUW06tYJcWtj6HJwFn42exnUeD7YUQW9hZk9Cjq69i1GGMuV8s2Rhs"/>
+</div>
+<script>
+        function toggleAuth() {
+            const login = document.getElementById('login-form');
+            const signup = document.getElementById('signup-form');
+            const card = document.getElementById('auth-card');
+
+            card.style.transform = 'scale(0.98)';
+            card.style.opacity = '0.5';
+
+            setTimeout(() => {
+                if (login.classList.contains('hidden')) {
+                    login.classList.remove('hidden');
+                    signup.classList.add('hidden');
+                } else {
+                    login.classList.add('hidden');
+                    signup.classList.remove('hidden');
+                }
+                card.style.transform = 'scale(1)';
+                card.style.opacity = '1';
+            }, 200);
+        }
+
+        // Simple mouse trail effect for atmospheric feel
+        document.addEventListener('mousemove', (e) => {
+            const x = (e.clientX / window.innerWidth) * 100;
+            const y = (e.clientY / window.innerHeight) * 100;
+            document.querySelector('.bg-mesh').style.background = `
+                radial-gradient(circle at ${x}% ${y}%, rgba(173, 199, 255, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 20% 30%, rgba(173, 199, 255, 0.05) 0%, transparent 50%),
+                radial-gradient(circle at 80% 70%, rgba(182, 0, 248, 0.05) 0%, transparent 50%)
+            `;
+        });
+    </script>
+</body></html>
