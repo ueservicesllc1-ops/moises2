@@ -30,6 +30,8 @@ import com.juditht.ai.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.Calendar
+import java.util.TimeZone
 
 @Composable
 fun ProfileScreen(
@@ -255,6 +257,17 @@ fun ProfileScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = SonicOutline
                         )
+
+                        val renewalDate = getRenewalDateText(state.planUpdatedAt, state.billingPeriod)
+                        if (renewalDate.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "Próxima renovación: $renewalDate",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = SonicTertiary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
 
                     // Upgrade CTA Button (Only if not on ULTRA)
@@ -352,6 +365,47 @@ fun ProfileScreen(
             }
 
             Spacer(Modifier.height(40.dp))
+        }
+    }
+}
+
+fun getRenewalDateText(planUpdatedAtIso: String?, billingPeriod: String?): String {
+    if (planUpdatedAtIso.isNullOrEmpty()) return ""
+    return try {
+        val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val date = format.parse(planUpdatedAtIso) ?: return ""
+        val cal = Calendar.getInstance().apply {
+            time = date
+        }
+
+        if (billingPeriod == "yearly") {
+            cal.add(Calendar.YEAR, 1)
+        } else {
+            cal.add(Calendar.MONTH, 1)
+        }
+
+        val displayFormat = SimpleDateFormat("dd 'de' MMMM, yyyy", Locale("es", "ES"))
+        displayFormat.format(cal.time)
+    } catch (e: Exception) {
+        try {
+            val formatFallback = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            val date = formatFallback.parse(planUpdatedAtIso) ?: return ""
+            val cal = Calendar.getInstance().apply {
+                time = date
+            }
+            if (billingPeriod == "yearly") {
+                cal.add(Calendar.YEAR, 1)
+            } else {
+                cal.add(Calendar.MONTH, 1)
+            }
+            val displayFormat = SimpleDateFormat("dd 'de' MMMM, yyyy", Locale("es", "ES"))
+            displayFormat.format(cal.time)
+        } catch (ex: Exception) {
+            ""
         }
     }
 }

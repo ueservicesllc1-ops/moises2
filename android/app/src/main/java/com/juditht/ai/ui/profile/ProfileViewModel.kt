@@ -22,6 +22,8 @@ data class ProfileState(
     val isLoading: Boolean = false,
     val tokenStatus: TokenStatus? = null,
     val transactions: List<TokenTransaction> = emptyList(),
+    val planUpdatedAt: String? = null,
+    val billingPeriod: String? = null,
     val error: String? = null
 )
 
@@ -43,6 +45,20 @@ class ProfileViewModel @Inject constructor(
         val uid = auth.currentUser?.uid ?: return
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
+
+            // Fetch extra subscription info directly from Firestore
+            try {
+                FirebaseFirestore.getInstance().collection("users").document(uid).get()
+                    .addOnSuccessListener { snapshot ->
+                        if (snapshot.exists()) {
+                            val planUpdatedAt = snapshot.getString("planUpdatedAt")
+                            val billingPeriod = snapshot.getString("billingPeriod")
+                            _state.update { it.copy(planUpdatedAt = planUpdatedAt, billingPeriod = billingPeriod) }
+                        }
+                    }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
 
             // Listen to transaction history in real-time
             historyListener?.remove()
