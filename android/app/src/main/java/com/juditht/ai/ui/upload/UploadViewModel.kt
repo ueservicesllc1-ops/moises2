@@ -158,16 +158,19 @@ class UploadViewModel @Inject constructor(
                     return@launch
                 }
             } else if (tokenCheck is ApiResult.Error) {
-                val cleanMsg = if (tokenCheck.message.length > 150 || tokenCheck.message.contains("<html") || tokenCheck.message.contains("Exception")) {
-                    "Error del servidor al verificar tokens."
-                } else {
-                    tokenCheck.message
+                // Si falla la verificación de tokens (red, servidor caído, etc.),
+                // solo bloqueamos si el código es 403 (explícitamente sin permisos).
+                // Para cualquier otro error (404, 500, red) continuamos normalmente.
+                if (tokenCheck.code == 403) {
+                    _state.update { it.copy(
+                        isUploading = false,
+                        needsPaywall = true,
+                        paywallReason = "no_tokens"
+                    ) }
+                    return@launch
                 }
-                _state.update { it.copy(
-                    isUploading = false,
-                    error = "Error al verificar tus tokens: $cleanMsg"
-                ) }
-                return@launch
+                // Error de red o temporal: continuar sin bloquear al usuario
+                println("[TOKENS] Check-tokens error (${tokenCheck.code}): ${tokenCheck.message} — continuando de todas formas")
             }
 
             val result = repository.startSeparation(

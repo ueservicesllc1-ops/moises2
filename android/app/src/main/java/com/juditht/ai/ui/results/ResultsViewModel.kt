@@ -180,12 +180,14 @@ class ResultsViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            var consecutiveErrors = 0
             repository.pollUntilComplete(taskId).collect { result ->
                 when (result) {
                     is ApiResult.Loading -> {
                         _state.update { it.copy(status = "processing", progress = 5, progressMessage = "Connecting...") }
                     }
                     is ApiResult.Success -> {
+                        consecutiveErrors = 0  // reset error counter on success
                         val s = result.data
                         val message = when {
                             s.status == "queued"     -> "In queue (position ${s.queuePosition})..."
@@ -226,7 +228,14 @@ class ResultsViewModel @Inject constructor(
                         }
                     }
                     is ApiResult.Error -> {
-                        _state.update { it.copy(error = result.message, status = "failed") }
+                        consecutiveErrors++
+                        // Solo marcar como fallido después de 5 errores consecutivos.
+                        // Errores transitorios (servidor reiniciando, red temporal) se ignoran.
+                        if (consecutiveErrors >= 5) {
+                            _state.update { it.copy(error = result.message, status = "failed") }
+                        } else {
+                            println("[POLL] Error temporal #$consecutiveErrors: ${result.message} — reintentando...")
+                        }
                     }
                 }
             }

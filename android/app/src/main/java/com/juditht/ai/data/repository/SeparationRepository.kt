@@ -161,7 +161,7 @@ class SeparationRepository @Inject constructor(
             when {
                 result is ApiResult.Success && result.data.status == "completed" -> break
                 result is ApiResult.Success && result.data.status == "failed"    -> break
-                result is ApiResult.Error -> break
+                // En errores, NO rompemos el flow — el ViewModel decide cuándo rendirse
                 else -> delay(2_500)
             }
         }

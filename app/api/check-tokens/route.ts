@@ -20,7 +20,14 @@ export async function GET(request: NextRequest) {
     const userDoc = await db.collection('users').doc(uid).get()
 
     if (!userDoc.exists) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+      // User exists in Auth but no Firestore doc yet — return safe defaults (free plan)
+      return NextResponse.json({
+        planId: 'free',
+        tokenBalance: 0,
+        freeSeparationUsed: false,
+        canSeparate: true,
+        reason: null,
+      })
     }
 
     const data = userDoc.data() ?? {}
