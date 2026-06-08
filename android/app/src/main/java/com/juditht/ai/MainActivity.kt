@@ -18,12 +18,33 @@ import dagger.hilt.android.AndroidEntryPoint
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    @javax.inject.Inject
+    lateinit var jobWatcher: com.juditht.ai.data.repository.SeparationJobWatcher
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val hasPermission = checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!hasPermission) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+            }
+        }
+
+        jobWatcher.startWatching()
+
         setContent {
             SonicSplitTheme {
                 val navController  = rememberNavController()
+
+                LaunchedEffect(intent) {
+                    val taskId = intent?.getStringExtra("taskId")
+                    if (!taskId.isNullOrEmpty()) {
+                        navController.navigate(Screen.Results.createRoute(taskId))
+                    }
+                }
+
                 val authViewModel: AuthViewModel = hiltViewModel()
                 val authState by authViewModel.state.collectAsStateWithLifecycle()
 
