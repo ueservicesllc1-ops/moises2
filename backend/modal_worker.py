@@ -247,116 +247,160 @@ def separate_audio(
                 "hifi":         {"shifts": 8, "overlap": 0.50},
             }
 
-        cfg = profile_settings.get(profile_name, profile_settings["pro_balanced"])
-        shifts_amt = cfg["shifts"]
-        overlap_amt = cfg["overlap"]
-
-        print(f"[MODAL GPU] Modelo principal: {primary_model_name}")
-        print(f"[MODAL GPU] Inferencia: {shifts_amt} pasadas, {overlap_amt:.2f} solapamiento")
-
-        # Cargar modelo estándar
-        model = get_model(primary_model_name)
-        model.cuda()
-        model.eval()
-
-        wav_proc = convert_audio(wav_orig, sr, model.samplerate, model.audio_channels)
-        wav_proc = wav_proc.cuda()
-
-        # Normalización z-score para la IA (estándar de Demucs)
-        ref = wav_proc.mean(0)
-        ref_mean = ref.mean()
-        ref_std = ref.std()
-        wav_proc_std = (wav_proc - ref_mean) / (ref_std + 1e-8)
-
-        print(f"[MODAL GPU] Ejecutando separación principal ({shifts_amt} shifts)...")
-        sources_std = model_inference(model, wav_proc_std, shifts_amt, overlap_amt)
-
         # =====================================================================
-        # ENSEMBLE HIFI — Enriquecimiento con htdemucs_6s
-        #
-        # Ratios de mezcla diseñados para MAXIMIZAR claridad sin phase issues:
-        #   - vocals:  90% ft + 10% 6s  → mínima interferencia, máxima limpieza
-        #   - drums:   85% ft + 15% 6s  → preservar la dinámica del ft
-        #   - bass:    85% ft + 15% 6s  → ft tiene mejor separación de bajo
-        #   - other:   65% ft + 35% 6s  → 6s aporta más contexto armónico aquí
+        # LÓGICA DE INFERENCIA
         # =====================================================================
+        
+        final_stems_real_cpu = {}
+        
+        if needs_6s_stems:
+            print("[MODAL GPU] === ENSEMBLE MODE ACTIVATED (6 STEMS) ===")
+            
+            # --- PASO 1: htdemucs_ft para Voz, Batería, Bajo ---
+            print("[MODAL GPU] Paso 1: Ejecutando htdemucs_ft para Vocals, Drums, Bass...")
+            model_ft = get_model("htdemucs_ft")
+            model_ft.cuda()
+            model_ft.eval()
+            
+            wav_proc_ft = convert_audio(wav_orig, sr, model_ft.samplerate, model_ft.audio_channels).cuda()
+            ref_ft = wav_proc_ft.mean(0)
+            ref_mean_ft = ref_ft.mean()
+            ref_std_ft = ref_ft.std()
+            wav_proc_std_ft = (wav_proc_ft - ref_mean_ft) / (ref_std_ft + 1e-8)
+            
+            shifts_ft = profile_settings.get(profile_name, {"shifts": 3})["shifts"]
+            overlap_ft = profile_settings.get(profile_name, {"overlap": 0.25})["overlap"]
+            
+            sources_std_ft = model_inference(model_ft, wav_proc_std_ft, shifts_ft, overlap_ft)
+            
+            for idx, name in enumerate(model_ft.sources):
+                if name in ["vocals", "drums", "bass"]:  # Tomamos la máxima limpieza de FT
+                    stem_real = sources_std_ft[idx] * (ref_std_ft + 1e-8) + ref_mean_ft
+                    final_stems_real_cpu[name] = stem_real.cpu().numpy().T
+                    
+            del model_ft, wav_proc_ft, wav_proc_std_ft, sources_std_ft
+            torch.cuda.empty_cache()
+            
+            # --- PASO 2: htdemucs_6s para Guitarra, Piano, Other ---
+            print("[MODAL GPU] Paso 2: Ejecutando htdemucs_6s para Piano, Guitar, Other...")
+            model_6s = get_model("htdemucs_6s")
+            model_6s.cuda()
+            model_6s.eval()
+            
+            wav_proc_6s = convert_audio(wav_orig, sr, model_6s.samplerate, model_6s.audio_channels).cuda()
+            ref_6s = wav_proc_6s.mean(0)
+            ref_mean_6s = ref_6s.mean()
+            ref_std_6s = ref_6s.std()
+            wav_proc_std_6s = (wav_proc_6s - ref_mean_6s) / (ref_std_6s + 1e-8)
+            
+            shifts_6s = shifts_ft
+            overlap_6s = overlap_ft
+            sources_std_6s = model_inference(model_6s, wav_proc_std_6s, shifts_6s, overlap_6s)
+            
+            for idx, name in enumerate(model_6s.sources):
+                if name in ["guitar", "piano", "other"]:  # Extraemos solo lo especializado
+                    stem_real = sources_std_6s[idx] * (ref_std_6s + 1e-8) + ref_mean_6s
+                    final_stems_real_cpu[name] = stem_real.cpu().numpy().T
+            
+            samplerate_export = model_6s.samplerate
+            del model_6s, wav_proc_6s, wav_proc_std_6s, sources_std_6s
+            torch.cuda.empty_cache()
+            
+        else:
+            # --- MODO NORMAL (Sin Ensemble) ---
+            cfg = profile_settings.get(profile_name, profile_settings.get("pro_balanced", {"shifts": 3, "overlap": 0.25}))
+            shifts_amt = cfg["shifts"]
+            overlap_amt = cfg["overlap"]
+            
+            print(f"[MODAL GPU] Modelo principal: {primary_model_name}")
+            print(f"[MODAL GPU] Ejecutando separación principal ({shifts_amt} shifts)...")
+            
+            model = get_model(primary_model_name)
+            model.cuda()
+            model.eval()
 
-        source_to_idx_main = {name: idx for idx, name in enumerate(model.sources)}
+            wav_proc = convert_audio(wav_orig, sr, model.samplerate, model.audio_channels).cuda()
+            ref = wav_proc.mean(0)
+            ref_mean = ref.mean()
+            ref_std = ref.std()
+            wav_proc_std = (wav_proc - ref_mean) / (ref_std + 1e-8)
+
+            sources_std = model_inference(model, wav_proc_std, shifts_amt, overlap_amt)
+            
+            for idx, name in enumerate(model.sources):
+                stem_real = sources_std[idx] * (ref_std + 1e-8) + ref_mean
+                final_stems_real_cpu[name] = stem_real.cpu().numpy().T
+                
+            samplerate_export = model.samplerate
+            del model, wav_proc, wav_proc_std, sources_std
+            torch.cuda.empty_cache()
 
         # =====================================================================
         # EXPORTAR STEMS
         # =====================================================================
 
         # Formato de salida por perfil
-        # HiFi: 24-bit PCM (Calidad mastering, no desperdicia espacio en GPU)
-        # Normal/Fast: 16-bit PCM (compatible, tamaño razonable)
         if profile_name == "hifi":
             output_subtype = "PCM_24"   # 24-bit WAV
-            noise_gate_ratio = 0.0      # Desactivado: estaba matando detalles (metales/reverb) al entrar voz
+            noise_gate_ratio = 0.0      # Desactivado: estaba matando detalles
             peak_target = 0.95          
         else:
             output_subtype = "PCM_16"   # 16-bit WAV estándar
-            noise_gate_ratio = 0.0      # Desactivado por preservación instrumental
+            noise_gate_ratio = 0.0      
             peak_target = 0.98
 
         stems_bytes = {}
-        vocals_idx = source_to_idx_main.get("vocals", -1)
 
         print(f"[MODAL GPU] Exportando stems ({output_subtype}, peak={peak_target})...")
 
-        for idx, stem_name in enumerate(model.sources):
-            if stem_name not in requested_tracks:
-                continue
-
-            # Deshacer normalización z-score → amplitud real
-            stem_real = sources_std[idx] * (ref_std + 1e-8) + ref_mean
-            stem_audio = stem_real.cpu().numpy().T  # [samples, channels]
+        for stem_name, stem_audio in final_stems_real_cpu.items():
+            if stem_name not in requested_tracks and stem_name != "vocals":
+                # Mantenemos las no solicitadas SOLO SI las necesitamos para construir la pista instrumental
+                if not ("instrumental" in requested_tracks):
+                    continue
 
             # Post-procesamiento
             if noise_gate_ratio > 0:
                 stem_audio = reduce_low_level_noise(stem_audio, threshold_ratio=noise_gate_ratio)
             stem_audio = normalize_audio(stem_audio, peak_target=peak_target)
 
-            buf = io.BytesIO()
-            sf.write(buf, stem_audio, model.samplerate, format='WAV', subtype=output_subtype)
-            stems_bytes[stem_name] = buf.getvalue()
-
-            print(f"[MODAL GPU]   OK {stem_name} -> {len(stems_bytes[stem_name]) // 1024}KB ({output_subtype})")
+            if stem_name in requested_tracks:
+                buf = io.BytesIO()
+                sf.write(buf, stem_audio, samplerate_export, format='WAV', subtype=output_subtype)
+                stems_bytes[stem_name] = buf.getvalue()
+                print(f"[MODAL GPU]   OK {stem_name} -> {len(stems_bytes[stem_name]) // 1024}KB ({output_subtype})")
 
         # =====================================================================
         # CONSTRUIR INSTRUMENTAL (suma de stems no-vocales)
         # =====================================================================
 
-        if "instrumental" in requested_tracks and vocals_idx != -1:
-            non_vocal_names = [name for name in model.sources if name != "vocals"]
-            can_rebuild = all(name in source_to_idx_main for name in non_vocal_names) and len(non_vocal_names) > 0
-
-            if can_rebuild:
+        if "instrumental" in requested_tracks and "vocals" in final_stems_real_cpu:
+            non_vocal_names = [k for k in final_stems_real_cpu.keys() if k != "vocals"]
+            if len(non_vocal_names) > 0:
                 print("[MODAL GPU] Construyendo instrumental desde stems no-vocales...")
-                instrumental_std = torch.zeros_like(sources_std[vocals_idx])
+                instrumental_audio = np.zeros_like(final_stems_real_cpu["vocals"])
                 for stem_name in non_vocal_names:
-                    instrumental_std = instrumental_std + sources_std[source_to_idx_main[stem_name]]
-            else:
-                print("[MODAL GPU] Fallback: instrumental por sustracción...")
-                instrumental_std = wav_proc_std - sources_std[vocals_idx]
+                    stem = final_stems_real_cpu[stem_name]
+                    if stem.shape == instrumental_audio.shape:
+                        instrumental_audio += stem
+                    else:
+                        min_len = min(stem.shape[0], instrumental_audio.shape[0])
+                        instrumental_audio[:min_len] += stem[:min_len]
+                        
+                if noise_gate_ratio > 0:
+                    instrumental_audio = reduce_low_level_noise(instrumental_audio, threshold_ratio=noise_gate_ratio)
+                instrumental_audio = normalize_audio(instrumental_audio, peak_target=peak_target)
 
-            instrumental_real = instrumental_std * (ref_std + 1e-8) + ref_mean
-            instrumental_audio = instrumental_real.cpu().numpy().T
-
-            if noise_gate_ratio > 0:
-                instrumental_audio = reduce_low_level_noise(instrumental_audio, threshold_ratio=noise_gate_ratio)
-            instrumental_audio = normalize_audio(instrumental_audio, peak_target=peak_target)
-
-            buf = io.BytesIO()
-            sf.write(buf, instrumental_audio, model.samplerate, format='WAV', subtype=output_subtype)
-            stems_bytes["instrumental"] = buf.getvalue()
-            print(f"[MODAL GPU]   OK instrumental -> {len(stems_bytes['instrumental']) // 1024}KB ({output_subtype})")
+                buf = io.BytesIO()
+                sf.write(buf, instrumental_audio, samplerate_export, format='WAV', subtype=output_subtype)
+                stems_bytes["instrumental"] = buf.getvalue()
+                print(f"[MODAL GPU]   OK instrumental -> {len(stems_bytes['instrumental']) // 1024}KB ({output_subtype})")
 
         try:
             click_source = instrumental_audio if "instrumental_audio" in locals() else wav_numpy
             click_bytes, click_bpm = build_click_track_bytes(
                 click_source,
-                model.samplerate,
+                samplerate_export,
                 output_subtype,
                 bpm_hint=canonical_bpm,
             )
