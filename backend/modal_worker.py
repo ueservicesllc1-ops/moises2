@@ -12,6 +12,7 @@ def download_models():
     get_model('mdx_extra_q')   # Modelo Quantizado (Comprimido) para cuentas GRATIS/Normales
     get_model('mdx_extra')     # Modelo Puro sin compresión para PRO/HiFi
     get_model('htdemucs_6s')   # Requerido ÚNICAMENTE cuando pidan separar Guitarra o Piano
+    get_model('htdemucs_ft')   # Modelo Fine-Tuned para Multitrack (Bajo/Batería excelente)
 
 # 1. Definimos el ADN de nuestro servidor virtual
 image = (
@@ -212,57 +213,38 @@ def separate_audio(
         wav_orig = torch.from_numpy(wav_numpy).transpose(0, 1)
 
         # =====================================================================
-        # LÓGICA DE SELECCIÓN DE MODELOS — CORREGIDA
-        #
-        # htdemucs_ft  = Fine-Tuned Hybrid Demucs — el MEJOR modelo para
-        #                separar vocals / drums / bass / other con alta limpieza.
-        #                Es nuestro modelo PRINCIPAL para todos los modos.
-        #
-        # htdemucs_6s  = Hybrid Demucs 6-stem — diseñado para guitar y piano.
-        #                Lo usamos como ENRIQUECEDOR en HiFi (ensemble secundario)
-        #                porque aporta información armónica adicional en "other".
-        #
-        # Modo Fast / Normal: mdx_extra_q (Version comprimida, muy eficiente y suena a pista profesional)
-        # Modo HiFi:          mdx_extra (Version pura), 2 shifts, 0.25 overlap
-        #                     + salida 24-bit PCM
+        # LÓGICA DE SELECCIÓN DE MODELOS — INTELIGENTE Y DINÁMICA
         # =====================================================================
 
         needs_6s_stems = any(t in requested_tracks for t in ["guitar", "piano"])
+        is_vocals_only = all(t in ["vocals", "instrumental"] for t in requested_tracks)
 
-        # Fine-tune deshabilitado hasta que el checkpoint sea reentrenado con la versión actual de demucs
-        finetuned_ckpt = Path(os.environ.get("DEMUCS_FINETUNED_PATH", "/finetuned/checkpoints/epoch_020.pt"))
-        use_finetuned = False
-
-        if use_finetuned:
-            # SI HAY ENTRENAMIENTO: Usar nuestro cerebro personalizado
-            primary_model_name = "finetuned_htdemucs"
-            profile_settings = {
-                "fast":         {"shifts": 1, "overlap": 0.20},
-                "pro_balanced": {"shifts": 3, "overlap": 0.30},
-                "hifi":         {"shifts": 5, "overlap": 0.40},
-            }
-        elif needs_6s_stems:
-            # Si no hay entrenamiento pero piden 6 pistas, usar el estándar de 6s
+        if needs_6s_stems:
+            # Si piden 6 pistas (Guitarra/Piano), usamos el modelo especializado 6s
             primary_model_name = "htdemucs_6s"
             profile_settings = {
-                "fast":         {"shifts": 1, "overlap": 0.20},
-                "pro_balanced": {"shifts": 3, "overlap": 0.30},
-                "hifi":         {"shifts": 5, "overlap": 0.40},
+                "fast":         {"shifts": 1, "overlap": 0.10},
+                "pro_balanced": {"shifts": 3, "overlap": 0.25},
+                "hifi":         {"shifts": 6, "overlap": 0.50},
             }
-        else:
-            # Para 4 pistas o menos, usar MDX (el más limpio para voces/batería estándar)
+        elif is_vocals_only:
+            # Para Solo Voz y Pista: MDX Extra es considerado el más "pro" para Vocales Cristalinas
             if profile_name == "fast":
                 primary_model_name = "mdx_extra_q"
-            elif profile_name == "hifi":
-                primary_model_name = "mdx_extra"     
-            else:  # pro_balanced
+            else:
                 primary_model_name = "mdx_extra"
-
-            # En MDX, overlap de 0 y shift de 0/1 es el estándar para q. Para HiFi inyectamos precision.
             profile_settings = {
-                "fast":        {"shifts": 0, "overlap": 0.0},
+                "fast":         {"shifts": 1, "overlap": 0.10},
                 "pro_balanced": {"shifts": 3, "overlap": 0.25},
-                "hifi":        {"shifts": 4, "overlap": 0.35},
+                "hifi":         {"shifts": 6, "overlap": 0.50},
+            }
+        else:
+            # Multitrack estándar (Batería, Bajo, etc.): HTDemucs_FT es insuperable evitando sangrado (bleed)
+            primary_model_name = "htdemucs_ft"
+            profile_settings = {
+                "fast":         {"shifts": 1, "overlap": 0.10},
+                "pro_balanced": {"shifts": 3, "overlap": 0.25},
+                "hifi":         {"shifts": 8, "overlap": 0.50},
             }
 
         cfg = profile_settings.get(profile_name, profile_settings["pro_balanced"])
