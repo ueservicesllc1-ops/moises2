@@ -165,6 +165,7 @@ class ResultsViewModel @Inject constructor(
         _state.update { it.copy(playbackPositionMs = positionMs) }
     }
 
+
     fun startPolling(taskId: String) {
         val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
         if (uid != null) {
@@ -180,6 +181,41 @@ class ResultsViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            // ── Primero revisar BD local: si ya está completado, no llamar al servidor ──
+            val localJob = repository.getJobById(taskId)
+            if (localJob != null && localJob.status == "completed" && !localJob.stemsJson.isNullOrBlank()) {
+                val stemsMap: Map<String, String> = try {
+                    com.google.gson.Gson().fromJson(localJob.stemsJson, Map::class.java) as Map<String, String>
+                } catch (e: Exception) { emptyMap() }
+
+                if (stemsMap.isNotEmpty()) {
+                    val stems = stemsMap.entries
+                        .filter { !it.key.startsWith("click") }
+                        .map { (name, url) ->
+                            StemItem(
+                                name = name,
+                                url  = url,
+                                displayName = stemDisplayName(name),
+                                emoji = stemEmoji(name)
+                            )
+                        }
+                    _state.update { prev ->
+                        prev.copy(
+                            status          = "completed",
+                            progress        = 100,
+                            progressMessage = "Done! Your stems are ready.",
+                            stems           = stems,
+                            bpm             = localJob.bpm,
+                            key             = localJob.key,
+                            duration        = localJob.duration
+                        )
+                    }
+                    initPlayersForStems(stems)
+                    return@launch  // ¡No necesitamos polling!
+                }
+            }
+
+            // ── Si no está completo localmente, hacer polling al servidor ──────────
             var consecutiveErrors = 0
             repository.pollUntilComplete(taskId).collect { result ->
                 when (result) {
