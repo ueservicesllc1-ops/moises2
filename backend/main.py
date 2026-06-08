@@ -653,15 +653,18 @@ async def separate_audio_handler(
                 token_balance = token_state.get("tokenBalance", 0)
                 free_used = token_state.get("freeSeparationUsed", False)
                 is_free_plan = plan_id in ("free", "starter")
-                if is_free_plan and free_used:
+                
+                # Si es plan gratuito y ya gastó su separación gratuita, verificamos si tiene tokens comprados
+                if is_free_plan and free_used and token_balance <= 0:
                     raise HTTPException(
                         status_code=403,
                         detail=json.dumps({
                             "error": "free_exhausted",
-                            "message": "Has usado tu separación gratuita. Suscríbete a un plan para continuar.",
+                            "message": "Has usado tu separación gratuita. Suscríbete a un plan o recarga tokens.",
                             "upgrade_required": True,
                         }),
                     )
+                # Si es de paga, verificamos balance
                 if not is_free_plan and token_balance <= 0:
                     raise HTTPException(
                         status_code=403,
@@ -1270,9 +1273,12 @@ async def process_audio(
                 if state_after:
                     plan_after = state_after.get("planId", "free")
                     is_free = plan_after in ("free", "starter")
-                    if is_free:
+                    free_used = state_after.get("freeSeparationUsed", False)
+                    
+                    if is_free and not free_used:
                         _mark_free_separation_used(uid_for_deduct)
                     else:
+                        # Deduct tokens para usuarios PRO o usuarios Free que ya gastaron su separación gratuita
                         _deduct_tokens(uid_for_deduct, float(duration or 0), f"Separación de {getattr(task, 'original_filename', 'audio')}")
             except Exception as tok_e:
                 print(f"[TOKENS] Error during post-completion token update: {tok_e}")

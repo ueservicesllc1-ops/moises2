@@ -98,6 +98,9 @@ export function canStartSeparation(params: {
   const { planId, tokenBalance, freeSeparationUsed } = params
 
   if (planId === 'free') {
+    if (tokenBalance > 0) {
+      return { allowed: true }
+    }
     if (freeSeparationUsed) {
       return { allowed: false, reason: 'free_exhausted' }
     }
