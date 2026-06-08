@@ -2930,6 +2930,126 @@ async def export_audio(
         temp_wav.unlink(missing_ok=True)
         temp_mp3.unlink(missing_ok=True)
 
+@app.post("/api/export-mix")
+async def export_mix(
+    stems_json: str = Form(...),
+    export_format: str = Form("wav"),
+    filename: str = Form("mix_export")
+):
+    """
+    Combina múltiples canales de audio con volúmenes/silencios personalizados en un solo archivo.
+    """
+    import json
+    import urllib.request
+    import soundfile as sf
+    import subprocess
+
+    try:
+        stems = json.loads(stems_json)
+    except Exception as je:
+        raise HTTPException(status_code=400, detail=f"Invalid stems JSON: {je}")
+
+    has_solo = any(s.get("isSoloed", False) for s in stems)
+    active_stems = []
+    for s in stems:
+        if s.get("isMuted", False):
+            continue
+        if has_solo and not s.get("isSoloed", False):
+            continue
+        active_stems.append(s)
+
+    if not active_stems:
+        raise HTTPException(status_code=400, detail="No active stems to mix")
+
+    temp_dir = Path("temp_export")
+    temp_dir.mkdir(exist_ok=True)
+    uid = str(uuid.uuid4())
+
+    loaded_stems = []
+    target_sr = None
+    max_len = 0
+    temp_files = []
+
+    try:
+        # Download and load each active stem
+        for idx, s in enumerate(active_stems):
+            url = s["url"]
+            vol = float(s.get("volume", 1.0))
+            
+            temp_file = temp_dir / f"stem_{uid}_{idx}.wav"
+            temp_files.append(temp_file)
+            urllib.request.urlretrieve(url, str(temp_file))
+            
+            y, sr = librosa.load(str(temp_file), sr=None, mono=False)
+            
+            y2 = np.asarray(y)
+            if y2.ndim == 1:
+                y2 = np.expand_dims(y2, axis=0)
+                
+            y2 = y2 * vol
+            
+            loaded_stems.append((y2, sr))
+            if target_sr is None:
+                target_sr = sr
+            max_len = max(max_len, y2.shape[1])
+
+        # Mix
+        mixed_audio = np.zeros((2, max_len), dtype=np.float32)
+        for y2, sr in loaded_stems:
+            if sr != target_sr:
+                y2 = librosa.resample(y2, orig_sr=sr, target_sr=target_sr)
+                
+            channels = y2.shape[0]
+            length = y2.shape[1]
+            
+            if channels == 1:
+                y2 = np.repeat(y2, 2, axis=0)
+                
+            mixed_audio[:, :length] += y2[:, :length]
+
+        mixed_audio = np.clip(mixed_audio, -1.0, 1.0)
+        
+        temp_wav = temp_dir / f"out_mix_{uid}.wav"
+        temp_files.append(temp_wav)
+        sf.write(str(temp_wav), mixed_audio.T, target_sr, subtype="PCM_24")
+
+        requested_format = (export_format or "wav").strip().lower()
+        base_name = re.sub(r'[^0-9A-Za-z._-]', '_', filename or "mix_export")
+
+        if requested_format == "mp3":
+            temp_mp3 = temp_dir / f"out_mix_{uid}.mp3"
+            temp_files.append(temp_mp3)
+            cmd = f'ffmpeg -y -i "{temp_wav}" -codec:a libmp3lame -qscale:a 2 "{temp_mp3}"'
+            subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            if temp_mp3.exists():
+                with open(temp_mp3, "rb") as f:
+                    out_data = f.read()
+                return StreamingResponse(
+                    iter([out_data]),
+                    media_type="audio/mpeg",
+                    headers={"Content-Disposition": f'attachment; filename="{base_name}.mp3"'},
+                )
+        else:
+            if temp_wav.exists():
+                with open(temp_wav, "rb") as f:
+                    out_data = f.read()
+                return StreamingResponse(
+                    iter([out_data]),
+                    media_type="audio/wav",
+                    headers={"Content-Disposition": f'attachment; filename="{base_name}.wav"'},
+                )
+
+        raise HTTPException(status_code=500, detail="Failed to mix stems")
+    except Exception as e:
+        print(f"[EXPORT MIX] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error combining stems: {str(e)}")
+    finally:
+        for f in temp_files:
+            f.unlink(missing_ok=True)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

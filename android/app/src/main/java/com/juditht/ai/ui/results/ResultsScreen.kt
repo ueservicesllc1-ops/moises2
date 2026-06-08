@@ -421,11 +421,21 @@ private fun CompletedView(state: ResultsState, viewModel: ResultsViewModel) {
                 }
 
                 // Master Channel Strip
+                val masterDownloadStatus = state.downloadStatuses["master"] ?: DownloadStatus.Idle
                 MasterChannelStrip(
                     isPlaying = state.isPlayingAll,
                     isSounding = isMasterSounding,
                     masterVolume = state.masterVolume,
-                    onMasterVolumeChange = { viewModel.setMasterVolume(it) }
+                    onMasterVolumeChange = { viewModel.setMasterVolume(it) },
+                    downloadStatus = masterDownloadStatus,
+                    onDownloadMix = {
+                        downloadStemTarget = StemItem(
+                            name = "master",
+                            url = "",
+                            displayName = "Mezcla Completa",
+                            emoji = "🎛️"
+                        )
+                    }
                 )
             }
         }
@@ -775,7 +785,9 @@ private fun MasterChannelStrip(
     isPlaying: Boolean,
     isSounding: Boolean,
     masterVolume: Float,
-    onMasterVolumeChange: (Float) -> Unit
+    onMasterVolumeChange: (Float) -> Unit,
+    downloadStatus: DownloadStatus,
+    onDownloadMix: () -> Unit
 ) {
     // LED VU animation
     val infiniteTransition = rememberInfiniteTransition(label = "MasterLEDGlow")
@@ -931,7 +943,58 @@ private fun MasterChannelStrip(
                 color = if (isPlaying) SonicTertiary else SonicOutline
             )
 
-            Spacer(modifier = Modifier.height(38.dp))
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Download Icon / Retry / Loader for Master Mix
+            Box(
+                modifier = Modifier.height(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                when (downloadStatus) {
+                    is DownloadStatus.Done -> {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "Downloaded",
+                            tint = SonicTertiary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    is DownloadStatus.InProgress -> {
+                        CircularProgressIndicator(
+                            progress = { downloadStatus.percent / 100f },
+                            modifier = Modifier.size(20.dp),
+                            color = SonicPrimary,
+                            strokeWidth = 2.dp
+                        )
+                    }
+                    is DownloadStatus.Failed -> {
+                        IconButton(
+                            onClick = onDownloadMix,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = "Failed, Retry",
+                                tint = SonicError,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    else -> {
+                        IconButton(
+                            onClick = onDownloadMix,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = "Download Mix",
+                                tint = SonicPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

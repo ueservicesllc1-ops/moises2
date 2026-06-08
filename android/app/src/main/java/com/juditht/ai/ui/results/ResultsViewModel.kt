@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -343,7 +344,24 @@ class ResultsViewModel @Inject constructor(
             _state.update { it.copy(downloadStatuses = it.downloadStatuses + (stemName to DownloadStatus.InProgress(0))) }
             try {
                 withContext(Dispatchers.IO) {
-                    val request = if (format.lowercase() == "wav") {
+                    val request = if (stemName == "master") {
+                        val stemsList = _state.value.stems.map { stem ->
+                            val vol = _state.value.volumes[stem.name] ?: 1.0f
+                            val isMuted = _state.value.mutes[stem.name] ?: false
+                            val isSoloed = _state.value.solos[stem.name] ?: false
+                            """{"url":"${stem.url}","volume":$vol,"isMuted":$isMuted,"isSoloed":$isSoloed}"""
+                        }
+                        val stemsJsonString = "[" + stemsList.joinToString(",") + "]"
+                        val formBody = FormBody.Builder()
+                            .add("stems_json", stemsJsonString)
+                            .add("export_format", format.lowercase())
+                            .add("filename", "mix_" + System.currentTimeMillis())
+                            .build()
+                        Request.Builder()
+                            .url("${com.juditht.ai.BuildConfig.API_BASE_URL}/api/export-mix")
+                            .post(formBody)
+                            .build()
+                    } else if (format.lowercase() == "wav") {
                         Request.Builder().url(stemUrl).build()
                     } else {
                         val json = """
