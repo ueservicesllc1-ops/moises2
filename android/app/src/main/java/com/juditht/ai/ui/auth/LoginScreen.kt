@@ -82,13 +82,13 @@ fun LoginScreen(
         ) {
             Spacer(Modifier.height(32.dp))
 
-            // ── Brand logo (igual que la web app) ─────────────────────────────
+            // ── Brand logo — mismo logo que la web app (/public/images/logo.png)
             androidx.compose.foundation.Image(
                 painter = painterResource(id = R.drawable.logo),
                 contentDescription = "Judit Logo",
                 modifier = Modifier
-                    .height(72.dp)
-                    .widthIn(max = 240.dp)
+                    .height(80.dp)
+                    .widthIn(max = 280.dp)
             )
             Spacer(Modifier.height(10.dp))
             Text(
