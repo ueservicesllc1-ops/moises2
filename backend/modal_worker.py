@@ -276,11 +276,12 @@ def separate_audio(
             
             output_dir = tempfile.mkdtemp()
             
+            import logging
             sep = Separator(
                 output_dir=output_dir,
                 output_format="WAV",
                 use_autocast=True, 
-                log_level="DEBUG" # Para verificar que cargue CUDAExecutionProvider
+                log_level=logging.DEBUG
             )
             sep.load_model("model_bs_roformer_ep_317_sdr_12.9755.ckpt")
             
