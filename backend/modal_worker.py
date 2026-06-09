@@ -14,6 +14,15 @@ def download_models():
     get_model('htdemucs_6s')   # Requerido ÚNICAMENTE cuando pidan separar Guitarra o Piano
     get_model('htdemucs_ft')   # Modelo Fine-Tuned para Multitrack (Bajo/Batería excelente)
 
+    print("Pre-descargando modelo Roformer (MVSep) para Voz...")
+    try:
+        from audio_separator.separator import Separator
+        sep = Separator()
+        # Descarga el modelo de ViperX (SDR 12.9755) considerado el mejor para Voz/Instrumental
+        sep.load_model("model_bs_roformer_ep_317_sdr_12.9755.ckpt")
+    except Exception as e:
+        print(f"Error pre-descargando Roformer: {e}")
+
 # 1. Definimos el ADN de nuestro servidor virtual
 image = (
     modal.Image.debian_slim(python_version="3.10")
@@ -28,6 +37,7 @@ image = (
         "numpy",
         "scipy",   # Para spectral smoothing en HiFi
         "diffq",   # Requerido por mdx_extra_q para deserializar el modelo
+        "audio-separator[gpu]" # Para integrar MVSep Roformer Models
     )
     .run_function(download_models)
 )
@@ -239,7 +249,6 @@ def separate_audio(
                 "hifi":         {"shifts": 6, "overlap": 0.50},
             }
         else:
-            # Multitrack estándar (Batería, Bajo, etc.): HTDemucs_FT es insuperable evitando sangrado (bleed)
             primary_model_name = "htdemucs_ft"
             profile_settings = {
                 "fast":         {"shifts": 1, "overlap": 0.10},
@@ -248,63 +257,104 @@ def separate_audio(
             }
 
         # =====================================================================
-        # LÓGICA DE INFERENCIA
+        # LÓGICA DE INFERENCIA HÍBRIDA (ROFORMER + DEMUCS)
         # =====================================================================
         
         final_stems_real_cpu = {}
+        samplerate_export = sr
         
-        if needs_6s_stems:
-            print("[MODAL GPU] === ENSEMBLE MODE ACTIVATED (6 STEMS) ===")
+        shifts_amt = profile_settings.get(profile_name, {"shifts": 3})["shifts"]
+        overlap_amt = profile_settings.get(profile_name, {"overlap": 0.25})["overlap"]
+
+        if is_vocals_only or needs_6s_stems:
+            print(f"[MODAL GPU] === MODO ROFORMER INICIADO (Vocals_only={is_vocals_only}, 6_stems={needs_6s_stems}) ===")
+            from audio_separator.separator import Separator
             
-            # --- PASO 1: htdemucs_ft para Voz, Batería, Bajo ---
-            print("[MODAL GPU] Paso 1: Ejecutando htdemucs_ft para Vocals, Drums, Bass...")
-            model_ft = get_model("htdemucs_ft")
-            model_ft.cuda()
-            model_ft.eval()
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_in:
+                sf.write(tmp_in.name, wav_numpy, sr)
+                input_path = tmp_in.name
             
-            wav_proc_ft = convert_audio(wav_orig, sr, model_ft.samplerate, model_ft.audio_channels).cuda()
-            ref_ft = wav_proc_ft.mean(0)
-            ref_mean_ft = ref_ft.mean()
-            ref_std_ft = ref_ft.std()
-            wav_proc_std_ft = (wav_proc_ft - ref_mean_ft) / (ref_std_ft + 1e-8)
+            output_dir = tempfile.mkdtemp()
             
-            shifts_ft = profile_settings.get(profile_name, {"shifts": 3})["shifts"]
-            overlap_ft = profile_settings.get(profile_name, {"overlap": 0.25})["overlap"]
+            sep = Separator(
+                output_dir=output_dir,
+                output_format="WAV",
+                use_autocast=True, # Optimización de velocidad
+            )
+            sep.load_model("model_bs_roformer_ep_317_sdr_12.9755.ckpt")
             
-            sources_std_ft = model_inference(model_ft, wav_proc_std_ft, shifts_ft, overlap_ft)
+            print("[MODAL GPU] Extrayendo Voz (Roformer ViperX)...")
+            output_paths = sep.separate(input_path)
+            print(f"[MODAL GPU] BS-Roformer completado. Archivos: {output_paths}")
             
-            for idx, name in enumerate(model_ft.sources):
-                if name in ["vocals", "drums", "bass"]:  # Tomamos la máxima limpieza de FT
-                    stem_real = sources_std_ft[idx] * (ref_std_ft + 1e-8) + ref_mean_ft
-                    final_stems_real_cpu[name] = stem_real.cpu().numpy().T
+            for out_file in output_paths:
+                full_path = os.path.join(output_dir, out_file)
+                stem_audio, stem_sr = sf.read(full_path, dtype='float32')
+                samplerate_export = stem_sr
+                
+                if "Vocals" in out_file or "vocals" in out_file.lower():
+                    final_stems_real_cpu["vocals"] = stem_audio
+                else:
+                    final_stems_real_cpu["instrumental"] = stem_audio
                     
-            del model_ft, wav_proc_ft, wav_proc_std_ft, sources_std_ft
+            # Cleanup temp files
+            os.remove(input_path)
+            for out_file in output_paths:
+                os.remove(os.path.join(output_dir, out_file))
+            os.rmdir(output_dir)
             torch.cuda.empty_cache()
             
-            # --- PASO 2: htdemucs_6s para Guitarra, Piano, Other ---
-            print("[MODAL GPU] Paso 2: Ejecutando htdemucs_6s para Piano, Guitar, Other...")
-            model_6s = get_model("htdemucs_6s")
-            model_6s.cuda()
-            model_6s.eval()
-            
-            wav_proc_6s = convert_audio(wav_orig, sr, model_6s.samplerate, model_6s.audio_channels).cuda()
-            ref_6s = wav_proc_6s.mean(0)
-            ref_mean_6s = ref_6s.mean()
-            ref_std_6s = ref_6s.std()
-            wav_proc_std_6s = (wav_proc_6s - ref_mean_6s) / (ref_std_6s + 1e-8)
-            
-            shifts_6s = shifts_ft
-            overlap_6s = overlap_ft
-            sources_std_6s = model_inference(model_6s, wav_proc_std_6s, shifts_6s, overlap_6s)
-            
-            for idx, name in enumerate(model_6s.sources):
-                if name in ["guitar", "piano", "other"]:  # Extraemos solo lo especializado
-                    stem_real = sources_std_6s[idx] * (ref_std_6s + 1e-8) + ref_mean_6s
-                    final_stems_real_cpu[name] = stem_real.cpu().numpy().T
-            
-            samplerate_export = model_6s.samplerate
-            del model_6s, wav_proc_6s, wav_proc_std_6s, sources_std_6s
-            torch.cuda.empty_cache()
+            if needs_6s_stems:
+                print("[MODAL GPU] === MODO 6-STEMS: ALIMENTANDO INSTRUMENTAL LIMPIO A DEMUCS ===")
+                
+                inst_np = final_stems_real_cpu["instrumental"]
+                if len(inst_np.shape) == 1:
+                    inst_np = inst_np.reshape(-1, 1)
+                    
+                # [channels, samples]
+                inst_tensor = torch.from_numpy(inst_np).transpose(0, 1).cuda() 
+                
+                def local_inference(m, audio, sh, ov):
+                    from demucs.apply import apply_model
+                    return apply_model(m, audio[None], shifts=sh, split=True, overlap=ov, progress=True)[0]
+                
+                # --- Demucs FT (Drums, Bass) ---
+                print("[MODAL GPU] Paso 2: Ejecutando htdemucs_ft sobre el Instrumental para Batería y Bajo...")
+                model_ft = get_model("htdemucs_ft").cuda().eval()
+                
+                wav_proc_ft = convert_audio(inst_tensor, samplerate_export, model_ft.samplerate, model_ft.audio_channels)
+                ref_ft = wav_proc_ft.mean(0)
+                ref_mean_ft = ref_ft.mean()
+                ref_std_ft = ref_ft.std()
+                wav_proc_std_ft = (wav_proc_ft - ref_mean_ft) / (ref_std_ft + 1e-8)
+                
+                sources_std_ft = local_inference(model_ft, wav_proc_std_ft, shifts_amt, overlap_amt)
+                for idx, name in enumerate(model_ft.sources):
+                    if name in ["drums", "bass"]:  
+                        stem_real = sources_std_ft[idx] * (ref_std_ft + 1e-8) + ref_mean_ft
+                        final_stems_real_cpu[name] = stem_real.cpu().numpy().T
+                        
+                del model_ft, wav_proc_ft, wav_proc_std_ft, sources_std_ft
+                torch.cuda.empty_cache()
+                
+                # --- Demucs 6s (Guitar, Piano, Other) ---
+                print("[MODAL GPU] Paso 3: Ejecutando htdemucs_6s sobre el Instrumental para Guitarra, Piano y Otros...")
+                model_6s = get_model("htdemucs_6s").cuda().eval()
+                
+                wav_proc_6s = convert_audio(inst_tensor, samplerate_export, model_6s.samplerate, model_6s.audio_channels)
+                ref_6s = wav_proc_6s.mean(0)
+                ref_mean_6s = ref_6s.mean()
+                ref_std_6s = ref_6s.std()
+                wav_proc_std_6s = (wav_proc_6s - ref_mean_6s) / (ref_std_6s + 1e-8)
+                
+                sources_std_6s = local_inference(model_6s, wav_proc_std_6s, shifts_amt, overlap_amt)
+                for idx, name in enumerate(model_6s.sources):
+                    if name in ["guitar", "piano", "other"]:  
+                        stem_real = sources_std_6s[idx] * (ref_std_6s + 1e-8) + ref_mean_6s
+                        final_stems_real_cpu[name] = stem_real.cpu().numpy().T
+                
+                del model_6s, wav_proc_6s, wav_proc_std_6s, sources_std_6s, inst_tensor
+                torch.cuda.empty_cache()
             
         else:
             # --- MODO NORMAL (Sin Ensemble) ---
