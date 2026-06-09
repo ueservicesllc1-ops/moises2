@@ -279,7 +279,8 @@ def separate_audio(
             sep = Separator(
                 output_dir=output_dir,
                 output_format="WAV",
-                use_autocast=True, # Optimización de velocidad
+                use_autocast=True, 
+                log_level="DEBUG" # Para verificar que cargue CUDAExecutionProvider
             )
             sep.load_model("model_bs_roformer_ep_317_sdr_12.9755.ckpt")
             
@@ -305,7 +306,7 @@ def separate_audio(
             torch.cuda.empty_cache()
             
             if needs_6s_stems:
-                print("[MODAL GPU] === MODO 6-STEMS: ALIMENTANDO INSTRUMENTAL LIMPIO A DEMUCS ===")
+                print("[MODAL GPU] === MODO 6-STEMS: ALIMENTANDO INSTRUMENTAL LIMPIO A DEMUCS 6S ===")
                 
                 inst_np = final_stems_real_cpu["instrumental"]
                 if len(inst_np.shape) == 1:
@@ -318,27 +319,8 @@ def separate_audio(
                     from demucs.apply import apply_model
                     return apply_model(m, audio[None], shifts=sh, split=True, overlap=ov, progress=True)[0]
                 
-                # --- Demucs FT (Drums, Bass) ---
-                print("[MODAL GPU] Paso 2: Ejecutando htdemucs_ft sobre el Instrumental para Batería y Bajo...")
-                model_ft = get_model("htdemucs_ft").cuda().eval()
-                
-                wav_proc_ft = convert_audio(inst_tensor, samplerate_export, model_ft.samplerate, model_ft.audio_channels)
-                ref_ft = wav_proc_ft.mean(0)
-                ref_mean_ft = ref_ft.mean()
-                ref_std_ft = ref_ft.std()
-                wav_proc_std_ft = (wav_proc_ft - ref_mean_ft) / (ref_std_ft + 1e-8)
-                
-                sources_std_ft = local_inference(model_ft, wav_proc_std_ft, shifts_amt, overlap_amt)
-                for idx, name in enumerate(model_ft.sources):
-                    if name in ["drums", "bass"]:  
-                        stem_real = sources_std_ft[idx] * (ref_std_ft + 1e-8) + ref_mean_ft
-                        final_stems_real_cpu[name] = stem_real.cpu().numpy().T
-                        
-                del model_ft, wav_proc_ft, wav_proc_std_ft, sources_std_ft
-                torch.cuda.empty_cache()
-                
-                # --- Demucs 6s (Guitar, Piano, Other) ---
-                print("[MODAL GPU] Paso 3: Ejecutando htdemucs_6s sobre el Instrumental para Guitarra, Piano y Otros...")
+                # --- Demucs 6s (Todos los instrumentos restantes) ---
+                print("[MODAL GPU] Paso 2: Ejecutando htdemucs_6s sobre el Instrumental...")
                 model_6s = get_model("htdemucs_6s").cuda().eval()
                 
                 wav_proc_6s = convert_audio(inst_tensor, samplerate_export, model_6s.samplerate, model_6s.audio_channels)
@@ -349,7 +331,7 @@ def separate_audio(
                 
                 sources_std_6s = local_inference(model_6s, wav_proc_std_6s, shifts_amt, overlap_amt)
                 for idx, name in enumerate(model_6s.sources):
-                    if name in ["guitar", "piano", "other"]:  
+                    if name in ["drums", "bass", "guitar", "piano", "other"]:  
                         stem_real = sources_std_6s[idx] * (ref_std_6s + 1e-8) + ref_mean_6s
                         final_stems_real_cpu[name] = stem_real.cpu().numpy().T
                 
