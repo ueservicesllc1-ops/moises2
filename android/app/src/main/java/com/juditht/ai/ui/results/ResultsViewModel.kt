@@ -34,9 +34,11 @@ import java.io.FileOutputStream
 import javax.inject.Inject
 
 data class ResultsState(
-    val status: String = "processing",   // "queued" | "processing" | "completed" | "failed"
+    val status: String = "processing",   // "queued" | "processing" | "caching" | "completed" | "failed"
     val progress: Int = 0,
     val progressMessage: String = "Initializing...",
+    val isCaching: Boolean = false,
+    val cachingProgress: Float = 0f,
     val stems: List<StemItem> = emptyList(),
     val bpm: Float? = null,
     val key: String? = null,
@@ -201,16 +203,16 @@ class ResultsViewModel @Inject constructor(
                         }
                     _state.update { prev ->
                         prev.copy(
-                            status          = "completed",
+                            status          = "caching",
                             progress        = 100,
-                            progressMessage = "Done! Your stems are ready.",
+                            progressMessage = "Downloading high-quality stems...",
                             stems           = stems,
                             bpm             = localJob.bpm,
                             key             = localJob.key,
                             duration        = localJob.duration
                         )
                     }
-                    initPlayersForStems(stems)
+                    downloadStemsToCache(stems, taskId)
                     return@launch  // ¡No necesitamos polling!
                 }
             }
@@ -260,7 +262,7 @@ class ResultsViewModel @Inject constructor(
                         }
 
                         if (s.status == "completed" && stems.isNotEmpty()) {
-                            initPlayersForStems(stems)
+                            downloadStemsToCache(stems, taskId)
                         }
                     }
                     is ApiResult.Error -> {
@@ -499,5 +501,78 @@ class ResultsViewModel @Inject constructor(
         player = null
         playersMap.values.forEach { it.release() }
         playersMap.clear()
+    }
+
+    // ── Caching Logic for Sync Playback ──────────────────────────────────────
+
+    private fun downloadStemsToCache(stemsList: List<StemItem>, taskId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _state.update { it.copy(isCaching = true, cachingProgress = 0f, status = "caching", progressMessage = "Descargando mezcla para sincronización...") }
+            
+            val cacheDir = File(context.cacheDir, "stems_cache/$taskId")
+            if (!cacheDir.exists()) cacheDir.mkdirs()
+
+            var totalBytesDownloaded = 0L
+            val totalBytesExpected = stemsList.size * 5_000_000L // Estimación (5MB por pista)
+            
+            val localStems = mutableListOf<StemItem>()
+
+            for (stem in stemsList) {
+                val safeName = stem.name.replace(Regex("[^a-zA-Z0-9.-]"), "_") + ".wav"
+                val file = File(cacheDir, safeName)
+                
+                if (file.exists() && file.length() > 100_000L) {
+                    // Ya está en caché
+                    localStems.add(stem.copy(url = Uri.fromFile(file).toString()))
+                    totalBytesDownloaded += file.length()
+                    continue
+                }
+
+                try {
+                    val request = Request.Builder().url(stem.url).build()
+                    val response = okHttpClient.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        response.body?.let { body ->
+                            val inputStream = body.byteStream()
+                            val outputStream = FileOutputStream(file)
+                            val buffer = ByteArray(8192)
+                            var bytesRead: Int
+                            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                                outputStream.write(buffer, 0, bytesRead)
+                                totalBytesDownloaded += bytesRead
+                                
+                                val prog = (totalBytesDownloaded.toFloat() / totalBytesExpected).coerceIn(0f, 1f)
+                                _state.update { it.copy(cachingProgress = prog) }
+                            }
+                            outputStream.flush()
+                            outputStream.close()
+                            inputStream.close()
+                            
+                            localStems.add(stem.copy(url = Uri.fromFile(file).toString()))
+                        } ?: run {
+                            // Fallback a URL remota si no hay body
+                            localStems.add(stem)
+                        }
+                    } else {
+                        // Fallback a URL remota si falla la descarga
+                        localStems.add(stem)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    // Fallback a URL remota si falla
+                    localStems.add(stem)
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                _state.update { it.copy(
+                    isCaching = false, 
+                    status = "completed", 
+                    progressMessage = "¡Mezcla lista!", 
+                    stems = localStems
+                ) }
+                initPlayersForStems(localStems)
+            }
+        }
     }
 }

@@ -157,9 +157,64 @@ fun ResultsScreen(
                 when (status) {
                     "completed" -> CompletedView(state = state, viewModel = viewModel)
                     "failed"    -> FailedView(error = state.error ?: "Processing failed", onBack = onBack)
+                    "caching"   -> CachingView(state = state)
                     else        -> ProcessingView(state = state)
                 }
             }
+        }
+    }
+}
+
+// ── Caching View ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun CachingView(state: ResultsState) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = androidx.compose.material.icons.Icons.Default.CheckCircle,
+            contentDescription = null,
+            tint = SonicPrimary,
+            modifier = Modifier.size(64.dp)
+        )
+        
+        Spacer(Modifier.height(32.dp))
+
+        Text(
+            text  = "Optimizando Reproducción",
+            style = MaterialTheme.typography.titleLarge,
+            color = SonicOnSurface
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            text  = "Descargando la mezcla en caché local para una reproducción perfectamente sincronizada...",
+            style = MaterialTheme.typography.bodyMedium,
+            color = SonicOnSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(Modifier.height(40.dp))
+
+        Box(contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(
+                progress = { state.cachingProgress },
+                modifier = Modifier.size(100.dp),
+                color    = SonicPrimary,
+                strokeWidth = 6.dp,
+                trackColor  = SonicSurfaceContainerHigh
+            )
+            Text(
+                text  = "${(state.cachingProgress * 100).toInt()}%",
+                style = MaterialTheme.typography.titleMedium,
+                color = SonicPrimary
+            )
         }
     }
 }
