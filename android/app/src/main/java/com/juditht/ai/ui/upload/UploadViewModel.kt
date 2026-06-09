@@ -87,6 +87,12 @@ class UploadViewModel @Inject constructor(
     private val _state = MutableStateFlow(UploadState())
     val state: StateFlow<UploadState> = _state.asStateFlow()
 
+    init {
+        viewModelScope.launch {
+            repository.wakeUpServer()
+        }
+    }
+
     fun onFileSelected(uri: Uri, fileName: String) {
         var durationMs = 0L
         try {

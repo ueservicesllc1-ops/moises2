@@ -43,6 +43,14 @@ class SeparationRepository @Inject constructor(
 
     suspend fun deleteJob(taskId: String) = dao.deleteJobById(taskId)
 
+    suspend fun wakeUpServer() {
+        try {
+            api.health()
+        } catch (e: Exception) {
+            // Silently fail, it's just a ping
+        }
+    }
+
     // ── Upload & Separate ─────────────────────────────────────────────────────
 
     suspend fun startSeparation(
